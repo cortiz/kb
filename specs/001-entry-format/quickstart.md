@@ -50,7 +50,7 @@ Scope to one file, from any directory:
 
 ```sh
 sed -i.bak 's/sumologic/sumo/' "$T/kb/sumo/bad.md" && rm "$T/kb/sumo/bad.md.bak"
-(cd /; kb --root "$T/kb" lint sumo/bad.md; echo "exit $?")   # 1 entries… exit 0
+(cd /; kb --root "$T/kb" lint sumo/bad.md; echo "exit $?")   # 1 entry, 0 errors, 0 warnings; exit 0
 ```
 
 Warnings and `--strict`: add `vars: { region: { kind: text } }` to the frontmatter without using
