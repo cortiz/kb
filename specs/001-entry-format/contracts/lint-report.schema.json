@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cortiz/kb/specs/001-entry-format/lint-report.schema.json",
+  "title": "kb lint --json report",
+  "type": "object",
+  "required": ["version", "root", "summary", "findings", "suppressions"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1, "description": "Version of this report schema." },
+    "root": { "type": "string", "description": "Absolute KB root." },
+    "summary": {
+      "type": "object",
+      "required": ["entries", "errors", "warnings", "info", "suppressed", "failed"],
+      "additionalProperties": false,
+      "properties": {
+        "entries": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "warnings": { "type": "integer", "minimum": 0 },
+        "info": { "type": "integer", "minimum": 0 },
+        "suppressed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "boolean", "description": "Same as exit code 1, given --strict." }
+      }
+    },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "suppressions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "line", "code"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "code": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "required": ["path", "id", "line", "column", "severity", "code", "message", "fix"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "description": "Relative to the root, '/' separators." },
+        "id": { "type": ["string", "null"], "description": "Entry ID; null for non-entry findings." },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1, "description": "Unicode characters, 1-based." },
+        "severity": { "enum": ["error", "warning", "info"] },
+        "code": { "type": "string", "pattern": "^KB[0-9]{3}-[a-z0-9-]+$" },
+        "message": { "type": "string" },
+        "fix": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/cortiz/kb/specs/001-entry-format/init-report.schema.json",
+  "title": "kb init --json report",
+  "type": "object",
+  "required": ["version", "root", "created", "existing", "examples"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "root": { "type": "string", "description": "Absolute path of the initialized KB." },
+    "created": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths created, relative to root; directories end with '/'. The root itself is '.'."
+    },
+    "existing": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Paths that already existed and were left untouched."
+    },
+    "examples": {
+      "enum": ["created", "skipped-flag", "skipped-has-entries"],
+      "description": "What happened to the example entries."
+    },
+    "hint": { "type": ["string", "null"], "description": "Set when root differs from the resolved KB root." }
+  }
+}
