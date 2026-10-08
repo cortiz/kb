@@ -53,12 +53,11 @@ start.
 **Acceptance Scenarios**:
 
 1. **Given** the directory doesn't exist or is empty, **When** the user runs `kb init [path]`
-   (default `~/kb`), **Then** kb creates the root, a `.kb/` directory, git-ignore rules that keep
-   `.kb/` out of git [NEEDS CLARIFICATION: where the ignore rule lives — the constitution (Principle I)
-   forbids kb writing anything to the KB root except entry files and `.kb/`, so a root `.gitignore`
-   conflicts with it], and one example entry for each type, all of which pass lint.
+   (default `~/kb`), **Then** kb creates the root, a `.kb/` directory, a `.kb/.gitignore`
+   containing `*` so git ignores everything inside `.kb/` (nothing is written to the KB root
+   itself), and one example entry for each type, all of which pass lint.
 2. **Given** the directory already contains entries, **When** the user runs `kb init`, **Then** kb
-   adds only what is missing (`.kb/` and the ignore rule), changes no existing entry file, and
+   adds only what is missing (`.kb/` and `.kb/.gitignore`), changes no existing file, and
    reports what it added.
 3. **Given** `--no-examples` is passed, **Then** no example entries are created.
 
@@ -190,8 +189,9 @@ bytes.
 #### Commands
 
 - **FR-019**: `kb init [path]` MUST behave as described in User Story 2. `kb init` MUST never
-  overwrite or delete an existing file. It MUST support `--json`, reporting each path it created and
-  each it left untouched.
+  overwrite or delete an existing file, and MUST write nothing to the KB root except example
+  entries and the `.kb/` directory; a root `.gitignore` is never created or edited.
+  It MUST support `--json`, reporting each path it created and each it left untouched.
 - **FR-020**: `kb lint [paths...]` MUST check the whole KB when no path is given, accept files and
   directories, and support `--json`, `--strict` and `--quiet` (summary only).
 - **FR-021**: Exit codes MUST be `0` for no errors (and no warnings under `--strict`), `1` when
@@ -280,6 +280,13 @@ Entry point for every authorization request.
 - Checking code links against the repository (M8).
 - Format migrations; only `kb_format: 1` exists.
 
+## Clarifications
+
+### Session 2026-10-08
+
+- Q: Where does the rule that keeps `.kb/` out of git live, given constitution Principle I? → A:
+  In `.kb/.gitignore` containing `*`; kb never creates or edits a root `.gitignore`.
+
 ## Assumptions
 
 - Hand-editing files is the main way to add entries until M6, so lint output must be friendly enough
@@ -290,7 +297,7 @@ Entry point for every authorization request.
 - The `kb:allow-secret` marker is recognized at the end of a line whatever comment syntax the
   payload's language uses (`--`, `#`, `//`), since entries hold many languages.
 - `kb init` adds example entries only when the target holds no entries yet; in a KB that already has
-  entries it adds only `.kb/` and the ignore rule.
+  entries it adds only `.kb/` and `.kb/.gitignore`.
 - The config file's location and format follow the platform conventions in the constitution
   (Principle V) and are decided in the plan; this milestone reads only the KB root setting from it.
 - Case-only ID collisions are errors on every platform, not only on case-insensitive file systems,

@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [ ] No [NEEDS CLARIFICATION] markers remain
+- [x] No [NEEDS CLARIFICATION] markers remain
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
@@ -36,8 +36,8 @@
   language, library or storage engine is named.
 - "Written for non-technical stakeholders": the audience is the developer who uses kb; the spec is
   written for that user, not for the implementer.
-- Open: one [NEEDS CLARIFICATION] in User Story 2 (where the `.kb/` ignore rule lives), caused by a
-  conflict with constitution Principle I.
+- Resolved: where the `.kb/` ignore rule lives (conflict with constitution Principle I). Answer:
+  `.kb/.gitignore` containing `*`, recorded under Clarifications.
 - Gaps filled during validation (recorded in Edge Cases, FR-011, FR-013, FR-019 and Assumptions):
   missing or invalid `kb_format`, missing or empty payload, case-only ID collisions on every
   platform, `\{{` kept in file bytes, secret scan covers frontmatter and body, `kb init --json`
