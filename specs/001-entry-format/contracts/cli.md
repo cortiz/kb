@@ -71,6 +71,9 @@ cmd/deploy.md:14:1: warning[KB048-unused-var]: variable "region" is declared but
 284 entries, 1 error, 1 warning
 ```
 
+Each suppression is printed as `path:line: suppressed[CODE]` after the findings and before the
+summary line, so every suppression appears in the output (FR-013). `--quiet` omits these lines.
+
 Summary line: `<n> entries, <e> errors, <w> warnings`, then `, <i> info` and `, <s> suppressed`
 only when those are non-zero. Singular forms are used for 1 (`1 error`).
 

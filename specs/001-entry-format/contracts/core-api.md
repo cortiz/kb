@@ -53,7 +53,10 @@ impl Entry {
   same case.
 
 ```rust
-pub fn write_entry(path: &Path, entry: &Entry) -> io::Result<()>; // atomic: temp file + rename
+pub fn write_entry(path: &Path, entry: &Entry) -> Result<(), WriteError>;
+// WriteError::{UnsupportedFormat, Secret(Vec<Finding>), Io(io::Error)}
+// Runs scan_secrets on the full bytes first; any unsuppressed finding → Secret, nothing written
+// (constitution VI). Atomic: temp file + rename.
 ```
 
 ## KB walk and lint

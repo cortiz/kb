@@ -53,7 +53,8 @@ start.
 **Acceptance Scenarios**:
 
 1. **Given** the directory doesn't exist or is empty, **When** the user runs `kb init [path]`
-   (default `~/kb`), **Then** kb creates the root, a `.kb/` directory, a `.kb/.gitignore`
+   (default: the resolved KB root, FR-022, which is `~/kb` unless configured), **Then** kb
+   creates the root, a `.kb/` directory, a `.kb/.gitignore`
    containing `*` so git ignores everything inside `.kb/` (nothing is written to the KB root
    itself), and one example entry for each type, all of which pass lint.
 2. **Given** the directory already contains entries, **When** the user runs `kb init`, **Then** kb

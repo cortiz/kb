@@ -51,7 +51,7 @@ performance test run in release mode in CI.
 **Constraints**: no network, no telemetry. No writes to the KB root except entries and `.kb/`.
 Never rewrite a file with an unsupported `kb_format`. Secret values never appear in output.
 
-**Scale/Scope**: 7 entry types, about 40 lint rules, 2 commands, KBs up to about 10,000 entries of
+**Scale/Scope**: 7 entry types, 44 lint rules, 2 commands, KBs up to about 10,000 entries of
 up to about 1 MB each.
 
 ## Constitution Check
@@ -108,17 +108,17 @@ crates/kb-core/
     ├── frontmatter.rs        # split ---/---, YAML events → spanned value tree
     ├── yaml.rs               # Spanned node types (Scalar/Seq/Map with byte spans)
     ├── body.rs               # payload + notes via pulldown-cmark offsets
-    ├── entry.rs              # Entry, EntryType, type-specific fields, CodeRef
-    ├── vars.rs               # VarDef, kinds, reference scanner, \{{ escape
+    ├── entry.rs              # Entry, types, fields, CodeRef; rules KB001, KB010–KB036
+    ├── vars.rs               # VarDef, references, \{{ escape; rules KB040–KB049
     ├── edit.rs               # set_field: span splice, value formatting
-    ├── walk.rs               # KB walk: hidden dirs, .md filter, symlinks, ID derivation
+    ├── walk.rs               # KB walk, hidden filter, symlinks, IDs; rules KB052–KB053
     ├── root.rs               # KB root resolution order (pure; platform paths passed in)
     ├── init.rs               # plan + apply kb init (create-only)
     ├── examples/             # one example .md per type, embedded with include_str!
     └── lint/
-        ├── mod.rs            # lint_kb, lint_paths, LintReport, Finding, Severity
-        ├── rules.rs          # structural, field and walk rules (KB001–KB053)
-        ├── secrets.rs        # secret patterns, entropy, kb:allow-secret (KB060–KB065)
+        ├── mod.rs            # lint(), LintReport, Finding, RuleCode, Severity
+        ├── rules.rs          # file-level rules KB050–KB051
+        ├── secrets.rs        # KB060–KB065, entropy, kb:allow-secret
         └── suggest.rs        # "did you mean" (prefix + Levenshtein ≤ 2)
 
 crates/kb/
