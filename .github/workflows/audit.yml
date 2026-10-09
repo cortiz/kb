@@ -1,0 +1,85 @@
+name: Audit
+
+# Weekly checks that do not belong on every pull request: new security advisories against the locked
+# dependencies, and whether two builds of the same commit are byte-identical.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories
+      - name: Report a new advisory
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create security --color D93F0B --description "Dependency advisories" 2>/dev/null || true
+          echo "cargo-deny found an advisory against the locked dependencies: $RUN_URL" > body.md
+          scripts/track-issue.sh security "Security advisory against a dependency" body.md
+
+  # The release build must not depend on the machine or the clock: two builds of one commit give the
+  # same bytes, so a published checksum can be re-derived from source.
+  reproducible:
+    name: reproducible
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TARGET: x86_64-unknown-linux-musl
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target "$TARGET" && rustup default stable
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-zigbuild@0.23.4
+      - name: Build twice
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          export RUSTFLAGS="--remap-path-prefix=$PWD=/src"
+          # the same directory both times: a path inside the build must not differ between the two
+          mkdir out
+          for n in 1 2; do
+            rm -rf target
+            cargo zigbuild --release --locked --target "$TARGET"
+            cp "target/$TARGET/release/kb" "out/kb-$n"
+          done
+      - name: Compare
+        run: |
+          a=$(sha256sum out/kb-1)
+          b=$(sha256sum out/kb-2)
+          echo "$a"
+          echo "$b"
+          [ "${a%% *}" = "${b%% *}" ] || { echo "::error::two builds of the same commit differ"; exit 1; }
+      - name: Report a difference
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create reproducibility --color 5319E7 --description "Builds are not reproducible" 2>/dev/null || true
+          echo "Two builds of the same commit differ: $RUN_URL" > body.md
+          scripts/track-issue.sh reproducibility "Release build is not reproducible" body.md

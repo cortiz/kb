@@ -1,0 +1,44 @@
+# Dependency policy, checked by cargo-deny in CI (the `deny` job) and weekly (audit.yml).
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Both are "unmaintained" notices (not vulnerabilities) for crates that only syntect pulls in. kb
+# uses syntect as a parser only; the fix is syntect moving off them. Revisit when it does, or in
+# six months, whichever comes first.
+ignore = [
+  { id = "RUSTSEC-2025-0141", reason = "bincode 1.x via syntect (unmaintained, no vulnerability); revisit when syntect updates" },
+  { id = "RUSTSEC-2024-0320", reason = "yaml-rust via syntect (unmaintained, no vulnerability); revisit when syntect updates" },
+]
+
+[licenses]
+version = 2
+# Exactly the licenses Cargo.lock uses today (an unused entry only produces a warning, so add
+# permissive licenses such as BSD-3-Clause, ISC or CC0-1.0 when a new dependency needs one).
+# Expressions with OR pass when one alternative is allowed.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "Zlib",
+  "Unlicense",
+  "Unicode-3.0",
+  "BSL-1.0",
+  "0BSD",
+]
+confidence-threshold = 0.93
+
+[bans]
+# Many transitive duplicates are normal; an error here would only teach people to ignore the check.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

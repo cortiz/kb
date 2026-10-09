@@ -8,6 +8,31 @@ them.
 > Status: milestone M4 (entry format, `kb lint`, `kb search`, the terminal UI, clipboard, config and
 > `kb doctor`). Variables at use time and actions arrive in later milestones.
 
+## Install
+
+Download the archive for your machine from the
+[releases page](https://github.com/cortiz/kb/releases) together with `SHA256SUMS`, then:
+
+```sh
+shasum -a 256 -c --ignore-missing SHA256SUMS      # sha256sum -c --ignore-missing on Linux
+tar -xzf kb-<version>-<target>.tar.gz
+./kb-<version>-<target>/kb --version
+```
+
+Targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and
+`x86_64-unknown-linux-musl` (static, no libraries needed). macOS warns about a downloaded binary
+because it is not notarized; run `xattr -d com.apple.quarantine kb` once, or install with Homebrew.
+
+Homebrew (once the repository is public, stable releases only):
+
+```sh
+brew tap cortiz/kb https://github.com/cortiz/kb
+brew install kb
+```
+
+Or build it yourself: `cargo install --git https://github.com/cortiz/kb kb`. Contributing and the
+release process are in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Building
 
 ```sh

@@ -1,0 +1,65 @@
+name: Performance
+
+# The kb performance budgets (search, TUI latency) run in release mode on both platforms: on every
+# push to main, weekly, and by hand. A failure opens (or comments on) one issue; it never blocks a
+# pull request, because timings on shared runners are noisy.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  perf:
+    name: perf (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the tools the pseudo-terminal tests need
+        if: runner.os == 'Linux'
+        run: |
+          for tool in perl pgrep kill stty sed; do
+            command -v "$tool" >/dev/null 2>&1 || { echo "::error::missing tool: $tool"; exit 1; }
+          done
+      - name: Run the performance budgets
+        run: |
+          set -o pipefail
+          cargo test --release --locked -p kb --test perf -- --ignored --test-threads=1 --nocapture 2>&1 | tee perf.log
+      - name: Report a failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OS: ${{ matrix.os }}
+        run: |
+          gh label create perf-regression --color B60205 --description "A performance budget failed" 2>/dev/null || true
+          {
+            echo "A performance budget failed on \`$OS\`: $RUN_URL"
+            echo
+            echo '```'
+            tail -n 40 perf.log
+            echo '```'
+          } > body.md
+          scripts/track-issue.sh perf-regression "Performance budget failed" body.md

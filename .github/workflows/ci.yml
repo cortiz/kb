@@ -1,60 +1,224 @@
 name: CI
 
+# The checks every change must pass, on macOS and Linux. Runs on pull requests, on pushes to main,
+# by hand, and is called by the release workflow so a release runs exactly what a pull request ran.
+# Branch protection (when available) requires `ci-ok` (this file) and `pr-title` (pr-title.yml).
+
 on:
+  pull_request:
+    # not `edited`: retitling a pull request must not re-run the tests (see pr-title.yml)
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # a new push to a pull request cancels the older run; runs on main and tags are never cancelled
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
-    name: check (${{ matrix.os }})
+  fmt:
+    name: fmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal -c rustfmt && rustup default stable
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal -c clippy && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-24.04, macos-15]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
-      - name: Docs build without warnings
-        run: cargo doc --workspace --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
-      - name: Build for Intel macOS
-        if: runner.os == 'macOS'
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check the tools the pseudo-terminal tests need
+        if: runner.os == 'Linux'
         run: |
-          rustup target add x86_64-apple-darwin
-          cargo build --workspace --target x86_64-apple-darwin
+          missing=""
+          for tool in perl pgrep kill stty sed; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing tools needed by the pty tests:$missing"
+            exit 1
+          fi
+      - run: cargo test --workspace --locked
+
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo doc --workspace --no-deps --locked
 
   msrv:
     name: msrv (1.88)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo +1.88 test --workspace
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust 1.88
+        run: rustup toolchain install 1.88 --profile minimal
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: msrv
+      - run: cargo +1.88 test --workspace --locked
 
-  perf:
-    name: perf (${{ matrix.os }})
+  deny:
+    name: deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+
+  workflows:
+    name: workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # built from source by the Go toolchain on the runner; the module proxy checks the hash
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Lint the workflows
+        run: |
+          gopath=$(go env GOPATH)
+          "$gopath/bin/actionlint"
+      - run: shellcheck -x --source-path=SCRIPTDIR scripts/*.sh scripts/tests/*.sh
+      - run: scripts/check-pins.sh
+      - run: scripts/tests/run.sh
+
+  # Trunk-based development wants short-lived branches: warn (never fail) about an old or far-behind
+  # pull request.
+  pr-staleness:
+    name: pr-staleness
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Warn about an old or far-behind pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: scripts/pr-staleness.sh "$GITHUB_REPOSITORY" "$PR"
+
+  # Is the Homebrew formula part of this change? (A tag push, the release's call, gives false.)
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      formula: ${{ steps.formula.outputs.formula }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Does the change touch Formula/?
+        id: formula
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: scripts/formula-changed.sh "$EVENT" "$BASE" "$BEFORE" "$AFTER" | tee -a "$GITHUB_OUTPUT"
+
+  # Audits the formula (and installs from it once the repository is public, since a private
+  # repository cannot serve release downloads to Homebrew without a token).
+  formula:
+    name: formula (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.formula == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu-24.04, macos-15]
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # M1 to M3 timing budgets, including the TUI ones (first frame, keystroke latency, frame time).
-      # They run one at a time (a mutex in perf.rs) and need `pgrep`, present on both runners.
-      - run: cargo test --release -p kb --test perf -- --ignored --nocapture
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Put Homebrew on the path
+        if: runner.os == 'Linux'
+        run: echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+      - name: Audit the formula
+        run: |
+          brew tap cortiz/kb "$GITHUB_WORKSPACE"
+          brew audit --strict kb
+      - name: Install and test
+        if: github.event.repository.private == false
+        run: |
+          brew install kb
+          brew test kb
+      - name: Note the skipped install
+        if: github.event.repository.private == true
+        run: echo "install skipped - repository is private" >> "$GITHUB_STEP_SUMMARY"
+
+  # One status for branch protection to require. A job that was skipped counts as passed; a failed
+  # or cancelled one does not. Keep this list equal to the jobs above.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [fmt, clippy, test, docs, msrv, deny, workflows, pr-staleness, changes, formula]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check the results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          case " $RESULTS " in
+            *" failure "* | *" cancelled "*)
+              echo "::error::at least one required job did not pass"
+              exit 1
+              ;;
+          esac

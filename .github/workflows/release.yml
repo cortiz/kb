@@ -1,0 +1,327 @@
+name: Release
+
+# A tag vMAJOR.MINOR.PATCH[-pre] on a commit of main builds four binaries, smoke-tests each, and
+# publishes a GitHub release. Nothing is created until every check, build and smoke test passed; the
+# release is made as a draft, filled, verified, and only then published. A manual run is a dry run:
+# it does everything except create the release.
+
+on:
+  push:
+    tags: ["v[0-9]*.[0-9]*.[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and package only; do not create a release (always true for manual runs)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check the tag
+        id: check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            scripts/check-release-tag.sh "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+          else
+            scripts/check-release-tag.sh --dry-run | tee -a "$GITHUB_OUTPUT"
+          fi
+
+  # the same checks a pull request runs, on the tagged commit
+  ci:
+    name: ci
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+    # a called workflow may not ask for more than its caller grants: the union of its jobs' needs
+    permissions:
+      contents: read
+      pull-requests: read
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: [verify, ci]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-15, zig: false }
+          - { target: x86_64-apple-darwin, os: macos-15, zig: false }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, zig: true }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target "${{ matrix.target }}"
+          rustup default stable
+      - name: Install Zig and cargo-zigbuild
+        if: matrix.zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-zigbuild@0.23.4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: ${{ matrix.target }}
+          save-if: "false"
+      - name: Build (Apple)
+        if: "!matrix.zig"
+        env:
+          RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/src
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+      - name: Build (Linux, static)
+        if: matrix.zig
+        env:
+          RUSTFLAGS: --remap-path-prefix=${{ github.workspace }}=/src
+        run: cargo zigbuild --release --locked --target "${{ matrix.target }}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bin-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/kb
+          if-no-files-found: error
+          retention-days: 7
+
+  # Each binary runs once before it is packaged. The Intel Mac binary runs natively on an Intel
+  # runner; the Linux ones run on the build host (x86_64) or under QEMU (aarch64), then inside
+  # minimal containers, which stand in for a clean machine.
+  smoke:
+    name: smoke (${{ matrix.target }})
+    needs: [verify, build]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-15, linux: false, static: "" }
+          - { target: x86_64-apple-darwin, os: macos-15-intel, linux: false, static: "" }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, linux: true, static: "--static", platform: linux/amd64 }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, linux: true, static: "--static", platform: linux/arm64 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bin-${{ matrix.target }}
+      - run: chmod +x kb
+      - name: Smoke test
+        if: "!matrix.linux || matrix.target == 'x86_64-unknown-linux-musl'"
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: scripts/smoke.sh ${{ matrix.static }} ./kb "$VERSION"
+      - name: Smoke test under QEMU
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q qemu-user file
+          scripts/smoke.sh --static ./kb "$VERSION" qemu-aarch64
+      - name: Register QEMU for containers
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - name: Run in minimal containers
+        if: matrix.linux
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          for image in alpine:latest debian:stable-slim; do
+            echo "::group::$image"
+            docker run --rm --platform "$PLATFORM" -v "$PWD:/w:ro" "$image" /w/kb --version
+            echo "::endgroup::"
+          done
+          # the whole smoke test inside one container; it needs bash, python3 and file there
+          docker run --rm --platform "$PLATFORM" -v "$PWD:/w:ro" alpine:latest sh -c \
+            "apk add --no-cache bash python3 file >/dev/null && /w/scripts/smoke.sh /w/kb '$VERSION'"
+
+  package:
+    name: package
+    needs: [verify, smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: bin-*
+          path: bin
+      - name: Package
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          for target in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            scripts/package.sh "$VERSION" "$target" "bin/bin-$target/kb" dist
+          done
+          ls -l dist
+          cat dist/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'push' && 30 || 7 }}
+
+  release:
+    name: release
+    needs: [verify, package]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.verify.outputs.tag }}
+      PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: git-cliff@2.14.2
+      - name: Write the release notes
+        run: |
+          git-cliff --latest --strip header -c cliff.toml > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "No user-facing changes." > notes.md
+          fi
+          cat notes.md
+      # a draft first, so nobody sees a half-filled release; a re-run reuses the draft or release
+      - name: Create or update the release as a draft
+        run: |
+          pre=""
+          [ "$PRERELEASE" = "true" ] && pre="--prerelease"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # shellcheck disable=SC2086
+            gh release edit "$TAG" --notes-file notes.md $pre
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file notes.md $pre
+          fi
+          gh release upload "$TAG" dist/* --clobber
+      - name: Attest build provenance
+        if: github.event.repository.private == false
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Note skipped attestations
+        if: github.event.repository.private == true
+        run: echo "attestations skipped - repository is private" >> "$GITHUB_STEP_SUMMARY"
+      - name: Verify the uploaded assets
+        run: |
+          mkdir check
+          gh release download "$TAG" --dir check
+          (cd check && sha256sum -c SHA256SUMS)
+          n=$(find check -name '*.tar.gz' | wc -l)
+          [ "$n" -eq 4 ] || { echo "::error::expected four archives, found $n"; find check -type f; exit 1; }
+      - name: Publish
+        run: gh release edit "$TAG" --draft=false
+
+  # After a stable release only: propose the Homebrew formula as a pull request. Nothing is ever
+  # pushed to main (the formula reaches it by review and squash merge like any change).
+  formula-pr:
+    name: formula-pr
+    needs: [verify, release]
+    if: needs.verify.outputs.prerelease == 'false' && github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.verify.outputs.tag }}
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Render the formula
+        run: |
+          gh release download "$TAG" --pattern SHA256SUMS --dir .
+          mkdir -p Formula
+          scripts/gen-formula.sh "$TAG" SHA256SUMS Formula/kb.rb
+          if git diff --quiet -- Formula/kb.rb && [ -n "$(git ls-files Formula/kb.rb)" ]; then
+            echo "The formula is already up to date." >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_ENV"
+          else
+            echo "changed=true" >> "$GITHUB_ENV"
+          fi
+      - name: Commit to a branch
+        if: env.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "chore/formula-$VERSION"
+          git add Formula/kb.rb
+          git commit -m "chore(release): kb $VERSION formula"
+      # a broken formula never gets a pull request
+      - name: Audit and test the formula
+        if: env.changed == 'true'
+        run: |
+          brew tap cortiz/kb "$GITHUB_WORKSPACE"
+          brew audit --strict kb
+          echo "audit: ok" > result.txt
+          if [ "${{ github.event.repository.private }}" = "false" ]; then
+            brew install kb
+            brew test kb
+            echo "install and test: ok" >> result.txt
+          else
+            echo "install and test: skipped (repository is private)" >> result.txt
+          fi
+      - name: Open the pull request
+        if: env.changed == 'true'
+        run: |
+          git push origin "chore/formula-$VERSION"
+          if gh pr create --base main --head "chore/formula-$VERSION" \
+              --title "chore(release): kb $VERSION formula" \
+              --body "Formula for $TAG, generated from the release's SHA256SUMS.
+
+          $(cat result.txt)"; then
+            # a pull request opened with the workflow token starts no checks of its own
+            gh workflow run ci.yml --ref "chore/formula-$VERSION"
+          else
+            gh release upload "$TAG" Formula/kb.rb#kb.rb --clobber
+            echo "Could not open a pull request (Actions may not create them); the formula is attached to the release as kb.rb." >> "$GITHUB_STEP_SUMMARY"
+          fi

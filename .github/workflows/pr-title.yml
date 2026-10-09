@@ -1,0 +1,25 @@
+name: PR title
+
+# Squash merges take the pull request title as the commit subject on main, and the release notes are
+# grouped by its Conventional Commit type, so the title is checked. This is its own workflow so that
+# editing a title re-runs only this check, never the tests. Branch protection (when available)
+# requires `pr-title` together with `ci-ok`.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-pr-title.sh "$TITLE"
