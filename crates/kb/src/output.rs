@@ -1,6 +1,7 @@
 //! Human and JSON rendering. kb prints no color, so output is the same in a terminal, a pipe or
 //! with `NO_COLOR` set.
 
+use kb_core::init::InitReport;
 use kb_core::lint::LintReport;
 use serde_json::json;
 
@@ -59,4 +60,36 @@ pub fn print_lint(report: &LintReport, quiet: bool) {
     }
     out.push_str(&report.summary_line());
     println!("{out}");
+}
+
+/// Human init output: a headline, then one line per path.
+pub fn print_init(report: &InitReport, hint: Option<&str>) {
+    let mut out = if report.created.is_empty() {
+        format!("KB at {} is up to date\n", report.root.display())
+    } else {
+        format!("Initialized KB at {}\n", report.root.display())
+    };
+    for (path, created) in &report.steps {
+        out.push_str(&format!(
+            "  {:<8} {path}\n",
+            if *created { "created" } else { "exists" }
+        ));
+    }
+    if let Some(hint) = hint {
+        out.push_str(&format!("\nhint: {hint}\n"));
+    }
+    print!("{out}");
+}
+
+/// `kb init --json`, per contracts/init-report.schema.json.
+pub fn print_init_json(report: &InitReport, hint: Option<&str>) {
+    let doc = json!({
+        "version": 1,
+        "root": report.root.to_string_lossy(),
+        "created": report.created,
+        "existing": report.existing,
+        "examples": report.examples.as_str(),
+        "hint": hint,
+    });
+    println!("{doc}");
 }

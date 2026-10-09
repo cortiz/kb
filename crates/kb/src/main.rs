@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+use kb_core::init::{apply_init, plan_init};
 use kb_core::lint::{LintError, lint, resolve_scope};
 use kb_core::root::{RootInputs, resolve_root};
 
@@ -85,12 +86,43 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
     };
     let root = resolve_root(&inputs).map_err(|e| CliError::new("config", e.to_string()))?;
     match cli.command {
-        Command::Init(_) => Err(CliError::new(
-            "usage",
-            format!("init is not implemented yet ({})", root.display()),
-        )),
+        Command::Init(args) => run_init(&root, inputs.config_file.as_deref(), &args),
         Command::Lint(args) => run_lint(&root, &args),
     }
+}
+
+fn run_init(
+    resolved_root: &std::path::Path,
+    config_file: Option<&std::path::Path>,
+    args: &InitArgs,
+) -> Result<ExitCode, CliError> {
+    let path = args
+        .path
+        .clone()
+        .unwrap_or_else(|| resolved_root.to_path_buf());
+    let plan =
+        plan_init(&path, !args.no_examples).map_err(|e| CliError::new("io", e.to_string()))?;
+    let report = apply_init(&plan).map_err(|e| CliError::new("io", e.to_string()))?;
+    let default_root = resolved_root
+        .canonicalize()
+        .or_else(|_| std::path::absolute(resolved_root))
+        .ok();
+    let hint = (default_root.as_deref() != Some(report.root.as_path())).then(|| {
+        let shown = report.root.display();
+        let config = config_file
+            .map(|c| format!(" or add `root: {shown}` to {}", c.display()))
+            .unwrap_or_default();
+        format!(
+            "kb uses {} by default; to use this KB, set KB_ROOT={shown}{config}",
+            resolved_root.display()
+        )
+    });
+    if args.json {
+        output::print_init_json(&report, hint.as_deref());
+    } else {
+        output::print_init(&report, hint.as_deref());
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliError> {

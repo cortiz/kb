@@ -147,7 +147,8 @@ Exit policy: `exit_code(strict) = 1 if errors > 0 || (strict && warnings > 0) el
 
 `InitPlan { root, actions: Vec<InitAction>, examples: Created | SkippedFlag | SkippedHasEntries }`
 where `InitAction = CreateDir(path) | CreateFile(path, contents) | Exists(path)`. `apply_init`
-runs `CreateDir` and `CreateFile` with exclusive create and returns an `InitReport` matching
+runs `CreateDir` and `CreateFile` with exclusive create and returns an `InitReport` (created and
+existing paths, plus every step in plan order for display) matching
 [contracts/init-report.schema.json](contracts/init-report.schema.json).
 
 ## State transitions

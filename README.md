@@ -13,6 +13,32 @@ Markdown file you can edit by hand, and `kb` is a single terminal binary that ch
 cargo build --release      # the binary is target/release/kb
 ```
 
+## Getting started
+
+```sh
+kb init                 # create ~/kb (or the configured root) with one example per type
+kb init ~/notes/kb      # or somewhere else
+kb init --no-examples   # just the layout
+kb lint                 # check every entry
+```
+
+`kb init` creates the KB root, a `.kb/` directory for kb's own data, and `.kb/.gitignore`
+(containing `*`) so git never picks that data up. It writes nothing else to the root. On a KB
+that already exists it only adds what is missing and never changes or overwrites a file, and it
+adds example entries only to a KB that has none yet. Copy an example to start a new entry, then
+run `kb lint` to check it.
+
+```text
+~/kb
+├── .kb/
+│   └── .gitignore
+├── sql/example-active-connections.md
+├── sumo/example-5xx-by-authorizer.md
+└── …
+```
+
+Folders are a convention, not a rule: an entry's type comes from its `type:` field.
+
 ## The KB root
 
 Entries live under one directory, the **KB root**. kb looks for it in this order:
