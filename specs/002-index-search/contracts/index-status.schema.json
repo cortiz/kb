@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kb://002-index-search/index-status",
+  "title": "kb index status --json / kb reindex --json",
+  "type": "object",
+  "required": ["path", "state", "entries_indexed", "entries_skipped", "size_bytes", "index_version", "last_full_build"],
+  "additionalProperties": false,
+  "properties": {
+    "path": { "type": "string" },
+    "state": { "enum": ["ok", "missing", "unusable"] },
+    "reason": { "type": "string", "description": "Present when state is unusable." },
+    "entries_indexed": { "type": "integer", "minimum": 0 },
+    "entries_skipped": { "type": "integer", "minimum": 0, "description": "Entries left out because of lint errors." },
+    "size_bytes": { "type": "integer", "minimum": 0 },
+    "index_version": { "type": "integer", "minimum": 1, "description": "The version this kb build writes." },
+    "last_full_build": { "type": ["integer", "null"], "description": "Unix seconds, UTC; null when none." },
+    "duration_ms": { "type": "integer", "minimum": 0, "description": "kb reindex only." }
+  }
+}

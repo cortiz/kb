@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kb://002-index-search/search-report",
+  "title": "kb search --json",
+  "type": "object",
+  "required": ["query", "total", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "query": { "type": "string", "description": "The query string after joining arguments." },
+    "total": { "type": "integer", "minimum": 0, "description": "Matches before --limit, capped at 1000." },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "title", "tags", "path", "score", "tier", "matches", "snippet"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "enum": ["sql", "sumo", "cw", "cmd", "prompt", "link", "code"] },
+          "title": { "type": "string" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "path": { "type": "string", "description": "Relative to the KB root, '/' separators, with .md." },
+          "score": { "type": "number" },
+          "tier": { "enum": ["title_exact", "exact", "typo"] },
+          "matches": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["field", "ranges"],
+              "additionalProperties": false,
+              "properties": {
+                "field": { "enum": ["title", "tags", "id", "meta", "payload", "notes"] },
+                "ranges": { "$ref": "#/$defs/ranges" }
+              }
+            }
+          },
+          "snippet": {
+            "oneOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["field", "text", "ranges"],
+                "additionalProperties": false,
+                "properties": {
+                  "field": { "enum": ["title", "tags", "id", "meta", "payload", "notes"] },
+                  "text": { "type": "string", "maxLength": 160 },
+                  "ranges": { "$ref": "#/$defs/ranges" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ranges": {
+      "type": "array",
+      "description": "[start, end) in characters (Unicode scalar values).",
+      "items": {
+        "type": "array",
+        "prefixItems": [{ "type": "integer", "minimum": 0 }, { "type": "integer", "minimum": 0 }],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    }
+  }
+}
