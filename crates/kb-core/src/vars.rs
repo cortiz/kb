@@ -15,8 +15,10 @@ pub enum VarKind {
 }
 
 impl VarKind {
+    /// The values `kind:` accepts.
     pub const NAMES: [&'static str; 4] = ["text", "number", "enum", "secret"];
 
+    /// The kind named `name`, if it is one of the four.
     pub fn from_name(name: &str) -> Option<VarKind> {
         match name {
             "text" => Some(VarKind::Text),

@@ -46,6 +46,7 @@ pub enum ExamplesOutcome {
 }
 
 impl ExamplesOutcome {
+    /// The name used in `kb init --json`.
     pub fn as_str(self) -> &'static str {
         match self {
             ExamplesOutcome::Created => "created",

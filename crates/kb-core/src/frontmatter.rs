@@ -26,6 +26,7 @@ pub enum SplitError {
 }
 
 impl SplitError {
+    /// The lint rule this error is reported under.
     pub fn code(self) -> RuleCode {
         match self {
             SplitError::NoFrontmatter => RuleCode::NoFrontmatter,

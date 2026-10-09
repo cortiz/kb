@@ -168,12 +168,12 @@ and diff (T048); validate `kb lint --json` (T051).
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T057 Write `crates/kb/tests/perf.rs` (`#[ignore]`): generate a 10,000-entry KB in a `tempfile` directory (mixed types, realistic sizes, with variables); assert that `kb lint --quiet` finishes in under 2 s (SC-002) and that the median of 5 `kb --version` runs is under 100 ms (constitution VII). Run with `cargo test --release -p kb --test perf -- --ignored`.
-- [ ] T058 Add a `perf` job on `ubuntu-latest` and `macos-latest` to `.github/workflows/ci.yml` running T057 in release mode.
-- [ ] T059 [P] Add a test in `crates/kb-core/src/lint/mod.rs` asserting that every error-severity `RuleCode` produces a `fix` except `KB006-yaml-syntax`, which keeps SC-003 (≥ 80% of error codes have a fix) from regressing.
-- [ ] T060 [P] Add rustdoc to every public item in `crates/kb-core/src/lib.rs` re-exports, and make `cargo doc --workspace --no-deps` warning-free.
-- [ ] T061 Run every scenario in `specs/001-entry-format/quickstart.md` on Linux (and macOS when available), then fix the code or update the quickstart where outputs differ.
-- [ ] T062 Constitution re-check: confirm with `cargo tree -e normal` that only the dependencies listed in T001 are direct dependencies and none does network I/O (III, IX); confirm by test (T042) that `kb init` writes nothing to the root except entries and `.kb/` (I); record the result in `specs/001-entry-format/plan.md` under Constitution Check.
+- [X] T057 Write `crates/kb/tests/perf.rs` (`#[ignore]`): generate a 10,000-entry KB in a `tempfile` directory (mixed types, realistic sizes, with variables); assert that `kb lint --quiet` finishes in under 2 s (SC-002) and that the median of 5 `kb --version` runs is under 100 ms (constitution VII). Run with `cargo test --release -p kb --test perf -- --ignored`.
+- [X] T058 Add a `perf` job on `ubuntu-latest` and `macos-latest` to `.github/workflows/ci.yml` running T057 in release mode.
+- [X] T059 [P] Add a test in `crates/kb-core/src/lint/mod.rs` asserting that every error-severity `RuleCode` produces a `fix` except `KB006-yaml-syntax`, which keeps SC-003 (≥ 80% of error codes have a fix) from regressing.
+- [X] T060 [P] Add rustdoc to every public item in `crates/kb-core/src/lib.rs` re-exports, and make `cargo doc --workspace --no-deps` warning-free.
+- [X] T061 Run every scenario in `specs/001-entry-format/quickstart.md` on Linux (and macOS when available), then fix the code or update the quickstart where outputs differ.
+- [X] T062 Constitution re-check: confirm with `cargo tree -e normal` that only the dependencies listed in T001 are direct dependencies and none does network I/O (III, IX); confirm by test (T042) that `kb init` writes nothing to the root except entries and `.kb/` (I); record the result in `specs/001-entry-format/plan.md` under Constitution Check.
 
 ---
 

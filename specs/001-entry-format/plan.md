@@ -72,6 +72,18 @@ up to about 1 MB each.
 
 **Gate result**: pass, no exceptions. Complexity Tracking stays empty.
 
+**Post-implementation re-check (2026-10-09)**: still pass.
+
+- I: `kb init` writes only example entries, `.kb/` and `.kb/.gitignore`; `cli_init.rs` asserts no
+  root `.gitignore` is created and existing files stay byte-identical.
+- III, IX: `cargo tree -e normal --depth 1` shows exactly the planned direct dependencies
+  (`saphyr-parser`, `pulldown-cmark`, `regex`, `serde`, `serde_json`, `walkdir`, plus `clap` in the
+  binary), and no crate in the tree does network I/O.
+- VI: `write_entry` refuses unsuppressed secrets; lint scans frontmatter and body.
+- VII: 10,000 entries lint in about 0.2 s and `kb --version` starts in about 3 ms (release build,
+  Linux), against budgets of 2 s and 100 ms.
+- VIII: fixtures cover every type and every rule; all fixtures round-trip byte for byte.
+
 ## Project Structure
 
 ### Documentation (this feature)

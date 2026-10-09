@@ -78,7 +78,7 @@ Expected: one JSON document that validates against
 ## 5. Round-trip and field edits (User Story 3, SC-001)
 
 ```sh
-cargo test --workspace roundtrip
+cargo test -p kb-core --test roundtrip && cargo test -p kb-core --lib edit
 ```
 
 Expected: every file under `tests/fixtures/valid/` (including CRLF, BOM, comments, flow maps and

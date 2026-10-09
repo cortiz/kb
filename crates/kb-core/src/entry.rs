@@ -60,6 +60,7 @@ pub enum EntryType {
 }
 
 impl EntryType {
+    /// Every entry type, in the order the format lists them.
     pub const ALL: [EntryType; 7] = [
         EntryType::Sql,
         EntryType::Sumo,
@@ -83,6 +84,7 @@ impl EntryType {
         }
     }
 
+    /// The type named `name` in `type:`, if it is one of the seven.
     pub fn from_name(name: &str) -> Option<EntryType> {
         EntryType::ALL.into_iter().find(|t| t.name() == name)
     }
@@ -117,8 +119,10 @@ pub enum Shell {
 }
 
 impl Shell {
+    /// The values `shell:` accepts.
     pub const NAMES: [&'static str; 4] = ["sh", "bash", "zsh", "fish"];
 
+    /// The shell named `name`, if kb supports it.
     pub fn from_name(name: &str) -> Option<Shell> {
         match name {
             "sh" => Some(Shell::Sh),
@@ -1077,6 +1081,7 @@ fn is_valid_repo_path(path: &str) -> bool {
 }
 
 impl Entry {
+    /// The entry ID: its path relative to the root, without `.md`.
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -1086,10 +1091,12 @@ impl Entry {
         &self.path
     }
 
+    /// The original text of the file.
     pub fn source(&self) -> &Source {
         &self.source
     }
 
+    /// The `kb_format` value, when it is a valid number.
     pub fn kb_format(&self) -> Option<u32> {
         self.kb_format
     }
@@ -1099,6 +1106,7 @@ impl Entry {
         self.entry_type
     }
 
+    /// The title, when it is valid.
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
@@ -1108,10 +1116,12 @@ impl Entry {
         &self.tags
     }
 
+    /// The `created` date as written, when valid.
     pub fn created(&self) -> Option<&str> {
         self.created.as_deref()
     }
 
+    /// The `updated` date as written, when valid.
     pub fn updated(&self) -> Option<&str> {
         self.updated.as_deref()
     }
@@ -1121,14 +1131,17 @@ impl Entry {
         &self.vars
     }
 
+    /// The type-specific fields.
     pub fn fields(&self) -> &TypeFields {
         &self.fields
     }
 
+    /// The payload, for types that have one.
     pub fn payload(&self) -> Option<&Payload> {
         self.payload.as_ref()
     }
 
+    /// The body text outside the payload.
     pub fn notes(&self) -> &str {
         &self.notes
     }

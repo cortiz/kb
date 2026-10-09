@@ -368,6 +368,7 @@ impl<'a> Builder<'a> {
 }
 
 impl Node {
+    /// Where the node is in the entry text.
     pub fn span(&self) -> &Span {
         match self {
             Node::Scalar { span, .. } | Node::Seq { span, .. } | Node::Map { span, .. } => span,
@@ -390,6 +391,7 @@ impl Node {
         }
     }
 
+    /// A mapping's entries; empty for other nodes.
     pub fn entries(&self) -> &[(Key, Node)] {
         match self {
             Node::Map { entries, .. } => entries,

@@ -32,10 +32,12 @@ macro_rules! rule_codes {
             /// Every rule code, in numeric order.
             pub const ALL: &'static [RuleCode] = &[$(RuleCode::$variant,)*];
 
+            /// The rule's number, for example `1` for `KB001`.
             pub fn number(self) -> u16 {
                 match self { $(RuleCode::$variant => $num,)* }
             }
 
+            /// The rule's name, for example `unknown-type`.
             pub fn slug(self) -> &'static str {
                 match self { $(RuleCode::$variant => $slug,)* }
             }
@@ -353,6 +355,7 @@ fn lint_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>, report: &mut LintRep
 }
 
 impl LintReport {
+    /// How many findings have this severity.
     pub fn count(&self, severity: Severity) -> usize {
         self.findings
             .iter()
@@ -514,6 +517,43 @@ mod tests {
             resolve_scope(&root, &cwd, &[root.join("sql/b.md")]).unwrap(),
             vec![root.join("sql/b.md")]
         );
+    }
+
+    /// SC-003: at least 80% of error rules carry a suggested fix. Every error rule except
+    /// KB006 (whose message comes from the YAML parser) must produce one.
+    #[test]
+    fn error_rules_carry_fixes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+        let mut seen = std::collections::BTreeMap::new();
+        for dir in ["invalid", "secrets"] {
+            let report = lint(&root.join(dir), &[]).unwrap();
+            for f in report
+                .findings
+                .iter()
+                .filter(|f| f.severity == Severity::Error)
+            {
+                *seen.entry(f.code).or_insert(true) &= f.fix.is_some();
+            }
+        }
+        for f in crate::entry::parse_entry("x", "x.md", b"---\nab\xff\n".to_vec()).findings {
+            seen.insert(f.code, f.fix.is_some());
+        }
+        let errors: Vec<RuleCode> = RuleCode::ALL
+            .iter()
+            .copied()
+            .filter(|c| c.severity() == Severity::Error)
+            .collect();
+        for code in &errors {
+            if *code == RuleCode::IdCaseCollision {
+                continue; // needs two files; covered in walk.rs
+            }
+            let has_fix = seen
+                .get(code)
+                .copied()
+                .unwrap_or_else(|| panic!("no fixture produces {code}"));
+            assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
+        }
+        assert_eq!(errors.len(), 38);
     }
 
     #[test]

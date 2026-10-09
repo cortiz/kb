@@ -42,6 +42,7 @@ pub struct CharMap {
 }
 
 impl CharMap {
+    /// Builds the map for `text`.
     pub fn new(text: &str) -> CharMap {
         if text.is_ascii() {
             return CharMap {
@@ -125,14 +126,17 @@ impl Source {
         }
     }
 
+    /// The text, without the BOM.
     pub fn text(&self) -> &str {
         &self.text
     }
 
+    /// Whether the file starts with a UTF-8 byte order mark.
     pub fn bom(&self) -> bool {
         self.bom
     }
 
+    /// The file's line-ending style.
     pub fn line_ending(&self) -> LineEnding {
         self.line_ending
     }
