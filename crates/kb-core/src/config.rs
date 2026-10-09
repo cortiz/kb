@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The ten settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The eleven settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -114,6 +114,13 @@ pub const SETTINGS: &[Setting] = &[
         default: "",
         env: "KB_OPENER_COMMAND",
         doc: "Command that opens a URL or file, given as its argument. Unset: open (macOS) or xdg-open.",
+    },
+    Setting {
+        key: "vars.remember",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_VARS_REMEMBER",
+        doc: "Remember the values you use for variables (never secrets), to pre-fill them next time.",
     },
 ];
 
@@ -337,6 +344,10 @@ impl Settings {
             "print" => EnterAction::Print,
             _ => EnterAction::Copy,
         }
+    }
+
+    pub fn vars_remember(&self) -> bool {
+        self.flag("vars.remember")
     }
 
     pub fn tui_mouse(&self) -> bool {
@@ -788,7 +799,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 10, "ten settings, no duplicates");
+        assert_eq!(keys.len(), 11, "eleven settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -814,7 +825,8 @@ mod settings_tests {
         for (key, r) in s.iter() {
             assert_eq!(r.source, Source::Default, "{key}");
         }
-        assert_eq!(s.iter().count(), 10);
+        assert!(s.vars_remember());
+        assert_eq!(s.iter().count(), 11);
     }
 
     #[test]

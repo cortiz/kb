@@ -262,3 +262,228 @@ fn narrow_full_preview_and_too_small_screens() {
         assert_snapshot(&format!("{name}.{}x{}.dark", size.0, size.1), &shot);
     }
 }
+
+// ---- the variable form (screen 2) ----
+
+mod form {
+    use super::support::snapshot::*;
+    use kb_cli::tui::app::AppState;
+    use kb_cli::tui::form::{FormSpec, FormState, Then};
+    use kb_cli::tui::keys::{ALT, CTRL, Code, Key};
+    use kb_cli::tui::theme::Theme;
+    use kb_core::search::Kb;
+
+    fn open(
+        root: &std::path::Path,
+        id: &str,
+        size: (u16, u16),
+        theme: &Theme,
+        env: &dyn Fn(&str) -> Option<String>,
+        then: Then,
+    ) -> AppState {
+        let mut state = state_for(root, "", Some(id), size, theme);
+        let kb = Kb::open(root).unwrap();
+        let spec = FormSpec::load(&kb, id, env)
+            .unwrap()
+            .expect("an entry with variables");
+        state.form = Some(Box::new(FormState::open(spec, then, None, None)));
+        state
+    }
+
+    fn press(state: &mut AppState, code: Code, mods: u8) {
+        state
+            .form
+            .as_mut()
+            .unwrap()
+            .handle_key(Key::new(code, mods));
+    }
+
+    fn type_text(state: &mut AppState, text: &str) {
+        for c in text.chars() {
+            press(state, Code::Char(c), 0);
+        }
+    }
+
+    fn none(_: &str) -> Option<String> {
+        None
+    }
+
+    const FIVE_XX: &str = "sumo/5xx-by-authorizer";
+
+    #[test]
+    fn wide_with_an_enum_a_number_and_a_live_preview() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let mut s = open(&root, FIVE_XX, (120, 40), &theme, &none, Then::Exit);
+        press(&mut s, Code::Right, 0);
+        press(&mut s, Code::Tab, 0);
+        let shot = render(&s, &theme);
+        assert!(
+            shot.contains("field 2/2") && shot.contains("[prod]") && shot.contains("timeslice 15m"),
+            "{shot}"
+        );
+        assert_snapshot("form-wide.120x40.dark", &shot);
+        let light = theme_of("light");
+        assert_snapshot("form-wide.120x40.light", &render(&s, &light));
+        let plain = theme_of("nocolor");
+        assert_snapshot("form-wide.120x40.nocolor", &render(&s, &plain));
+    }
+
+    #[test]
+    fn narrow_puts_the_preview_under_the_fields() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let s = open(&root, FIVE_XX, (80, 24), &theme, &none, Then::Exit);
+        let shot = render(&s, &theme);
+        let rows: Vec<&str> = shot.lines().collect();
+        let fields = rows.iter().position(|r| r.contains("minutes")).unwrap();
+        let preview = rows.iter().position(|r| r.contains("Preview")).unwrap();
+        assert!(fields < preview, "{shot}");
+        assert_snapshot("form-narrow.80x24.dark", &shot);
+    }
+
+    #[test]
+    fn an_invalid_field_shows_its_message_and_the_focus() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let mut s = open(&root, FIVE_XX, (200, 40), &theme, &none, Then::Exit);
+        press(&mut s, Code::Right, 0);
+        press(&mut s, Code::Tab, 0);
+        press(&mut s, Code::Char('u'), CTRL);
+        type_text(&mut s, "abc");
+        press(&mut s, Code::Tab, 0);
+        press(&mut s, Code::Enter, 0);
+        let shot = render(&s, &theme);
+        assert!(
+            shot.contains("✗ expected a number like 30, -5 or 0.25"),
+            "{shot}"
+        );
+        assert!(
+            shot.contains("{{minutes}}"),
+            "an invalid value stays a placeholder in the preview"
+        );
+        assert_snapshot("form-invalid.200x40.dark", &shot);
+    }
+
+    #[test]
+    fn a_secret_from_the_environment_is_masked_everywhere() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let env = |n: &str| (n == "KB_TEST_TOKEN").then(|| "S3CR3T-MARKER".to_string());
+        let s = open(&root, "cmd/curl-token", (120, 40), &theme, &env, Then::Exit);
+        let shot = render(&s, &theme);
+        assert!(shot.contains("•••• (from $KB_TEST_TOKEN)"), "{shot}");
+        assert!(shot.contains("Bearer ••••"), "{shot}");
+        assert!(!shot.contains("S3CR3T"));
+        assert_snapshot("form-secret.120x40.dark", &shot);
+    }
+
+    #[test]
+    fn markers_for_raw_and_undeclared_variables() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let s = open(
+            &root,
+            "cmd/escape-none",
+            (120, 40),
+            &theme,
+            &none,
+            Then::Exit,
+        );
+        assert!(render(&s, &theme).contains("raw"));
+        let s = open(
+            &root,
+            "cmd/undeclared",
+            (120, 40),
+            &theme,
+            &none,
+            Then::Exit,
+        );
+        assert!(render(&s, &theme).contains("undeclared"));
+    }
+
+    #[test]
+    fn a_quoted_value_is_shown_with_its_quotes() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let mut s = open(
+            &root,
+            "cmd/git-checkout",
+            (120, 40),
+            &theme,
+            &none,
+            Then::Exit,
+        );
+        type_text(&mut s, "feature/x; rm -rf ~");
+        let shot = render(&s, &theme);
+        assert!(
+            shot.contains("git checkout 'feature/x; rm -rf ~'"),
+            "{shot}"
+        );
+    }
+
+    #[test]
+    fn many_fields_scroll_and_the_preview_stays() {
+        let (tmp, root) = fixture_copy("vars");
+        let vars: String = (1..=9)
+            .map(|i| format!("  v{i}: {{ kind: text, default: d{i} }}\n"))
+            .collect();
+        let payload: String = (1..=9).map(|i| format!("{{{{v{i}}}}} ")).collect();
+        std::fs::write(
+            root.join("cmd/many.md"),
+            format!("---\nkb_format: 1\ntype: cmd\ntitle: Many\nvars:\n{vars}---\n\n```\necho {payload}\n```\n"),
+        )
+        .unwrap();
+        let theme = theme_of("dark");
+        let mut s = open(&root, "cmd/many", (120, 15), &theme, &none, Then::Exit);
+        for _ in 0..8 {
+            press(&mut s, Code::Tab, 0);
+        }
+        let shot = render(&s, &theme);
+        assert!(
+            shot.contains("field 9/9") && shot.contains("▸ v9"),
+            "{shot}"
+        );
+        assert!(
+            !shot.contains(" v1 "),
+            "the first fields scrolled out:\n{shot}"
+        );
+        assert!(shot.contains("Preview") && shot.contains("d9"), "{shot}");
+        assert_snapshot("form-scrolled.120x15.dark", &shot);
+        drop(tmp);
+    }
+
+    #[test]
+    fn recent_values_are_listed_under_a_text_field() {
+        let (_tmp, root) = fixture_copy("vars");
+        std::fs::create_dir_all(root.join(".kb")).unwrap();
+        std::fs::write(
+            root.join(".kb/state.json"),
+            r#"{"state_version":1,"usage":{},"vars":{"recent":{"name":["api","db"]}}}"#,
+        )
+        .unwrap();
+        let theme = theme_of("dark");
+        let mut s = open(&root, "cmd/repeat", (120, 40), &theme, &none, Then::Exit);
+        press(&mut s, Code::Down, ALT);
+        let shot = render(&s, &theme);
+        assert!(shot.contains("↳ api") && shot.contains("↳ db"), "{shot}");
+        assert_snapshot("form-suggestions.120x40.dark", &shot);
+    }
+
+    #[test]
+    fn variables_used_only_outside_the_payload_show_in_the_preview() {
+        let (_tmp, root) = fixture_copy("vars");
+        let theme = theme_of("dark");
+        let mut s = open(&root, "cw/log-groups", (120, 40), &theme, &none, Then::Exit);
+        assert!(render(&s, &theme).contains("log_groups[0]: /aws/lambda/{{svc}}"));
+        type_text(&mut s, "api");
+        let shot = render(&s, &theme);
+        assert!(shot.contains("log_groups[0]: /aws/lambda/api"), "{shot}");
+        assert!(shot.contains("fields @timestamp"), "{shot}");
+        assert_snapshot("form-fields.120x40.dark", &shot);
+        let s = open(&root, "cmd/fields", (120, 40), &theme, &none, Then::Exit);
+        assert!(render(&s, &theme).contains("cwd: /tmp"));
+        let s = open(&root, "sumo/range", (120, 40), &theme, &none, Then::Exit);
+        assert!(render(&s, &theme).contains("range: -15m"));
+    }
+}

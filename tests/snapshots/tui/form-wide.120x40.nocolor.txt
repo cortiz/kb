@@ -1,0 +1,57 @@
+ kb · variables · 5xx by authorizer                                                                           field 2/2
+  env  enum  · edited                                 ┌ Preview ───────────────────────────────────────────────────────┐
+  [prod]  stage   dev                                 │_sourceCategory=prod/api | where status >= 500 | timeslice 15m |│
+▸ minutes  number  · default                          │ count by authorizer                                            │
+  15                                                  │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      │                                                                │
+                                                      └────────────────────────────────────────────────────────────────┘
+ Tab next · Enter copy · Alt-Enter print · ^Z reset · Esc back
+--- styles ---
+0:0..3 bold
+0:3..18 dim
+0:18..35 bold
+0:110..120 dim
+1:0..2 bold
+1:5..21 dim
+1:55..64 dim
+2:2..8 bold
+2:9..16 dim
+2:17..22 dim
+2:71..75 bold+reverse
+2:114..116 bold+reverse
+3:0..9 bold
+3:9..28 dim
+4:4..5 reverse
+39:1..62 dim

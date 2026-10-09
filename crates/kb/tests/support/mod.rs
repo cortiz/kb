@@ -35,6 +35,14 @@ pub fn search_kb() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
+/// A temporary KB holding a copy of `tests/fixtures/vars` (entries with every kind of variable).
+pub fn vars_kb() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    copy_dir(&fixtures().join("vars"), &root);
+    (dir, root)
+}
+
 /// A home that does not exist: tests that do not care about config get no config.
 pub const NOWHERE: &str = "/nonexistent-kb-test-home";
 

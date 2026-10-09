@@ -8,3 +8,4 @@ pub mod output;
 pub mod platform;
 pub mod show;
 pub mod tui;
+pub mod varcli;

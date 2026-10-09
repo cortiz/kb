@@ -158,13 +158,13 @@ fn the_method_flag_overrides_the_config_for_one_run() {
 }
 
 #[test]
-fn print_is_a_usage_error_on_copy() {
-    let (_d, root) = search_kb();
-    let out = kb_in(&root)
-        .args(["copy", ID, "--print", "id"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2));
+fn print_on_copy_writes_the_payload_to_stdout_instead_of_the_clipboard() {
+    // M5: `kb copy` takes the same flags as `kb use`, and `--print` is a flag, not a mode
+    let (d, root) = search_kb();
+    let (out, copied, _tool) = copy_with_fake(d.path(), &root, &[ID, "--print"]);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(text(&out.stdout).trim_end(), payload(&root, ID));
+    assert!(!copied.exists());
 }
 
 #[test]

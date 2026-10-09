@@ -1,6 +1,8 @@
 //! The full-screen terminal UI.
 
 pub mod app;
+pub mod form;
+pub mod form_view;
 pub mod highlight;
 pub mod input;
 pub mod keys;
@@ -17,6 +19,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use kb_core::entry_json::PrintMode;
 use kb_core::search::Kb;
+use kb_core::varres::{self, Source, Value};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event};
@@ -25,6 +28,7 @@ use ratatui::crossterm::terminal::size;
 use crate::platform::Platform;
 use crate::platform::clipboard::{self, ClipboardSettings, Place};
 use app::{Action, AppState, CopyReport, Effect, Options, RefreshInfo};
+use form::{FormSpec, Submission, Then};
 use terminal::{Signals, TerminalGuard, exit_code_for_signal};
 use theme::{Theme, ThemeEnv};
 use worker::{Reply, Request, Worker};
@@ -34,6 +38,13 @@ use worker::{Reply, Request, Worker};
 pub enum Outcome {
     /// An entry was picked; the caller copies or prints it (and records the use).
     Picked { id: String },
+    /// An entry with variables was picked and its form filled in; the caller resolves it with
+    /// these values, then copies or prints it. `print` is Alt-Enter.
+    Resolved {
+        id: String,
+        values: Vec<(String, Value, Source)>,
+        print: bool,
+    },
     /// Cancelled or signalled; nothing to print.
     Exit(i32),
 }
@@ -85,6 +96,7 @@ pub fn run(
     let mut worker = Worker::spawn(root.to_path_buf(), theme.is_color());
     let mut pending: Vec<Effect> = state.start();
     let mut picked: Option<String> = None;
+    let mut resolved: Option<Submission> = None;
     let mut exit: Option<i32> = None;
     let mut dirty = true;
     let mut first = true;
@@ -119,11 +131,83 @@ pub fn run(
                         use_count,
                     });
                 }
-                Effect::Pick => picked = state.selected_id.clone(),
+                Effect::Pick => {
+                    let id = state.selected_id.clone();
+                    match (&id, state.options.fill_variables) {
+                        (Some(id), true) => match FormSpec::load(&ui_kb, id, &real_env) {
+                            Ok(Some(spec)) => {
+                                let a = Action::FormLoaded(Ok(Box::new(spec)), Then::Exit);
+                                pending.extend(state.update(a, Instant::now()));
+                                dirty = true;
+                            }
+                            Ok(None) => picked = Some(id.clone()),
+                            Err(e) => {
+                                let a = Action::FormLoaded(Err(e), Then::Exit);
+                                pending.extend(state.update(a, Instant::now()));
+                                dirty = true;
+                            }
+                        },
+                        _ => picked = id,
+                    }
+                }
                 Effect::Quit(code) => exit = Some(code),
                 Effect::CopyPayload => {
-                    let report = copy_selected(platform, &clipboard_settings, &state, &ui_kb);
+                    let id = state.selected_id.clone();
+                    let spec = id.as_ref().map(|id| FormSpec::load(&ui_kb, id, &real_env));
+                    let action = match spec {
+                        Some(Ok(Some(spec))) => Action::FormLoaded(Ok(Box::new(spec)), Then::Stay),
+                        Some(Err(e)) => Action::FormLoaded(Err(e), Then::Stay),
+                        _ => Action::CopyDone(copy_selected(
+                            platform,
+                            &clipboard_settings,
+                            &state,
+                            &ui_kb,
+                        )),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::CopyTemplate => {
+                    let mut report = copy_selected(platform, &clipboard_settings, &state, &ui_kb);
+                    if report.sent {
+                        report
+                            .message
+                            .push_str(" (template; variables not filled in)");
+                    }
                     pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
+                Effect::SubmitForm(sub) => {
+                    let now = Instant::now();
+                    match recheck(&ui_kb, &sub) {
+                        Recheck::Same => match sub.then {
+                            // Alt-Enter prints and exits, whichever way the form was opened
+                            Then::Exit => resolved = Some(*sub),
+                            Then::Stay if sub.print => resolved = Some(*sub),
+                            Then::Stay => {
+                                let report = copy_resolved(
+                                    platform,
+                                    &clipboard_settings,
+                                    &ui_kb,
+                                    &sub,
+                                    state.options.remember_vars,
+                                );
+                                pending.extend(state.update(Action::CopyDone(report), now));
+                                pending.extend(state.update(Action::FormDone, now));
+                            }
+                        },
+                        Recheck::Changed(spec) => {
+                            pending.extend(state.update(Action::FormChanged(spec), now));
+                        }
+                        Recheck::Failed(message) => {
+                            let report = CopyReport {
+                                message,
+                                sent: false,
+                            };
+                            pending.extend(state.update(Action::CopyDone(report), now));
+                            pending.extend(state.update(Action::FormDone, now));
+                        }
+                    }
                     dirty = true;
                 }
                 Effect::EditEntry(id) => {
@@ -147,7 +231,7 @@ pub fn run(
                 }
             }
         }
-        if picked.is_some() || exit.is_some() {
+        if picked.is_some() || exit.is_some() || resolved.is_some() {
             break;
         }
         if dirty {
@@ -209,9 +293,96 @@ pub fn run(
     if let Some(code) = exit {
         return Ok(Outcome::Exit(code));
     }
+    if let Some(sub) = resolved {
+        return Ok(Outcome::Resolved {
+            id: sub.id,
+            values: sub.values,
+            print: sub.print,
+        });
+    }
     match picked {
         Some(id) => Ok(Outcome::Picked { id }),
         None => Ok(Outcome::Exit(130)),
+    }
+}
+
+fn real_env(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// What the entry looks like now compared with the form that was filled in.
+enum Recheck {
+    Same,
+    Changed(Box<FormSpec>),
+    Failed(String),
+}
+
+/// Reads the entry again before it is used (the file may have been edited since the form opened).
+fn recheck(kb: &Kb, sub: &Submission) -> Recheck {
+    match FormSpec::load(kb, &sub.id, &real_env) {
+        Ok(Some(spec)) if spec.plan.signature == sub.signature => Recheck::Same,
+        Ok(Some(spec)) => Recheck::Changed(Box::new(spec)),
+        Ok(None) => Recheck::Failed(format!(
+            "{} no longer has variables; nothing copied",
+            sub.id
+        )),
+        Err(e) => Recheck::Failed(format!("Copy failed: {e}")),
+    }
+}
+
+/// Ctrl-Y with a form: resolves the values, copies through the clipboard chain and, when the text
+/// was sent, records the use and remembers the values.
+fn copy_resolved(
+    platform: &impl Platform,
+    settings: &ClipboardSettings,
+    kb: &Kb,
+    sub: &Submission,
+    remember: bool,
+) -> CopyReport {
+    let failed = |m: String| CopyReport {
+        message: m,
+        sent: false,
+    };
+    let entry = match kb.entry(&sub.id) {
+        Ok(e) => e,
+        Err(e) => return failed(format!("Copy failed: {e}")),
+    };
+    let plan = varres::plan_vars(&entry);
+    let values: varres::Values = sub
+        .values
+        .iter()
+        .map(|(n, v, _)| (n.clone(), v.clone()))
+        .collect();
+    let resolved = match varres::resolve(&plan, &values) {
+        Ok(r) => r,
+        Err(errors) => {
+            let first = errors.first().map(ToString::to_string).unwrap_or_default();
+            return failed(format!("Copy failed: {first}"));
+        }
+    };
+    let Some(text) = resolved.primary().map(|o| o.text.clone()) else {
+        return failed("Copy failed: nothing to copy".into());
+    };
+    let outcome = clipboard::copy(platform, settings, &text, Place::Ui);
+    if outcome.sent() {
+        let pairs: Vec<(String, String)> = if remember {
+            sub.values
+                .iter()
+                .filter(|(_, v, _)| !v.is_secret())
+                .map(|(n, v, _)| (n.clone(), v.reveal().to_string()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let _ = kb.record_resolved_use(&sub.id, SystemTime::now(), &pairs);
+    }
+    let mut message = outcome.message_short();
+    if outcome.sent() && resolved.has_secret {
+        message.push_str(" · the clipboard now holds a secret");
+    }
+    CopyReport {
+        message,
+        sent: outcome.sent(),
     }
 }
 

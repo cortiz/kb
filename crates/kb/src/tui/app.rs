@@ -8,6 +8,7 @@ use kb_core::config::ThemeChoice;
 use kb_core::search::{Notice, SearchResult};
 use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 
+use super::form::{FormEvent, FormSpec, FormState, Submission, Then};
 use super::input::{Change, SearchInput};
 use super::keys::{self, Command, Key, Mode};
 use super::layout::{self, Screen};
@@ -32,6 +33,11 @@ pub struct Options {
     pub refresh_timer: bool,
     /// Problems found in the config file or environment, shown as a warning in the header.
     pub config_problems: usize,
+    /// Enter and Ctrl-Y open the variable form for entries that have variables. Off when what
+    /// happens next does not need the payload (`--print id`, `kb show`).
+    pub fill_variables: bool,
+    /// The form remembers the values it was used with (`vars.remember` and `--no-remember`).
+    pub remember_vars: bool,
 }
 
 impl Default for Options {
@@ -39,6 +45,8 @@ impl Default for Options {
         Options {
             mouse: false,
             config_problems: 0,
+            fill_variables: true,
+            remember_vars: true,
             theme: ThemeChoice::Auto,
             clipboard: ClipboardSettings::default(),
             editor: None,
@@ -120,6 +128,12 @@ pub enum Action {
     CopyDone(CopyReport),
     /// The editor returned; `Some` carries the first lint error of the file.
     EditorReturned(Option<String>),
+    /// The form for an entry with variables was read (or could not be).
+    FormLoaded(Result<Box<FormSpec>, String>, Then),
+    /// The entry changed between opening the form and submitting it.
+    FormChanged(Box<FormSpec>),
+    /// The form was used (Ctrl-Y): it closes.
+    FormDone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +153,10 @@ pub enum Effect {
     /// Enter on the selected entry: leave the UI and let the caller copy or print it.
     Pick,
     CopyPayload,
+    /// Alt-C: copy the payload as it is in the file.
+    CopyTemplate,
+    /// The form passed validation: check the entry did not change, then use it.
+    SubmitForm(Box<Submission>),
     EditEntry(String),
     Quit(i32),
 }
@@ -171,6 +189,11 @@ pub struct AppState {
     pub options: Options,
     /// A search has been answered at least once.
     pub loaded: bool,
+    /// The variable form, when it is open.
+    pub form: Option<Box<FormState>>,
+    /// Values typed in a form that was closed with Esc, by entry ID (this session only).
+    pub form_session:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
 }
 
 impl AppState {
@@ -204,6 +227,8 @@ impl AppState {
             empty_kb: false,
             options,
             loaded: false,
+            form: None,
+            form_session: std::collections::BTreeMap::new(),
         }
     }
 
@@ -211,6 +236,8 @@ impl AppState {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
+        } else if self.form.is_some() {
+            Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
         } else if self.layout_mode == LayoutMode::FullPreview {
@@ -331,12 +358,19 @@ impl AppState {
                 if self.message.as_ref().is_some_and(|m| m.expires.is_none()) {
                     self.message = None;
                 }
+                if self.form.is_some() {
+                    return self.form_key(e);
+                }
                 match Key::from_event(e).and_then(|k| keys::resolve(k, self.mode())) {
                     Some(command) => self.command(command, now),
                     None => Vec::new(),
                 }
             }
             Action::Paste(text) => {
+                if let Some(form) = &mut self.form {
+                    form.paste(&text);
+                    return Vec::new();
+                }
                 if self.mode() != Mode::Search {
                     return Vec::new();
                 }
@@ -416,12 +450,68 @@ impl AppState {
                 self.say(&report.message, kind, now, true);
                 Vec::new()
             }
+            Action::FormLoaded(result, then) => {
+                match result {
+                    Ok(spec) => {
+                        let typed = self.form_session.get(&spec.id).cloned();
+                        self.form =
+                            Some(Box::new(FormState::open(*spec, then, typed.as_ref(), None)));
+                    }
+                    Err(e) => self.say(
+                        &format!("Cannot open the variables: {e}"),
+                        MessageKind::Warning,
+                        now,
+                        false,
+                    ),
+                }
+                Vec::new()
+            }
+            Action::FormChanged(spec) => {
+                if let Some(form) = &mut self.form {
+                    form.reopen(*spec, "The entry changed; review the fields");
+                }
+                Vec::new()
+            }
+            Action::FormDone => {
+                self.form = None;
+                Vec::new()
+            }
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
                     self.say(&text, MessageKind::Warning, now, false);
                 }
                 vec![Effect::Refresh]
+            }
+        }
+    }
+
+    /// A key while the variable form is open: the form handles it, and may ask for something.
+    fn form_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(form) = self.form.as_mut() else {
+            return Vec::new();
+        };
+        match form.handle_key(key) {
+            FormEvent::None => Vec::new(),
+            FormEvent::Close => {
+                let kept = form.session_values();
+                let id = form.id.clone();
+                self.form = None;
+                if kept.is_empty() {
+                    self.form_session.remove(&id);
+                } else {
+                    self.form_session.insert(id, kept);
+                }
+                Vec::new()
+            }
+            FormEvent::Submit { print } => {
+                vec![Effect::SubmitForm(Box::new(form.submission(print)))]
             }
         }
     }
@@ -529,6 +619,14 @@ impl AppState {
             Command::Copy => {
                 if self.selected_result().is_some() {
                     vec![Effect::CopyPayload]
+                } else {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            }
+            Command::CopyTemplate => {
+                if self.selected_result().is_some() {
+                    vec![Effect::CopyTemplate]
                 } else {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()
@@ -682,6 +780,7 @@ impl AppState {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::tui::form::Then;
     use kb_core::entry::EntryType;
     use kb_core::search::Tier;
     use ratatui::crossterm::event::{KeyCode, KeyModifiers};
@@ -1700,5 +1799,180 @@ pub(crate) mod tests {
         let e = s.update(key(KeyCode::Tab, KeyModifiers::NONE), Instant::now());
         assert_eq!(type_chips(&s), vec!["cmd"]);
         assert_eq!(search_of(&e).unwrap().1, "type:cmd tag:prod latency");
+    }
+
+    // ---- the variable form ----
+
+    fn form_spec() -> crate::tui::form::FormSpec {
+        crate::tui::form::tests::spec_of(
+            "vars:\n  env: { kind: enum, options: [prod, stage], default: stage }\n  n: { kind: number, default: 5 }\n",
+            "go {{env}} {{n}}",
+        )
+    }
+
+    fn with_form(then: Then) -> AppState {
+        let mut s = loaded(&["a"]);
+        s.update(
+            Action::FormLoaded(Ok(Box::new(form_spec())), then),
+            Instant::now(),
+        );
+        s
+    }
+
+    #[test]
+    fn enter_on_a_result_asks_the_caller_to_pick_and_the_form_opens_when_it_is_loaded() {
+        let mut s = loaded(&["a"]);
+        let now = Instant::now();
+        assert_eq!(
+            s.update(key(KeyCode::Enter, KeyModifiers::NONE), now),
+            vec![Effect::Pick]
+        );
+        assert!(s.form.is_none());
+        s.update(
+            Action::FormLoaded(Ok(Box::new(form_spec())), Then::Exit),
+            now,
+        );
+        assert_eq!(s.mode(), Mode::Form);
+        assert!(s.form.is_some());
+    }
+
+    #[test]
+    fn a_form_that_cannot_be_read_is_reported_not_opened() {
+        let mut s = loaded(&["a"]);
+        s.update(
+            Action::FormLoaded(Err("a/b: not readable".into()), Then::Exit),
+            Instant::now(),
+        );
+        assert!(s.form.is_none());
+        let m = s.message.as_ref().unwrap();
+        assert!(m.text.contains("Cannot open the variables") && m.kind == MessageKind::Warning);
+    }
+
+    #[test]
+    fn keys_go_to_the_form_while_it_is_open() {
+        let mut s = with_form(Then::Exit);
+        let now = Instant::now();
+        // `?` and letters are typed into the field, not the search line or help
+        s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
+        s.update(ch('?'), now);
+        assert_eq!(s.overlay, Overlay::None);
+        assert_eq!(s.input.editor.text(), "");
+        assert_eq!(s.form.as_ref().unwrap().fields[1].editor.text(), "5?");
+        // Ctrl-C still quits
+        assert_eq!(s.update(ctrl('c'), now), vec![Effect::Quit(130)]);
+    }
+
+    #[test]
+    fn enter_submits_a_valid_form_as_an_effect_and_blocks_an_invalid_one() {
+        let mut s = with_form(Then::Exit);
+        let now = Instant::now();
+        let e = s.update(key(KeyCode::Enter, KeyModifiers::NONE), now);
+        let Some(Effect::SubmitForm(sub)) = e.first() else {
+            panic!("{e:?}")
+        };
+        assert_eq!(
+            (sub.id.as_str(), sub.print, sub.then),
+            ("x", false, Then::Exit)
+        );
+        s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
+        s.update(ch('x'), now);
+        assert!(
+            s.update(key(KeyCode::Enter, KeyModifiers::NONE), now)
+                .is_empty()
+        );
+        assert!(s.form.as_ref().unwrap().fields[1].error.is_some());
+        let e = s.update(key(KeyCode::Backspace, KeyModifiers::NONE), now);
+        assert!(e.is_empty());
+        let e = s.update(key(KeyCode::Enter, KeyModifiers::ALT), now);
+        let Some(Effect::SubmitForm(sub)) = e.first() else {
+            panic!("{e:?}")
+        };
+        assert!(sub.print);
+    }
+
+    #[test]
+    fn esc_returns_to_the_list_with_the_same_selection_and_keeps_typed_values() {
+        let mut s = loaded(&["a", "b"]);
+        let now = Instant::now();
+        s.update(key(KeyCode::Down, KeyModifiers::NONE), now);
+        s.update(
+            Action::FormLoaded(Ok(Box::new(form_spec())), Then::Exit),
+            now,
+        );
+        s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
+        s.update(ch('0'), now);
+        assert!(
+            s.update(key(KeyCode::Esc, KeyModifiers::NONE), now)
+                .is_empty()
+        );
+        assert!(s.form.is_none());
+        assert_eq!(s.selected_id.as_deref(), Some("b"));
+        assert_eq!(s.form_session["x"]["n"], "50");
+        // opening it again restores what was typed
+        s.update(
+            Action::FormLoaded(Ok(Box::new(form_spec())), Then::Exit),
+            now,
+        );
+        assert_eq!(s.form.as_ref().unwrap().fields[1].editor.text(), "50");
+    }
+
+    #[test]
+    fn a_changed_entry_reopens_the_form_with_a_notice_and_a_done_copy_closes_it() {
+        let mut s = with_form(Then::Stay);
+        let now = Instant::now();
+        s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
+        s.update(ch('0'), now);
+        s.update(Action::FormChanged(Box::new(form_spec())), now);
+        let f = s.form.as_ref().unwrap();
+        assert!(f.notice.as_deref().unwrap().contains("changed"));
+        assert_eq!(f.fields[1].editor.text(), "50", "typed values survive");
+        s.update(Action::FormDone, now);
+        assert!(s.form.is_none());
+    }
+
+    #[test]
+    fn alt_c_copies_the_template_and_ctrl_y_copies_the_payload() {
+        let mut s = loaded(&["a"]);
+        let now = Instant::now();
+        assert_eq!(
+            s.update(key(KeyCode::Char('c'), KeyModifiers::ALT), now),
+            vec![Effect::CopyTemplate]
+        );
+        assert_eq!(s.update(ctrl('y'), now), vec![Effect::CopyPayload]);
+        let mut empty = state();
+        assert!(
+            empty
+                .update(key(KeyCode::Char('c'), KeyModifiers::ALT), now)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn pasted_text_goes_to_the_form_not_the_search_line() {
+        let mut s = with_form(Then::Exit);
+        let now = Instant::now();
+        s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
+        s.update(Action::Paste("1\n2".into()), now);
+        assert_eq!(s.input.editor.text(), "");
+        assert_eq!(s.form.as_ref().unwrap().fields[1].editor.text(), "51");
+    }
+
+    #[test]
+    fn the_debug_output_of_the_whole_state_never_shows_a_secret() {
+        let env = |n: &str| (n == "KB_TOK").then(|| "S3CR3T-MARKER".to_string());
+        let spec = crate::tui::form::tests::spec_with(
+            "vars:\n  t: { kind: secret, env: KB_TOK }\n",
+            "curl {{t}}",
+            &[],
+            &env,
+        );
+        let mut s = loaded(&["a"]);
+        s.update(
+            Action::FormLoaded(Ok(Box::new(spec)), Then::Exit),
+            Instant::now(),
+        );
+        assert!(!format!("{s:?}").contains("S3CR3T"));
+        let e = s.update(key(KeyCode::Enter, KeyModifiers::NONE), Instant::now());
+        assert!(!format!("{e:?}").contains("S3CR3T"));
     }
 }

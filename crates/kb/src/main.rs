@@ -15,6 +15,7 @@ use kb_core::search::Kb;
 use kb_cli::commands::{self, ShowMode, ShowOptions};
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
+use kb_cli::varcli::VarArgs;
 use kb_cli::{color, output};
 
 /// A terminal knowledge base for operational snippets.
@@ -63,6 +64,42 @@ struct CopyArgs {
     #[arg(long, value_name = "METHOD", value_parser = ["auto", "native", "osc52", "stdout"])]
     method: Option<String>,
     /// Print what happened as JSON.
+    #[arg(long)]
+    json: bool,
+    /// Copy the payload as it is in the file, `{{variables}}` included.
+    #[arg(long, conflicts_with_all = ["vars", "yes", "no_remember"])]
+    raw: bool,
+    #[command(flatten)]
+    vars: VarArgs,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
+struct UseArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// How to copy, for this run: auto, native, osc52 or stdout.
+    #[arg(long, value_name = "METHOD", value_parser = ["auto", "native", "osc52", "stdout"])]
+    method: Option<String>,
+    /// Print what happened as JSON.
+    #[arg(long)]
+    json: bool,
+    #[command(flatten)]
+    vars: VarArgs,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
+struct VarsArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Print the variables as JSON.
     #[arg(long)]
     json: bool,
     /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
@@ -193,8 +230,12 @@ enum Command {
     Index(IndexCommand),
     /// Open the terminal UI (the same as running `kb` with no subcommand).
     Tui(TuiArgs),
-    /// Copy an entry's payload to the clipboard.
+    /// Copy an entry's payload to the clipboard, asking for its variables first.
     Copy(CopyArgs),
+    /// Fill in an entry's variables and copy (or print) the result.
+    Use(UseArgs),
+    /// List an entry's variables and the values that would be pre-filled.
+    Vars(VarsArgs),
     /// Print an entry: the preview as text, or only the payload, JSON or file path.
     Show(ShowArgs),
     /// Open an entry's file in $VISUAL / $EDITOR.
@@ -340,6 +381,8 @@ fn main() -> ExitCode {
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
         Command::Copy(a) => a.json,
+        Command::Use(a) => a.json,
+        Command::Vars(a) => a.json,
         Command::Show(a) => a.json,
         Command::Edit(a) => a.json,
         Command::Doctor(a) => a.json,
@@ -369,6 +412,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         root: cli.root.as_ref().map(|p| p.to_string_lossy().into_owned()),
         clipboard_method: match &cli.command {
             Command::Copy(a) => a.method.clone(),
+            Command::Use(a) => a.method.clone(),
             _ => None,
         },
     };
@@ -393,10 +437,23 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
-        Command::Copy(args) => commands::run_copy(
+        Command::Copy(args) => {
+            let query = join_query(&args.query, &args.not_tags);
+            if args.raw {
+                commands::run_copy_raw(&platform, &root, &loaded, &query, args.json)
+            } else {
+                let opts = args.vars.into_opts(args.json)?;
+                commands::run_use(&platform, &root, &loaded, &query, &opts)
+            }
+        }
+        Command::Use(args) => {
+            let query = join_query(&args.query, &args.not_tags);
+            let opts = args.vars.into_opts(args.json)?;
+            commands::run_use(&platform, &root, &loaded, &query, &opts)
+        }
+        Command::Vars(args) => commands::run_vars(
             &platform,
             &root,
-            &loaded,
             &join_query(&args.query, &args.not_tags),
             args.json,
         ),

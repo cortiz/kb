@@ -114,6 +114,7 @@ kb config list                      # every setting, its value and where the val
 | `clipboard.osc52_max_bytes` | a whole number, at least 1 | `74000` |
 | `clipboard.trim_trailing_newline` | `true`, `false` | `true` |
 | `opener.command` | a command that gets the URL or file | `open` (macOS), `xdg-open` (Linux) |
+| `vars.remember` | `true`, `false` | `true` |
 
 A command-line flag beats an environment variable (`KB_<SECTION>_<KEY>`, for example
 `KB_CLIPBOARD_METHOD` or `KB_ROOT`), which beats the file, which beats the default. An unknown key
@@ -199,6 +200,10 @@ vars:
   `range`, `url`, `cwd` and `log_groups`.
 - Write `\{{` for a literal `{{`.
 - A reference that isn't declared is treated as `text` with no default.
+- `escape` (optional) says how a value is quoted where it lands: `auto` (the default: shell quoting
+  in a `cmd` payload and in `cwd`, percent-encoding in a `url`, as typed everywhere else), `shell`
+  (always quote for the shell), `sql` (a single-quoted SQL string) or `none` (exactly as typed).
+  See [Filling in variables](#filling-in-variables).
 
 ### Secrets
 
@@ -207,6 +212,47 @@ and never give it a `default`. `kb lint` rejects AWS keys, bearer tokens, JWTs, 
 high-entropy values assigned to names like `password` or `token`. If a line only looks like a
 secret, end it with `kb:allow-secret` (in whatever comment syntax the payload uses); every
 suppression is listed in the lint output.
+
+## Filling in variables
+
+Copying an entry that has variables asks for their values first, in the UI (a small form with a
+live preview of the result) or on the command line:
+
+```sh
+kb use 5xx --var env=prod --var minutes=30     # no questions: everything given
+kb use 5xx                                     # asks for each variable on the terminal
+kb use tail-logs -y --print                    # -y: take the pre-filled values; --print: to stdout
+kb vars 5xx                                    # what the entry asks for and what would be pre-filled
+kb copy --raw 5xx                              # the template itself, {{placeholders}} included
+```
+
+`kb copy` does the same as `kb use` for an entry with variables (and is unchanged for one without).
+A variable starts with, in this order: `--var`, the environment variable named by its `env`, the value
+you used last time **for this entry**, its `default`. Values must fit their kind (`number` is
+`30`, `-5` or `0.25`; `enum` is one of its options; `text` is one line); a wrong value says what was
+expected. Prompts use the terminal even when stdout is redirected, so `kb use x --print > file` works.
+Exit codes: `0` done, `1` a value is missing and nobody can be asked (or no match), `2` a bad
+`--var`, `130` cancelled. `--no-remember` (or `vars.remember = false`) stops kb remembering values;
+kb never remembers a `secret` or a value that looks like a credential, and keeps the last 20 values
+per variable name in `.kb/state.json` to suggest them.
+
+**Quoting.** Values are quoted for where they land, so `feature/x; rm -rf ~` becomes one argument:
+in a `cmd` payload (and `cwd`) for the entry's `shell` (`sh`, `bash`, `zsh` or `fish`), by the quotes
+the template already has around the variable; in a `url`, percent-encoded. In a `sql`, `sumo`, `cw`
+or `prompt` payload values are inserted as typed; use `escape: sql` for a string literal.
+
+**Secrets.** A `secret` variable is read from its `env`, or typed with nothing echoed. It is used for
+that one run and is never written down: not in `.kb/state.json`, not in `kb vars`, not in the preview
+(which shows `••••`). It does end up on the clipboard (or stdout with `--print`), and kb says so;
+clipboard managers may keep a history. `--var token=…` works but lands in your shell history. When
+the clipboard has nowhere to go and kb falls back to printing (see [Copying](#copying)), the secret is
+printed too, on stdout only.
+
+In the UI, Enter on an entry with variables opens the form instead of copying; Ctrl-Y opens it too and
+stays open afterwards. Tab and Shift-Tab (or ↓ and ↑) move between fields, ←/→ change a choice,
+Enter copies, Alt-Enter prints to stdout and exits, Ctrl-Z resets a field, Ctrl-R replaces a secret
+that came from the environment, Alt-↓ opens recent values for a text field, and Esc goes back to the
+list (what you typed is kept until you quit). Alt-C in the list copies the template without asking.
 
 ## `kb lint`
 
@@ -295,6 +341,7 @@ printed on stderr after the UI closes.
 |-----|--------|
 | `Enter` | pick: copy the entry and exit |
 | `Ctrl-Y` | copy the payload and stay open |
+| `Alt-C` | copy the payload with its `{{variables}}` left in |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
 | `↓  Ctrl-N  Ctrl-J` | select the next result |
 | `↑  Ctrl-P  Ctrl-K` | select the previous result |

@@ -93,6 +93,7 @@ rule_codes! {
     FileTooLarge = 51, "file-too-large", Warning;
     SymlinkOutsideRoot = 52, "symlink-outside-root", Warning;
     IdCaseCollision = 53, "id-case-collision", Error;
+    InvalidEscape = 54, "invalid-escape", Error;
     SecretAwsAccessKey = 60, "secret-aws-access-key", Error;
     SecretAwsSecretKey = 61, "secret-aws-secret-key", Error;
     SecretBearerToken = 62, "secret-bearer-token", Error;
@@ -575,7 +576,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture produces {code}"));
             assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
         }
-        assert_eq!(errors.len(), 38);
+        assert_eq!(errors.len(), 39);
     }
 
     #[test]
@@ -599,7 +600,7 @@ mod tests {
                 code.number()
             );
         }
-        assert_eq!(RuleCode::ALL.len(), 48);
+        assert_eq!(RuleCode::ALL.len(), 49);
     }
 
     #[test]
