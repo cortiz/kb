@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "kb://003-tui-core/entry",
+  "title": "kb show --print json / TUI pick with --print json",
+  "type": "object",
+  "required": ["id", "path", "file", "type", "title", "tags", "vars", "payload", "notes", "fields"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "path": { "type": "string", "description": "Relative to the KB root, '/' separators, with .md." },
+    "file": { "type": "string", "description": "Absolute path of the entry file." },
+    "type": { "enum": ["sql", "sumo", "cw", "cmd", "prompt", "link", "code"] },
+    "title": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "created": { "type": ["string", "null"] },
+    "updated": { "type": ["string", "null"] },
+    "vars": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind", "declared"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "enum": ["text", "number", "enum", "secret"] },
+          "declared": { "type": "boolean" },
+          "default": { "type": ["string", "null"], "description": "Never present for secret variables." },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": ["string", "null"] },
+          "env": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "payload": { "type": ["string", "null"], "description": "Payload text with {{variables}} unresolved; null for link and code." },
+    "notes": { "type": "string" },
+    "fields": {
+      "type": "object",
+      "description": "Type-specific values: dialect, database, range, log_groups, region, shell, cwd, url, code.",
+      "additionalProperties": true
+    }
+  }
+}
