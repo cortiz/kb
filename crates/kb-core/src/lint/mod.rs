@@ -289,7 +289,28 @@ pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
     Ok(report)
 }
 
-fn lint_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>, report: &mut LintReport) {
+/// Everything the per-file checks found, plus the parsed entry when the file is readable.
+pub(crate) struct FileCheck {
+    pub findings: Vec<Finding>,
+    pub entry: Option<crate::entry::Entry>,
+}
+
+/// Runs the checks of one file (size, encoding, line endings, secrets, format). `lint` and the
+/// search index both go through this, so "has errors" means the same thing in both.
+pub(crate) fn check_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>) -> FileCheck {
+    let mut report = LintReport::default();
+    let entry = lint_file(file, bytes, &mut report);
+    FileCheck {
+        findings: report.findings,
+        entry,
+    }
+}
+
+fn lint_file(
+    file: &crate::walk::WalkEntry,
+    bytes: Vec<u8>,
+    report: &mut LintReport,
+) -> Option<crate::entry::Entry> {
     let finding = |line, column, code: RuleCode, message: String, fix: Option<&str>| Finding {
         path: file.rel_path.clone(),
         id: Some(file.id.clone()),
@@ -322,7 +343,7 @@ fn lint_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>, report: &mut LintRep
                 &bytes,
                 e.offset,
             ));
-            return;
+            return None;
         }
     };
     if let Some(offset) = rules::mixed_line_ending_at(&source) {
@@ -352,6 +373,7 @@ fn lint_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>, report: &mut LintRep
     }
     let outcome = crate::entry::parse_source(&file.id, &file.rel_path, source);
     report.findings.extend(outcome.findings);
+    outcome.entry
 }
 
 impl LintReport {

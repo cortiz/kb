@@ -78,6 +78,16 @@ fn valid_fixtures_have_no_findings() {
 }
 
 #[test]
+fn search_fixture_kb_is_lint_clean() {
+    let root = fixtures().join("search");
+    let report = lint(&root, &[]).unwrap();
+    assert_eq!(report.entries, md_files(&root).len());
+    assert!(report.entries >= 30);
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    assert!(report.suppressions.is_empty());
+}
+
+#[test]
 fn invalid_fixtures_match_expectations() {
     assert!(check_dir("invalid") >= 37);
 }

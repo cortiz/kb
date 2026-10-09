@@ -2,9 +2,10 @@
 
 A personal, serverless knowledge base for reusable operational snippets: SQL, Sumo Logic and
 CloudWatch queries, shell commands, prompts, links and code locations. Each snippet is a plain
-Markdown file you can edit by hand, and `kb` is a single terminal binary that checks them.
+Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
+them.
 
-> Status: milestone M1 (entry format, `kb lint`). Search, the TUI, variables at use time and
+> Status: milestone M2 (entry format, `kb lint`, `kb search`). The TUI, variables at use time and
 > actions arrive in later milestones.
 
 ## Building
@@ -163,20 +164,57 @@ Exit codes: `0` no errors (and no warnings with `--strict`), `1` findings failed
 or I/O error, such as a missing KB root. Every rule code is listed in
 [`specs/001-entry-format/contracts/lint-rules.md`](specs/001-entry-format/contracts/lint-rules.md).
 
+## Searching
+
+```sh
+kb search 5xx auth                    # every word must match, in any field
+kb search latency type:cw tag:prod    # filters narrow the results
+kb search '"role cache"'              # exact phrase (quote it for the shell too)
+kb search auth --ids | fzf            # only IDs, one per line
+kb search auth --json                 # ranges and snippets, for scripts and the TUI
+kb search                             # everything, most used first
+```
+
+| Syntax | Meaning |
+|--------|---------|
+| `word` | Matches as a word prefix (`auth` finds `authorizer`), ignoring case and accents. Words of 5+ characters also match one typo (`authroizer`), ranked below exact matches. |
+| `"two words"` | Exact phrase. |
+| `type:cw` | Entry type; repeat for "any of". Same as `--type cw`. |
+| `tag:prod` / `-tag:stage` | Has / lacks a tag; several `tag:` must all be present. Same as `--tag`, `--not-tag`. |
+| `var:region` | Uses the variable `region`. |
+| `repo:acme/api` | A `code` entry in that repo. |
+| `in:title`, `in:payload`, `in:notes` | Restrict the free text to one field. |
+
+Results are ordered by relevance (title, then tags, ID, variables and type-specific fields, payload,
+notes), with entries you use often and recently ranked a little higher; an exact title match always
+comes first. `--limit N` caps the results (default 20, `0` for all). Exit codes: `0` results, `1`
+none (`kb: no matches` on stderr), `2` error. Entries with lint errors are left out, and each search
+says how many (`run kb lint`).
+
+The index lives in `.kb/index.db` and is brought up to date on every search: edit, rename or delete
+a file and the next search sees it, with no command to run. It is disposable: delete `.kb/` any time
+and it is rebuilt (you only lose usage counts in `.kb/state.json`). `kb index status` shows what is
+indexed, and `kb reindex` rebuilds it from scratch. Both are git-ignored through `.kb/.gitignore`,
+which kb creates whenever it creates `.kb/`.
+
 ## JSON output
 
-Both commands take `--json` and print a single JSON document, so kb composes with `jq`, `fzf` and
+Every command takes `--json` and prints a single JSON document, so kb composes with `jq`, `fzf` and
 scripts:
 
 ```sh
 kb lint --json | jq -r '.findings[] | select(.severity == "error") | "\(.path):\(.line) \(.code)"'
 kb lint --json | jq '.summary'
 kb init ~/kb --json | jq '.created'
+kb search auth --json | jq -r '.results[] | "\(.id)\t\(.title)"'
 ```
 
 The formats are defined in
 [`lint-report.schema.json`](specs/001-entry-format/contracts/lint-report.schema.json) and
-[`init-report.schema.json`](specs/001-entry-format/contracts/init-report.schema.json). On a usage or
+[`init-report.schema.json`](specs/001-entry-format/contracts/init-report.schema.json), and for
+search by
+[`search-report.schema.json`](specs/002-index-search/contracts/search-report.schema.json) and
+[`index-status.schema.json`](specs/002-index-search/contracts/index-status.schema.json). On a usage or
 I/O error (exit code `2`), `--json` prints `{"error": {"kind": "...", "message": "..."}}`.
 
 kb never changes an entry while reading it: parsing then writing an unmodified file reproduces it

@@ -1,0 +1,49 @@
+# query	expected_first	must_be_in_top3	story
+5xx auth	sumo/5xx-by-authorizer	sumo/5xx-by-authorizer	us1
+5xx host	sumo/5xx-by-host	sumo/5xx-by-host	us1
+slow requests	sumo/slow-requests	sumo/slow-requests	us1
+login failures	sumo/login-failures	sumo/login-failures	us1
+lambda errors	cw/lambda-errors	cw/lambda-errors	us1
+active connections	sql/active-connections	sql/active-connections	us1
+kubectl	cmd/kubectl-pods	cmd/kubectl-pods	us1
+pods logs	cmd/kubectl-pods	cmd/kubectl-pods	us1
+postmortem	prompt/postmortem-template	prompt/postmortem-template	us1
+runbook	link/payments-runbook	link/payments-runbook,link/oncall-handbook	us1
+deploy	cmd/deploy-service	cmd/deploy-service	us1
+restart	cmd/restart-worker	cmd/restart-worker	us1
+payments	link/payments-runbook	link/payments-runbook	us1
+grafana	link/grafana-dashboards	link/grafana-dashboards	us1
+verify token	code/auth-middleware	code/auth-middleware	us1
+handle request	code/request-handler	code/request-handler	us1
+backoff	code/retry-policy	code/retry-policy	us1
+orders status	sql/orders-by-status	sql/orders-by-status	us1
+pg_stat_activity	sql/active-connections	sql/active-connections	us1
+Cache	prompt/cache	prompt/cache,prompt/cache-warmup	us1
+cache warmup	prompt/cache-warmup	prompt/cache-warmup	us1
+incident timeline	prompt/summarize-incident	prompt/summarize-incident	us1
+network	cmd/network-config	cmd/network-config,sql/configuracion-red	us1
+gateway	cw/api-gateway-5xx	cw/api-gateway-5xx,prompt/postmortem-template	us1
+lambda	cw/lambda-errors	cw/lambda-errors,sumo/5xx-by-authorizer	us1
+redis	cmd/cache-role-flush	cmd/cache-role-flush	us1
+systemctl	cmd/restart-worker	cmd/restart-worker	us1
+authorizer	cw/authorizer-latency	cw/authorizer-latency,sumo/5xx-by-authorizer	us1
+latency type:cw tag:prod	cw/latency-prod	cw/latency-prod,cw/authorizer-latency	us3
+latency tag:stage	cw/latency-stage	cw/latency-stage	us3
+tag:prod tag:auth	cw/authorizer-latency	cw/authorizer-latency,sumo/login-failures	us3
+latency -tag:stage	cw/latency-prod	cw/latency-prod,cw/authorizer-latency	us3
+"role cache"	prompt/role-cache-notes	prompt/role-cache-notes	us3
+var:region	cmd/deploy-service	cmd/deploy-service,cmd/kubectl-pods	us3
+repo:acme/api	code/request-handler	code/request-handler,code/retry-policy	us3
+in:title cache	prompt/cache	prompt/cache	us3
+type:link runbook	link/payments-runbook	link/payments-runbook	us3
+authroizer	cw/authorizer-latency	cw/authorizer-latency,sumo/5xx-by-authorizer	us4
+authori	cw/authorizer-latency	cw/authorizer-latency,sumo/5xx-by-authorizer	us4
+configuracion	sql/configuracion-red	sql/configuracion-red	us4
+CONFIGURACIÓN	sql/configuracion-red	sql/configuracion-red	us4
+latncy tag:stage	cw/latency-stage	cw/latency-stage	us4
+postmortm	prompt/postmortem-template	prompt/postmortem-template	us4
+summarise	prompt/summarize-incident	prompt/summarize-incident	us4
+kubectll	cmd/kubectl-pods	cmd/kubectl-pods	us4
+dashbaords	link/grafana-dashboards	link/grafana-dashboards	us4
+connections activ	sql/active-connections	sql/active-connections	us4
+retri	code/retry-policy	code/retry-policy	us4
