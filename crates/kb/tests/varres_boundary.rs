@@ -29,6 +29,14 @@ const ALLOWED: &[(&str, &str)] = &[
         "draws a variable marker in the preview",
     ),
     ("kb/src/tui/preview.rs", "marks variables in the preview"),
+    (
+        "kb-core/src/author/draft.rs",
+        "lists the references of a new entry's body to declare them, and escapes one as a literal; never substitutes a value",
+    ),
+    (
+        "kb-core/src/author/suggest.rs",
+        "turns a literal value into a reference (the opposite of resolving) and skips existing references",
+    ),
 ];
 
 const NEEDLES: &[&str] = &[

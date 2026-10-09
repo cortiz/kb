@@ -6,7 +6,9 @@ use std::fs;
 
 use serde_json::Value;
 use support::pty::{ENTER, Session, Spec, kb_home};
-use support::{fake_clipboard, fixtures, kb, kb_without_terminal, path_with, search_kb};
+use support::{
+    fake_clipboard, fake_paste, fixtures, kb, kb_without_terminal, path_with, search_kb,
+};
 
 fn text(out: &[u8]) -> String {
     String::from_utf8(out.to_vec()).unwrap()
@@ -167,6 +169,87 @@ fn config_problems_show_up_as_a_warning_with_the_lines() {
     assert!(
         report.contains("config.toml:3:") && report.contains("config.toml:6:"),
         "{report}"
+    );
+}
+
+// ---- clipboard-read ----
+
+fn read_check(out: &std::process::Output) -> Value {
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    doc["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "clipboard-read")
+        .unwrap_or_else(|| panic!("no clipboard-read check in {doc}"))
+        .clone()
+}
+
+#[test]
+fn the_read_check_passes_when_the_read_tool_is_installed_and_never_reads() {
+    let (d, root) = search_kb();
+    let (tool, dir, log, env) = fake_paste(d.path(), "secret clipboard text");
+    let mut cmd = kb();
+    cmd.arg("--root")
+        .arg(&root)
+        .args(["doctor", "--json"])
+        .env("PATH", path_with(&dir));
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().unwrap();
+    let check = read_check(&out);
+    assert_eq!(check["status"], "pass", "{check}");
+    assert_eq!(check["summary"], format!("reads with {tool}"));
+    assert!(!log.exists(), "doctor must not read the clipboard");
+    assert!(!text(&out.stdout).contains("secret clipboard text"));
+}
+
+#[test]
+fn the_read_check_warns_with_a_hint_when_nothing_is_installed() {
+    let (d, root) = search_kb();
+    let empty = d.path().join("empty-bin");
+    fs::create_dir_all(&empty).unwrap();
+    let out = kb()
+        .arg("--root")
+        .arg(&root)
+        .args(["doctor", "--json"])
+        .env("PATH", &empty)
+        .env("WAYLAND_DISPLAY", "wayland-test")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "warnings alone exit 0");
+    let check = read_check(&out);
+    assert_eq!(check["status"], "warn", "{check}");
+    assert!(
+        check["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("cannot read the clipboard")
+    );
+    assert!(!check["hint"].as_str().unwrap().is_empty());
+}
+
+#[test]
+fn the_read_check_says_ssh_cannot_read_the_clipboard() {
+    let (d, root) = search_kb();
+    let (_tool, dir, _log, env) = fake_paste(d.path(), "x");
+    let mut cmd = kb();
+    cmd.arg("--root")
+        .arg(&root)
+        .args(["doctor", "--json"])
+        .env("PATH", path_with(&dir))
+        .env("SSH_TTY", "/dev/pts/9");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let check = read_check(&cmd.output().unwrap());
+    assert_eq!(check["status"], "warn");
+    assert!(
+        check["hint"]
+            .as_str()
+            .unwrap()
+            .contains("stdin or an empty form")
     );
 }
 

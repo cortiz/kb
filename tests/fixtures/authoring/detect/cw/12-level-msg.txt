@@ -1,0 +1,3 @@
+parse @message "[*] *" as level, msg
+| filter level = "ERROR"
+| stats count() by msg

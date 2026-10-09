@@ -1,0 +1,4 @@
+env|enum|prod|dev,qa,stage,prod
+minutes|number|1|
+minutes_2|number|30|
+region|text|us-west-2|

@@ -99,11 +99,27 @@ pub fn kb() -> Command {
     for setting in kb_core::config::SETTINGS {
         cmd.env_remove(setting.env);
     }
+    // the machine the tests run on (an SSH session, a Wayland desktop) must not change what they see
+    for var in CLEARED {
+        cmd.env_remove(var);
+    }
     cmd.env("HOME", NOWHERE)
         .env("XDG_CONFIG_HOME", format!("{NOWHERE}/config"))
         .env("PATH", path_with(process_guards()));
     cmd
 }
+
+/// Variables that describe the real session; tests set the ones they mean.
+pub const CLEARED: &[&str] = &[
+    "SSH_CONNECTION",
+    "SSH_TTY",
+    "SSH_CLIENT",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "TMUX",
+    "STY",
+    "KB_TEST_NOW",
+];
 
 /// Runs `kb` with no controlling terminal and no stdin (a new session, so `/dev/tty` cannot be
 /// opened). `kb copy` and `kb show` list the candidates instead of opening the UI there.
@@ -118,6 +134,11 @@ pub fn kb_without_terminal(args: &[&str], env: &[(&str, &str)]) -> std::process:
     ])
     .args(args)
     .env_remove("NO_COLOR")
+    .env_remove("SSH_CONNECTION")
+    .env_remove("SSH_TTY")
+    .env_remove("SSH_CLIENT")
+    .env_remove("WAYLAND_DISPLAY")
+    .env_remove("DISPLAY")
     .env("HOME", NOWHERE)
     .env("XDG_CONFIG_HOME", format!("{NOWHERE}/config"))
     .env("PATH", path_with(process_guards()))
@@ -168,6 +189,43 @@ pub fn fake_clipboard(
     .unwrap();
     fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
     (name, dir, copied, env)
+}
+
+/// A directory with a fake clipboard *read* program for this host (`pbpaste` on macOS, `wl-paste`
+/// and `WAYLAND_DISPLAY` on Linux) that prints `text` and appends a line to `reads.log` next to
+/// it each time it runs. Returns `(program name, directory, log file, extra environment)`.
+pub fn fake_paste(
+    base: &Path,
+    text: &str,
+) -> (
+    &'static str,
+    PathBuf,
+    PathBuf,
+    Vec<(&'static str, &'static str)>,
+) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = base.join("fake-paste-bin");
+    fs::create_dir_all(&dir).unwrap();
+    let log = base.join("reads.log");
+    let (name, env) = if cfg!(target_os = "macos") {
+        ("pbpaste", vec![])
+    } else {
+        ("wl-paste", vec![("WAYLAND_DISPLAY", "wayland-test")])
+    };
+    let content = dir.join("content");
+    fs::write(&content, text).unwrap();
+    let script = dir.join(name);
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\necho read >> '{}'\ncat '{}'\n",
+            log.display(),
+            content.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    (name, dir, log, env)
 }
 
 pub fn kb_in(root: &Path) -> Command {

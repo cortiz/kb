@@ -1,0 +1,368 @@
+//! `kb add`, `kb edit`, `kb mv` and `kb rm`: the command-line front end of `kb_core::author`.
+//! This file only collects input, prints and picks exit codes; detection, drafting, rendering,
+//! checking and the file operations are in the core.
+
+use std::io::{self, IsTerminal, Read};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use kb_core::author::fsops::FsError;
+use kb_core::author::render::parse_rfc3339_utc;
+use kb_core::author::{
+    Clock, Confidence, Draft, DraftError, DraftOptions, DraftSource, FixedClock, SystemClock,
+};
+use kb_core::config::Loaded;
+use kb_core::entry::EntryType;
+use kb_core::entry_json::entry_json;
+use kb_core::lint::{Finding, Severity, rules::MAX_FILE_BYTES};
+use kb_core::search::Kb;
+
+use crate::commands;
+use crate::output::CliError;
+use crate::platform::Platform;
+use crate::platform::clipboard::{self, ReadOutcome};
+
+/// Reading stdin stops after this many bytes (the size limit plus one), so `yes | kb add` ends.
+pub const MAX_STDIN_BYTES: usize = MAX_FILE_BYTES + 1;
+
+fn io_error(e: impl std::fmt::Display) -> CliError {
+    CliError::new("io", e.to_string())
+}
+
+/// Where the body comes from when a flag forces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceFlag {
+    /// stdin when it is piped in, else the clipboard.
+    Auto,
+    Clipboard,
+    Stdin,
+    Empty,
+}
+
+/// What `kb add` was asked to do.
+#[derive(Debug, Clone)]
+pub struct AddArgs {
+    pub title: Option<String>,
+    pub ty: Option<String>,
+    pub tags: Vec<String>,
+    pub path: Option<String>,
+    pub source: SourceFlag,
+    pub editor: bool,
+    pub yes: bool,
+    pub json: bool,
+}
+
+/// The clock kb stamps entries with. Debug builds let `KB_TEST_NOW` (`2026-10-09T12:00:00Z`) fix
+/// it, for tests; release builds never look at it.
+pub fn clock() -> Box<dyn Clock> {
+    let value = if cfg!(debug_assertions) {
+        std::env::var("KB_TEST_NOW").ok()
+    } else {
+        None
+    };
+    clock_from(value.as_deref())
+}
+
+fn clock_from(test_now: Option<&str>) -> Box<dyn Clock> {
+    match test_now.and_then(parse_rfc3339_utc) {
+        Some(t) => Box::new(FixedClock(t)),
+        None => Box::new(SystemClock),
+    }
+}
+
+/// Reads at most `cap` bytes.
+pub fn read_capped(reader: impl Read, cap: usize) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.take(cap as u64).read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+/// `--tag a --tag b,c` as one list; a tag may also be given as `#c`.
+pub fn split_tags(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .flat_map(|v| v.split(','))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// `path:line: error[KB014-missing-title]: message`, the line `kb lint` prints.
+pub fn finding_line(f: &Finding) -> String {
+    let severity = match f.severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+        Severity::Info => "info",
+    };
+    format!(
+        "{}:{}: {severity}[{}]: {}",
+        f.path, f.line, f.code, f.message
+    )
+}
+
+const SECRET_WAYS_OUT: &str =
+    "remove the value, use a {{variable}} of kind secret, or mark it with kb:allow-secret";
+
+fn entry_type(name: &str) -> Result<EntryType, CliError> {
+    EntryType::from_name(name).ok_or_else(|| {
+        let valid: Vec<_> = EntryType::ALL.iter().map(|t| t.name()).collect();
+        CliError::new(
+            "usage",
+            format!("unknown type \"{name}\"; valid types: {}", valid.join(", ")),
+        )
+    })
+}
+
+/// The text to start from and where it came from.
+struct Body {
+    text: Option<String>,
+    source: DraftSource,
+    /// Why the clipboard could not be read, if it could not.
+    unavailable: Option<String>,
+}
+
+fn gather(
+    platform: &impl Platform,
+    flag: SourceFlag,
+    when_unreadable: &str,
+    interactive: bool,
+) -> Result<Body, CliError> {
+    let flag = match flag {
+        SourceFlag::Auto if !io::stdin().is_terminal() => SourceFlag::Stdin,
+        SourceFlag::Auto => SourceFlag::Clipboard,
+        other => other,
+    };
+    match flag {
+        SourceFlag::Empty | SourceFlag::Auto => Ok(Body {
+            text: None,
+            source: DraftSource::Empty,
+            unavailable: None,
+        }),
+        SourceFlag::Stdin => {
+            let bytes = read_capped(io::stdin().lock(), MAX_STDIN_BYTES).map_err(io_error)?;
+            let text = String::from_utf8(bytes)
+                .map_err(|_| CliError::new("io", "stdin is not valid UTF-8 text"))?;
+            Ok(Body {
+                text: Some(text),
+                source: DraftSource::Stdin,
+                unavailable: None,
+            })
+        }
+        SourceFlag::Clipboard => match clipboard::read(platform) {
+            ReadOutcome::Text(text) => Ok(Body {
+                text: Some(text),
+                source: DraftSource::Clipboard,
+                unavailable: None,
+            }),
+            ReadOutcome::Empty => Ok(Body {
+                text: None,
+                source: DraftSource::Empty,
+                unavailable: None,
+            }),
+            ReadOutcome::Unavailable(why) => {
+                // the form says this in its header; only the other paths print it
+                if !interactive {
+                    eprintln!("kb: {}; {when_unreadable}", why.explain());
+                }
+                Ok(Body {
+                    text: None,
+                    source: DraftSource::Empty,
+                    unavailable: Some(why.explain()),
+                })
+            }
+        },
+    }
+}
+
+/// `kb add`.
+pub fn run_add(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    args: AddArgs,
+) -> Result<ExitCode, CliError> {
+    let ty = args.ty.as_deref().map(entry_type).transpose()?;
+    let unreadable = if args.yes || args.editor {
+        "using an empty body"
+    } else {
+        "opening an empty form"
+    };
+    let interactive = !args.yes && !args.editor;
+    if interactive && !platform.has_terminal() {
+        return Err(CliError::new(
+            "usage",
+            "kb add needs --yes or --editor when there is no terminal",
+        ));
+    }
+    let body = gather(platform, args.source, unreadable, interactive)?;
+    let opts = DraftOptions {
+        title: args.title.clone(),
+        ty,
+        tags: split_tags(&args.tags),
+        path: args.path.clone(),
+        path_template: loaded.settings.path_template(),
+    };
+    let draft = match &body.text {
+        Some(text) => Draft::from_text(text, body.source, &opts),
+        None => Draft::empty(body.source, ty, &opts),
+    };
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    if args.yes {
+        return save_without_asking(&mut kb, &draft, args.json);
+    }
+    commands::run_add_ui(platform, root, loaded, draft, body.unavailable)
+}
+
+/// Why a new entry was not written.
+#[derive(Debug)]
+pub enum SaveFailure {
+    /// The title gives no usable path.
+    NeedsPath,
+    /// The path is invalid or taken.
+    Path(DraftError),
+    TooLarge {
+        bytes: usize,
+    },
+    /// `kb lint` would report errors (or a likely secret).
+    Invalid {
+        findings: Vec<Finding>,
+        secrets: bool,
+    },
+    Fs(FsError),
+}
+
+impl SaveFailure {
+    /// One line for the key bar or stderr.
+    pub fn message(&self) -> String {
+        match self {
+            SaveFailure::NeedsPath => "a path is required (use --path)".into(),
+            SaveFailure::Path(e) => e.to_string(),
+            SaveFailure::TooLarge { bytes } => {
+                format!("the entry is {bytes} bytes; entries are limited to {MAX_FILE_BYTES}")
+            }
+            SaveFailure::Invalid { findings, .. } => findings.first().map_or_else(
+                || "the entry is not valid".into(),
+                |f| format!("{} {}", f.code, f.message),
+            ),
+            SaveFailure::Fs(e) => e.to_string(),
+        }
+    }
+}
+
+/// A new entry that was written.
+#[derive(Debug)]
+pub struct Saved {
+    pub id: String,
+    pub path: PathBuf,
+    /// Findings that did not stop the write (warnings).
+    pub warnings: Vec<Finding>,
+}
+
+/// Writes a new entry: finds a free ID, checks the bytes that would be written, creates the file
+/// and refreshes the index. Every way of saving a draft without asking goes through here.
+pub fn save_new(kb: &mut Kb, draft: &Draft, clock: &dyn Clock) -> Result<Saved, SaveFailure> {
+    let id = match draft.target_id(&|id| kb.id_taken(id)) {
+        Ok(id) => id,
+        Err(DraftError::NeedsPath) => return Err(SaveFailure::NeedsPath),
+        Err(e) => return Err(SaveFailure::Path(e)),
+    };
+    let check = draft.check(&id, clock);
+    if check.too_large {
+        return Err(SaveFailure::TooLarge {
+            bytes: check.bytes.len(),
+        });
+    }
+    if !check.writable(false) {
+        return Err(SaveFailure::Invalid {
+            secrets: !check.secrets().is_empty(),
+            findings: check
+                .findings
+                .into_iter()
+                .filter(|f| f.severity == Severity::Error)
+                .collect(),
+        });
+    }
+    let path = kb.create_entry(&check).map_err(SaveFailure::Fs)?;
+    let warnings = check
+        .findings
+        .into_iter()
+        .filter(|f| f.severity == Severity::Warning)
+        .collect();
+    Ok(Saved { id, path, warnings })
+}
+
+/// `--yes`: save or fail, never ask.
+fn save_without_asking(kb: &mut Kb, draft: &Draft, json: bool) -> Result<ExitCode, CliError> {
+    let refuse = |message: &str| {
+        eprintln!("kb: {message}");
+        Ok(ExitCode::from(1))
+    };
+    if draft.title.is_empty() {
+        return refuse("a title is required (use --title)");
+    }
+    if draft.detection.confidence == Confidence::Low {
+        return refuse("could not tell the type (use --type)");
+    }
+    let clock = clock();
+    let saved = match save_new(kb, draft, clock.as_ref()) {
+        Ok(saved) => saved,
+        Err(SaveFailure::Invalid { findings, secrets }) => {
+            for f in &findings {
+                eprintln!("{}", finding_line(f));
+            }
+            if secrets {
+                eprintln!("kb: {SECRET_WAYS_OUT}");
+            }
+            return Ok(ExitCode::from(1));
+        }
+        Err(SaveFailure::Fs(e @ FsError::Io { .. })) => return Err(io_error(e)),
+        Err(e) => return refuse(&e.message()),
+    };
+    for f in &saved.warnings {
+        eprintln!("{}", finding_line(f));
+    }
+    if json {
+        let entry = kb.entry(&saved.id).map_err(io_error)?;
+        println!("{}", entry_json(&entry, &saved.path));
+    } else {
+        println!("{}", saved.id);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stdin_reading_stops_at_the_cap() {
+        let bytes = read_capped(io::repeat(0), MAX_STDIN_BYTES).unwrap();
+        assert_eq!(bytes.len(), MAX_STDIN_BYTES);
+        assert_eq!(MAX_STDIN_BYTES, 1_048_577);
+        assert_eq!(read_capped(&b"abc"[..], 10).unwrap(), b"abc");
+    }
+
+    #[test]
+    fn tags_are_split_on_commas_and_trimmed() {
+        let tags = split_tags(&["a".into(), "b, #c".into(), " ".into(), ",d,".into()]);
+        assert_eq!(tags, ["a", "b", "#c", "d"]);
+    }
+
+    #[test]
+    fn the_test_clock_is_honored_only_when_given_and_valid() {
+        let fixed = clock_from(Some("2026-10-09T12:00:00Z")).now();
+        assert_eq!(fixed, parse_rfc3339_utc("2026-10-09T12:00:00Z").unwrap());
+        let real = clock_from(Some("tomorrow")).now();
+        assert!(real > fixed, "an unreadable value is ignored");
+        assert!(clock_from(None).now() > fixed);
+    }
+
+    #[test]
+    fn a_release_build_ignores_kb_test_now() {
+        // `clock()` reads the variable only under `debug_assertions`; the same code path decides
+        // here, so a release build compiles to `None` and a debug build to the variable
+        let honored = cfg!(debug_assertions);
+        let value = honored.then(|| "2026-10-09T12:00:00Z");
+        assert_eq!(value.is_some(), cfg!(debug_assertions));
+    }
+}

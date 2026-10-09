@@ -166,7 +166,7 @@ fn classify(lang: Lang, text: &str) -> Vec<Vec<Span>> {
     out
 }
 
-fn plain(text: &str) -> Vec<Vec<Span>> {
+pub fn plain(text: &str) -> Vec<Vec<Span>> {
     text.split_inclusive('\n')
         .map(|l| vec![Span::new(l.trim_end_matches('\n'), Class::Plain)])
         .collect()

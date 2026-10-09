@@ -27,6 +27,8 @@ pub enum Request {
         modified: Option<i64>,
         use_count: u64,
     },
+    /// The tags in use, with how many entries have each (for the add form).
+    Tags,
     Shutdown,
 }
 
@@ -34,6 +36,7 @@ pub enum Reply {
     Refreshed(RefreshInfo),
     Results(u64, Page),
     Preview(u64, Box<PreviewModel>),
+    Tags(Vec<(String, u32)>),
     Failed(String),
 }
 
@@ -76,6 +79,7 @@ pub struct Batch {
     pub refresh: bool,
     pub search: Option<(u64, String, usize)>,
     pub preview: Option<(u64, String, Option<i64>, u64)>,
+    pub tags: bool,
 }
 
 /// Keeps the newest search and the newest preview request, and one refresh.
@@ -85,6 +89,7 @@ pub fn coalesce(requests: Vec<Request>) -> Batch {
         match r {
             Request::Shutdown => b.shutdown = true,
             Request::Refresh => b.refresh = true,
+            Request::Tags => b.tags = true,
             Request::Search {
                 generation,
                 query,
@@ -186,6 +191,9 @@ pub fn run(
             if replies.send(reply).is_err() {
                 return;
             }
+        }
+        if batch.tags && replies.send(Reply::Tags(kb.tag_counts())).is_err() {
+            return;
         }
         if highlight && !warmed && batch_had_results {
             warmed = true;

@@ -1,0 +1,5 @@
+select u.email, o.total
+from users u
+join orders o on o.user_id = u.id
+where o.total > 100
+order by o.total desc;

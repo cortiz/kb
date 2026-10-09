@@ -1,0 +1,5 @@
+# opts: title=5xx by authorizer; tags=lambda,auth
+_sourceCategory={{env}}/lambda/authorizer
+| where status >= 500
+| timeslice {{minutes}}m
+| count by _timeslice, errorCode

@@ -1,0 +1,1 @@
+_sourceCategory=app/api | json auto | where status = 500

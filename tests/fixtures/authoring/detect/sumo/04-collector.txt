@@ -1,0 +1,3 @@
+_collector=eks* "OOMKilled"
+| timeslice 5m
+| count by _timeslice

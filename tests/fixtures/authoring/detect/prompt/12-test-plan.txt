@@ -1,0 +1,2 @@
+Create a test plan for the feature described below. List the happy path first, then edge cases, then failure modes.
+For each case say what to check and what the expected result is.

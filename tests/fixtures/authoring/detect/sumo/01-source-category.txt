@@ -1,0 +1,4 @@
+_sourceCategory=prod/lambda/authorizer
+| where status >= 500
+| timeslice 1m
+| count by _timeslice, errorCode

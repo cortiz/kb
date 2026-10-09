@@ -1,0 +1,3 @@
+# opts: title=Incident summary: five bullets; type=prompt
+You are a senior site reliability engineer. Summarize the following incident timeline in five bullet points.
+Focus on customer impact, the root cause, and what we changed.

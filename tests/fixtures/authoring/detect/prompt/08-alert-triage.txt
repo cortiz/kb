@@ -1,0 +1,3 @@
+Given the alert text and the last hour of metrics, decide whether this page needs a human right now.
+Answer with PAGE or WAIT, then give two sentences of reasoning.
+If the data is missing, say what you need.

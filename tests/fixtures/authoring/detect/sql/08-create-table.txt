@@ -1,0 +1,5 @@
+CREATE TABLE audit_log (
+  id bigserial PRIMARY KEY,
+  actor text NOT NULL,
+  at timestamptz DEFAULT now()
+);

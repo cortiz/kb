@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 const TOOL_LITERALS: &[&str] = &[
     "\"pbcopy\"",
     "\"pbpaste\"",
+    "\"wl-paste\"",
     "\"wl-copy\"",
     "\"xclip\"",
     "\"xsel\"",
@@ -31,7 +32,14 @@ const ENV_LITERALS: &[&str] = &[
     "TERM_PROGRAM",
 ];
 
-const OTHER: &[&str] = &["Command::new(\"open\")", "cfg(target_os"];
+/// Starting a process and making temp files are the platform layer's job (spec 007, FR-001,
+/// "Temporary files"): the editor, `git` and the clipboard read tools all start there.
+const OTHER: &[&str] = &[
+    "Command::new(\"open\")",
+    "cfg(target_os",
+    "Command::new(",
+    "temp_dir()",
+];
 
 #[derive(Debug, PartialEq, Eq)]
 struct Violation {
@@ -173,7 +181,12 @@ fn scan(workspace: &Path) -> Vec<Violation> {
     }
     files.sort();
     let mut found = Vec::new();
-    for file in files.into_iter().filter(|f| !f.starts_with(&allowed)) {
+    // a `tests.rs` next to its module is test code too
+    let is_test_file = |f: &PathBuf| f.file_name().is_some_and(|n| n == "tests.rs");
+    for file in files
+        .into_iter()
+        .filter(|f| !f.starts_with(&allowed) && !is_test_file(f))
+    {
         let Ok(text) = fs::read_to_string(&file) else {
             continue;
         };
@@ -220,7 +233,7 @@ fn the_checker_finds_violations_and_ignores_comments_and_the_platform_layer() {
     };
     write(
         "crates/a/src/bad.rs",
-        "fn f() {\n    let _ = std::process::Command::new(\"xclip\");\n    let _ = std::env::var(\"SSH_TTY\");\n    #[cfg(target_os = \"linux\")]\n    fn g() {}\n    let _ = Command::new(\"open\");\n}\n",
+        "fn f() {\n    let _ = std::process::Command::new(\"xclip\");\n    let _ = std::env::var(\"SSH_TTY\");\n    #[cfg(target_os = \"linux\")]\n    fn g() {}\n    let _ = Command::new(\"open\");\n    let _ = std::env::temp_dir();\n}\n",
     );
     write(
         "crates/a/src/fine.rs",
@@ -243,6 +256,7 @@ fn the_checker_finds_violations_and_ignores_comments_and_the_platform_layer() {
         summary,
         [
             ("crates/a/src/bad.rs".to_string(), 2, "\"xclip\""),
+            ("crates/a/src/bad.rs".to_string(), 2, "Command::new("),
             ("crates/a/src/bad.rs".to_string(), 3, "SSH_TTY"),
             ("crates/a/src/bad.rs".to_string(), 4, "cfg(target_os"),
             (
@@ -250,6 +264,8 @@ fn the_checker_finds_violations_and_ignores_comments_and_the_platform_layer() {
                 6,
                 "Command::new(\"open\")"
             ),
+            ("crates/a/src/bad.rs".to_string(), 6, "Command::new("),
+            ("crates/a/src/bad.rs".to_string(), 7, "temp_dir()"),
             ("crates/kb/src/other.rs".to_string(), 1, "\"TMUX\""),
         ]
     );

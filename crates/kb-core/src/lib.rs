@@ -1,5 +1,6 @@
 //! Core library for kb: the entry file format, its lossless parser, validation, and search.
 
+pub mod author;
 pub mod body;
 pub mod config;
 pub mod edit;

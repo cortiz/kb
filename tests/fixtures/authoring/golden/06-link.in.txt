@@ -1,0 +1,2 @@
+# opts: title=Auth service runbook; tags=auth,runbook
+https://example.com/runbooks/auth

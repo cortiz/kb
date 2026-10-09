@@ -1,0 +1,4 @@
+_sourceCategory=prod/db
+| timeslice 1h
+| count by _timeslice
+| sort by _timeslice

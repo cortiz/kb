@@ -65,3 +65,15 @@ Not KBs: single config files for the `kb-core` config tests and the `kb config` 
   (`clipboard.method = "xclipp"`): loading must give exactly two warnings with those lines.
 - `syntax-error.toml`: not valid TOML; loading gives one warning and all defaults.
 - `legacy/config.yml`: the pre-M4 YAML config (`root`, `theme`, `mouse`), read only as a fallback.
+
+## `authoring/`: the M6 authoring fixtures
+
+- `detect/<type>/NN-name.txt`: pasted snippets for `kb_core::author::detect` (at least 10 per type,
+  over 100 in all). The directory name is the expected type. `detect/low/<type>/` holds deliberately
+  ambiguous snippets: they must still be detected as `<type>`, but only with `Low` confidence. The
+  corpus test needs 95% of all snippets right and no `High` result wrong. **A change to the detection
+  rules comes with a corpus case** that shows why.
+- `golden/NN-<type>.in.txt` and `NN-<type>.md`: the input (with the options on a first-line
+  `# opts: title=…; tags=a,b; type=…; path=…; notes=…` header, not part of the body) and the file that
+  `Draft::render` must produce byte for byte at the fixed time `2026-10-09T12:00:00Z`.
+- `suggest/`: variable suggestion cases, see its own README.

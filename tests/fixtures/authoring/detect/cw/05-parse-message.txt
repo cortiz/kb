@@ -1,0 +1,2 @@
+parse @message "user=* action=*" as user, action
+| stats count() by user

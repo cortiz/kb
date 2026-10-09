@@ -1,0 +1,4 @@
+fields @message
+| filter @message like "timeout"
+| display @timestamp, @message
+| limit 50

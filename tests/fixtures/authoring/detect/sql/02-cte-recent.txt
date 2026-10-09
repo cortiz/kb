@@ -1,0 +1,4 @@
+WITH recent AS (
+  SELECT * FROM orders WHERE created_at > now() - interval '1 day'
+)
+SELECT customer_id, count(*) FROM recent GROUP BY customer_id;

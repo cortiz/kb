@@ -647,6 +647,9 @@ pub fn run_ui(
             && !matches!(post, PostPick::Use(o) if !o.remember),
         // Timing tests set this so the background refresh does not add noise.
         refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
+        path_template: loaded.settings.path_template(),
+        highlight: true,
+        start_add: None,
     };
     let outcome = tui::run(platform, root, query, options).map_err(|e| CliError::new("io", e));
     if report_config {
@@ -668,7 +671,43 @@ pub fn run_ui(
             let kb = Kb::open(root).map_err(io_error)?;
             deliver_values(platform, &kb, &loaded.settings, &id, values, &opts)
         }
+        Outcome::Added { id } => {
+            println!("{id}");
+            Ok(ExitCode::SUCCESS)
+        }
         Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+    }
+}
+
+/// `kb add` without `--yes`: the UI opens on the add form for `draft`. The new ID is printed after
+/// the terminal is restored; cancelling prints nothing and exits 130.
+pub fn run_add_ui(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    draft: kb_core::author::Draft,
+    unavailable: Option<String>,
+) -> Result<ExitCode, CliError> {
+    let options = Options {
+        mouse: loaded.settings.tui_mouse(),
+        theme: loaded.settings.theme(),
+        clipboard: ClipboardSettings::from_settings(&loaded.settings),
+        editor: loaded.settings.editor().map(str::to_string),
+        config_problems: loaded.warnings.len(),
+        fill_variables: false,
+        remember_vars: false,
+        refresh_timer: false,
+        path_template: loaded.settings.path_template(),
+        highlight: true,
+        start_add: Some(Box::new(crate::tui::app::StartAdd { draft, unavailable })),
+    };
+    match tui::run(platform, root, "", options).map_err(|e| CliError::new("io", e))? {
+        Outcome::Added { id } => {
+            println!("{id}");
+            Ok(ExitCode::SUCCESS)
+        }
+        Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+        Outcome::Picked { .. } | Outcome::Resolved { .. } => Ok(ExitCode::from(130)),
     }
 }
 

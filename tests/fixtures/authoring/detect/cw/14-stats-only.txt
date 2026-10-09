@@ -1,0 +1,2 @@
+stats count() by bin(1m)
+| sort bin(1m) desc

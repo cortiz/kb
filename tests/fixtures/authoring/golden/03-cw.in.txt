@@ -1,0 +1,4 @@
+# opts: title=Authorizer p99 latency
+fields @timestamp, @message
+| filter @message like /{{fn}}/
+| stats pct(@duration, 99) by bin({{minutes}}m)

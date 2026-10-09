@@ -1,0 +1,3 @@
+_view=audit_logs
+| parse "user=* " as user
+| count by user

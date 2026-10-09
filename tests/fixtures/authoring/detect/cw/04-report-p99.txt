@@ -1,0 +1,2 @@
+filter @type = "REPORT"
+| stats pct(@duration, 99) as p99 by bin(5m)

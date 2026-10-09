@@ -1,0 +1,4 @@
+fields @timestamp, @message
+| filter @message like /5\d\d/
+| stats count() as errors by bin(5m)
+| sort errors desc

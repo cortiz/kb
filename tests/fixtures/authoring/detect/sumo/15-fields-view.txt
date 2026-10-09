@@ -1,0 +1,2 @@
+_view=security_events action=denied
+| count by user, src_ip

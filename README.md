@@ -106,6 +106,7 @@ kb config list                      # every setting, its value and where the val
 |---------|--------|---------|
 | `root` | a path | `~/kb` |
 | `editor` | a command, arguments allowed | `$VISUAL`, then `$EDITOR`, then `vi` |
+| `path_template` | text with `{type}`, `{slug}` (required) and `{tag}` | `{type}/{slug}` |
 | `theme` | `auto`, `dark`, `light` | `auto` |
 | `tui.enter` | `copy`, `print` | `copy` |
 | `tui.mouse` | `true`, `false` | `false` |
@@ -416,6 +417,53 @@ for the terminal and has nowhere else to go).
 `kb show <id|words>` prints the entry as the preview shows it (colors only on a terminal);
 `--raw` prints only the payload, `--json` the entry as JSON, `--file` the path of its file, and
 `--no-color` turns colors off. It records no use.
+
+## Adding entries
+
+`kb add` writes a valid entry for you: it reads the text, guesses the type, finds the
+`{{variables}}`, suggests a title and a path, and checks the result with the same rules as
+`kb lint` before anything touches the disk.
+
+```sh
+history | tail -1 | kb add -t "Restart ECS service" --tag ecs --yes   # prints cmd/restart-ecs-service
+kb add --clipboard --yes -t "Authorizer p99" --tag lambda,cw          # from the clipboard
+kb add --empty --type prompt --path prompts/standup -t "Standup"      # no body, type and path chosen
+```
+
+| Flag | |
+|------|--|
+| `-t`, `--title` | The title. Without it kb uses a leading comment (`-- title`, `# title`, `// title`), a link's host and last path segment, or a code location. |
+| `--type` | `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link` or `code`. Beats detection. |
+| `--tag` | Repeatable or comma-separated. Lowercased; a leading `#` is dropped. |
+| `--path` | The new entry's ID. Folders are created. |
+| `--clipboard`, `--stdin`, `--empty` | Where the body comes from. At most one. With none, stdin is used when it is piped in, else the clipboard. |
+| `-y`, `--yes` | Never ask: save the entry or fail. |
+| `--json` | Print the new entry as `kb show --json` does. |
+
+The ID is `<type>/<slug of the title>`: lowercase ASCII, accents removed, words joined by `-`, at
+most 60 characters. If it is taken, `-2`, `-3`, … is added. `path_template` changes the shape, for
+example `{tag}/{slug}` (`{tag}` is the first tag, or the type when there are none); it must contain
+`{slug}`.
+
+**Detection** uses fixed local rules, in this order: a GitHub or GitLab file URL with a line
+anchor (`/blob/<ref>/<path>#L147`) is a `code` entry with its repo, ref, path and lines filled in;
+any other single URL is a `link`; Sumo Logic markers (`_sourceCategory`, `_index`, `_view`,
+`_collector`, or operators such as `| timeslice` and `| count by`) are `sumo`; CloudWatch Insights
+commands with `@` fields are `cw`; a leading `SELECT`, `WITH`, `INSERT`, `UPDATE`, `DELETE`,
+`EXPLAIN`, `CREATE` or `ALTER` is `sql`; a few lines that look like shell commands are `cmd` (a
+`$ ` or `% ` prompt marker on every line is removed); longer text is a `prompt`. A Markdown
+fence's language (`sql`, `bash`, `sh`, `zsh`, `shell`) decides first, and a whole-text fence is
+removed. When kb is not sure, `--yes` needs `--type` and the form puts the focus on the type.
+
+`--yes` exits `0` with only the ID on stdout, `1` when the entry would not be valid (no title, an
+unknown type, a taken path, lint errors, a likely secret, more than 1,048,576 bytes), `2` for a
+usage error. An entry with a likely secret is never written: remove the value, use a
+`{{variable}}` of kind `secret`, or mark the line with `kb:allow-secret`. Variable suggestions are
+never applied by `--yes`.
+
+Reading the clipboard uses `pbpaste` (macOS), `wl-paste` (Wayland), then `xclip -o` or `xsel -o`
+(X11), 2 seconds each. Over SSH it is not read at all (terminals do not give the clipboard back),
+and kb says so and starts with an empty body. `kb doctor` shows which program will be used.
 
 ## Checking your setup
 

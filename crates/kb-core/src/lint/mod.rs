@@ -307,6 +307,21 @@ pub(crate) fn check_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>) -> FileC
     }
 }
 
+/// The findings `kb lint` would report for one entry held in memory (a draft about to be
+/// written, or an edited file). Same checks as the index and `kb lint`: there is one definition of
+/// "has errors".
+pub fn check_text(id: &str, bytes: Vec<u8>) -> Vec<Finding> {
+    let rel_path = format!("{id}.md");
+    let file = crate::walk::WalkEntry {
+        id: id.to_string(),
+        abs_path: PathBuf::from(&rel_path),
+        rel_path,
+    };
+    let mut findings = check_file(&file, bytes).findings;
+    findings.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+    findings
+}
+
 fn lint_file(
     file: &crate::walk::WalkEntry,
     bytes: Vec<u8>,
@@ -652,5 +667,57 @@ mod tests {
                 ("b.md", 1, 1, RuleCode::UnknownType),
             ]
         );
+    }
+
+    const GOOD: &str = "---\nkb_format: 1\ntype: cmd\ntitle: Restart api\n---\n\n```sh\nkubectl rollout restart deploy/api\n```\n";
+
+    fn codes(findings: &[Finding]) -> Vec<RuleCode> {
+        findings.iter().map(|f| f.code).collect()
+    }
+
+    /// What `lint()` reports for the same bytes written to `<id>.md` in a temp KB.
+    fn via_files(id: &str, text: &str) -> Vec<Finding> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(format!("{id}.md"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        lint(dir.path(), &[]).unwrap().findings
+    }
+
+    #[test]
+    fn check_text_valid_entry_has_no_findings() {
+        assert!(check_text("cmd/restart-api", GOOD.as_bytes().to_vec()).is_empty());
+    }
+
+    #[test]
+    fn check_text_matches_lint_on_the_same_bytes() {
+        let aws = GOOD.replace(
+            "kubectl",
+            "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE; kubectl",
+        );
+        for text in [
+            GOOD.replace("title: Restart api\n", ""),
+            GOOD.replace("type: cmd", "type: nope"),
+            aws,
+        ] {
+            let expected = via_files("cmd/restart-api", &text);
+            let got = check_text("cmd/restart-api", text.clone().into_bytes());
+            assert!(!expected.is_empty());
+            assert_eq!(codes(&got), codes(&expected), "{text}");
+            assert_eq!(
+                got.iter().map(|f| f.line).collect::<Vec<_>>(),
+                expected.iter().map(|f| f.line).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn check_text_honors_allow_secret() {
+        let text = GOOD.replace(
+            "kubectl rollout restart deploy/api",
+            "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE # kb:allow-secret",
+        );
+        assert!(check_text("cmd/x", text.clone().into_bytes()).is_empty());
+        assert!(via_files("cmd/x", &text).is_empty());
     }
 }

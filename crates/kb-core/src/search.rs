@@ -198,7 +198,7 @@ pub struct Kb {
     held: Option<index::Index>,
 }
 
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && !id.starts_with('/')
         && !id.contains('\\')
@@ -460,6 +460,40 @@ impl Kb {
                 Err(Fail::Other(e)) => return Err(e),
             }
         }
+    }
+
+    /// Tags in use with how many entries have each, most used first, then by name. Reads the
+    /// index when one is held (after a search or refresh), else scans the files.
+    pub fn tag_counts(&self) -> Vec<(String, u32)> {
+        let from_index = self.held.as_ref().and_then(|index| {
+            let mut stmt = index
+                .conn
+                .prepare(
+                    "SELECT tag, count(*) FROM entry_tags GROUP BY tag ORDER BY count(*) DESC, tag",
+                )
+                .ok()?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, u32>(1)?)))
+                .ok()?;
+            Some(rows.flatten().collect::<Vec<_>>())
+        });
+        if let Some(counts) = from_index {
+            return counts;
+        }
+        let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+        for file in self.walk().map(|w| w.files).unwrap_or_default() {
+            let Ok(bytes) = self.reader.read(&file.abs_path) else {
+                continue;
+            };
+            if let Some(entry) = parse_entry(&file.id, &file.rel_path, bytes).entry {
+                for tag in entry.tags() {
+                    *counts.entry(tag.clone()).or_default() += 1;
+                }
+            }
+        }
+        let mut counts: Vec<_> = counts.into_iter().collect();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        counts
     }
 
     /// The errors `kb lint` would report for this entry's file (empty when it is valid).

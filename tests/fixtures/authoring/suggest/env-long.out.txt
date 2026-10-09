@@ -1,0 +1,1 @@
+kubectl -n {{env}} get pods

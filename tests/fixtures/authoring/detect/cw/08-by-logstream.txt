@@ -1,0 +1,2 @@
+stats count(*) as requests by @logStream
+| sort requests desc

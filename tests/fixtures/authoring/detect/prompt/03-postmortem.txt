@@ -1,0 +1,3 @@
+Write a blameless postmortem for the outage described below.
+Use the headings Summary, Impact, Timeline, Root cause, and Follow-ups.
+Do not speculate about individuals.

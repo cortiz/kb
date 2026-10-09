@@ -1,0 +1,1 @@
+Write API documentation for the handler below. Include the request shape, the response shape, the error cases and one curl example. Keep it short enough to fit on one screen.

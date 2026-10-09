@@ -1,0 +1,1 @@
+Help me write a query that finds customers who ordered in January but not in February. I use Postgres, and the tables are orders and customers.

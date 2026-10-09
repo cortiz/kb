@@ -1,0 +1,2 @@
+Explain what this query does in plain English, step by step, as if the reader had never seen the tool before.
+Mention anything that could be slow on a large table.

@@ -1,0 +1,3 @@
+error
+| timeslice 5m
+| count by _timeslice
