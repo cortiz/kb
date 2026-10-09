@@ -21,6 +21,8 @@ use crate::show;
 use crate::tui::app::Options;
 use crate::tui::theme::{Theme, ThemeEnv};
 use crate::tui::{self, Outcome};
+use crate::varcli::{self, Ask, Collected, TtyAsk, UseOpts};
+use kb_core::varres;
 
 fn io_error(e: impl std::fmt::Display) -> CliError {
     CliError::new("io", e.to_string())
@@ -55,16 +57,24 @@ pub enum PostPick {
     Print(PrintMode),
     /// Print the entry the way `kb show` does (when the UI was opened by `kb show`).
     Show(ShowOptions),
+    /// Resolve the entry's variables and copy or print it (`kb use` and `kb copy` that opened the UI).
+    Use(UseOpts),
+    /// Copy the payload as it is in the file, placeholders included (`kb copy --raw`).
+    Raw,
 }
 
 /// A copy that did not fail, reported: warnings and the confirmation on stderr, the text on stdout
 /// for the stdout method, and the exit code (0 delivered, 2 refused).
-fn report_copy(outcome: &CopyOutcome, id: &str, json: bool) -> ExitCode {
+fn report_copy(outcome: &CopyOutcome, id: &str, json: bool, extra: Option<Value>) -> ExitCode {
     for warning in outcome.warnings() {
         eprintln!("{warning}");
     }
     if json {
-        println!("{}", copy_json(outcome, id));
+        let mut doc = copy_json(outcome, id);
+        if let (Some(Value::Object(more)), Some(map)) = (extra, doc.as_object_mut()) {
+            map.extend(more);
+        }
+        println!("{doc}");
     } else if outcome.used == Some(Method::Stdout) {
         let mut stdout = std::io::stdout();
         let _ = stdout.write_all(outcome.text.as_bytes());
@@ -137,6 +147,225 @@ fn record_use(kb: &Kb, id: &str) {
     }
 }
 
+/// Counts the use and, when asked and allowed, remembers the values that were used.
+fn finish_use(kb: &Kb, settings: &Settings, id: &str, used: &[varcli::Used], remember: bool) {
+    if used.is_empty() || !remember || !settings.vars_remember() {
+        return record_use(kb, id);
+    }
+    let pairs: Vec<(String, String)> = used
+        .iter()
+        .filter_map(|u| u.text.clone().map(|t| (u.name.clone(), t)))
+        .collect();
+    match kb.record_resolved_use(id, SystemTime::now(), &pairs) {
+        Ok(skipped) => {
+            for name in skipped {
+                eprintln!("kb: {name} looks like a credential, so it was not remembered");
+            }
+        }
+        Err(e) => eprintln!("kb: warning: could not record the use of {id}: {e}"),
+    }
+}
+
+const SECRET_NOTICE: &str =
+    "kb: the clipboard now holds a secret; clipboard managers may keep a history";
+
+/// Resolves the variables of `id`, then copies or prints the result and records the use (`kb use`,
+/// `kb copy`, and Enter in a UI that returned an entry with variables).
+fn deliver(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    opts: &UseOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    varcli::check_flag_names(&plan, &opts.flags)?;
+    let mut secret = false;
+    let mut used = Vec::new();
+    let mut fields = Vec::new();
+    let text = if plan.is_empty() {
+        kb.pick(id, PrintMode::Payload).map_err(io_error)?
+    } else {
+        let (memory, _) = kb.remembered(id);
+        let mut tty = if opts.yes || !platform.has_terminal() {
+            None
+        } else {
+            TtyAsk::open(platform)
+        };
+        let ask = tty.as_mut().map(|t| t as &mut dyn Ask);
+        let env = |name: &str| std::env::var(name).ok();
+        match varcli::collect(&plan, &opts.flags, &env, Some(&memory), ask)? {
+            Collected::Stop(code) => return Ok(code),
+            Collected::Ready(values, report) => {
+                let resolved = varres::resolve(&plan, &values).map_err(|errors| {
+                    CliError::new(
+                        "usage",
+                        errors
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join("; "),
+                    )
+                })?;
+                secret = resolved.has_secret;
+                used = report;
+                fields = other_fields(&resolved);
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .ok_or_else(|| CliError::new("io", format!("{id} has nothing to copy")))?
+            }
+        }
+    };
+    emit(
+        platform,
+        kb,
+        settings,
+        id,
+        Prepared {
+            text,
+            used,
+            secret,
+            has_vars: !plan.is_empty(),
+            fields,
+        },
+        opts,
+    )
+}
+
+/// What `deliver` ends up with: the text to hand over and how the variables were filled.
+struct Prepared {
+    text: String,
+    used: Vec<varcli::Used>,
+    secret: bool,
+    has_vars: bool,
+    /// The other resolved strings (`cwd`, `range`, `log_groups`), secrets masked, for `--json`.
+    fields: Vec<(String, String)>,
+}
+
+/// `(label, text)` of every resolved string that is not the primary one; secrets are masked.
+fn other_fields(resolved: &varres::Resolved) -> Vec<(String, String)> {
+    let primary = resolved.primary().map(|o| o.target.clone());
+    resolved
+        .outputs
+        .iter()
+        .filter(|o| Some(&o.target) != primary.as_ref())
+        .map(|o| {
+            let label = match &o.target {
+                varres::Target::Payload => "payload".to_string(),
+                varres::Target::Url => "url".to_string(),
+                varres::Target::Cwd => "cwd".to_string(),
+                varres::Target::Range => "range".to_string(),
+                varres::Target::LogGroup(i) => format!("log_groups[{i}]"),
+            };
+            (label, o.redacted())
+        })
+        .collect()
+}
+
+/// Copies or prints the text, records the use and reports.
+fn emit(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    prepared: Prepared,
+    opts: &UseOpts,
+) -> Result<ExitCode, CliError> {
+    let Prepared {
+        text,
+        used,
+        secret,
+        has_vars,
+        fields,
+    } = prepared;
+    let extra = has_vars.then(|| {
+        json!({
+            "variables": varcli::used_json(&used),
+            "secret": secret,
+            "fields": fields.iter().cloned().collect::<std::collections::BTreeMap<_, _>>(),
+        })
+    });
+    if opts.print {
+        if opts.json {
+            let mut doc = json!({ "id": id, "sent": true, "method": "print", "text": text });
+            if let (Some(Value::Object(more)), Some(map)) = (extra, doc.as_object_mut()) {
+                map.extend(more);
+            }
+            println!("{doc}");
+        } else {
+            write_stdout(&text);
+        }
+        finish_use(kb, settings, id, &used, opts.remember);
+        return Ok(ExitCode::SUCCESS);
+    }
+    let outcome = clipboard::copy(
+        platform,
+        &ClipboardSettings::from_settings(settings),
+        &text,
+        Place::Cli,
+    );
+    if outcome.sent() {
+        finish_use(kb, settings, id, &used, opts.remember);
+    }
+    let code = report_copy(&outcome, id, opts.json, extra);
+    if outcome.sent() && secret && outcome.used != Some(Method::Stdout) {
+        eprintln!("{SECRET_NOTICE}");
+    }
+    Ok(code)
+}
+
+/// The values the UI collected: checks them against the entry as it is now, then hands the text
+/// over like `kb use` does.
+fn deliver_values(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    values: Vec<(String, kb_core::varres::Value, kb_core::varres::Source)>,
+    opts: &UseOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    let mut map = varres::Values::new();
+    let mut used = Vec::new();
+    for (name, value, source) in values {
+        if let Some(p) = plan.var(&name) {
+            used.push(varcli::Used {
+                name: name.clone(),
+                kind: p.var.kind,
+                source,
+                text: (!value.is_secret()).then(|| value.reveal().to_string()),
+            });
+            map.insert(name, value);
+        }
+    }
+    match varres::resolve(&plan, &map) {
+        Ok(resolved) => {
+            let text = resolved
+                .primary()
+                .map(|o| o.text.clone())
+                .ok_or_else(|| CliError::new("io", format!("{id} has nothing to copy")))?;
+            let prepared = Prepared {
+                text,
+                used,
+                secret: resolved.has_secret,
+                has_vars: true,
+                fields: other_fields(&resolved),
+            };
+            emit(platform, kb, settings, id, prepared, opts)
+        }
+        Err(errors) => {
+            eprintln!("kb: {id} changed while you filled it in; nothing was copied");
+            for e in errors {
+                eprintln!("  {e}");
+            }
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
 /// Copies, prints or shows the entry the UI returned, and returns the exit code.
 pub fn run_pick(
     platform: &impl Platform,
@@ -147,10 +376,32 @@ pub fn run_pick(
 ) -> Result<ExitCode, CliError> {
     let kb = Kb::open(root).map_err(io_error)?;
     match post {
-        PostPick::Copy => {
+        PostPick::Copy => deliver(
+            platform,
+            &kb,
+            &loaded.settings,
+            id,
+            &UseOpts {
+                remember: true,
+                ..UseOpts::default()
+            },
+        ),
+        PostPick::Use(opts) => deliver(platform, &kb, &loaded.settings, id, opts),
+        PostPick::Raw => {
             let outcome = copy_entry(platform, &kb, &loaded.settings, id)?;
-            Ok(report_copy(&outcome, id, false))
+            Ok(report_copy(&outcome, id, false, None))
         }
+        PostPick::Print(PrintMode::Payload) => deliver(
+            platform,
+            &kb,
+            &loaded.settings,
+            id,
+            &UseOpts {
+                print: true,
+                remember: true,
+                ..UseOpts::default()
+            },
+        ),
         PostPick::Print(mode) => {
             let out = kb.pick(id, *mode).map_err(io_error)?;
             write_stdout(&out);
@@ -265,8 +516,34 @@ fn resolve_or_report(
     })
 }
 
-/// `kb copy <id|query>`.
-pub fn run_copy(
+/// `kb use <id|query>`, and `kb copy` without `--raw`.
+pub fn run_use(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    opts: &UseOpts,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, opts.json)? {
+        Next::Entry(id) => deliver(platform, &kb, &loaded.settings, &id, opts),
+        Next::Choose => {
+            if !opts.flags.is_empty() || opts.yes {
+                eprintln!("kb: --var and --yes are ignored when you choose in the UI");
+            }
+            let post = PostPick::Use(UseOpts {
+                flags: Vec::new(),
+                yes: false,
+                ..opts.clone()
+            });
+            run_ui(platform, root, loaded, text, &post, false)
+        }
+        Next::Done(code) => Ok(code),
+    }
+}
+
+/// `kb copy --raw <id|query>`: the payload as it is in the file, placeholders included.
+pub fn run_copy_raw(
     platform: &impl Platform,
     root: &Path,
     loaded: &Loaded,
@@ -277,9 +554,34 @@ pub fn run_copy(
     match resolve_or_report(platform, &mut kb, text, json)? {
         Next::Entry(id) => {
             let outcome = copy_entry(platform, &kb, &loaded.settings, &id)?;
-            Ok(report_copy(&outcome, &id, json))
+            Ok(report_copy(&outcome, &id, json, None))
         }
-        Next::Choose => run_ui(platform, root, loaded, text, &PostPick::Copy, false),
+        Next::Choose => run_ui(platform, root, loaded, text, &PostPick::Raw, false),
+        Next::Done(code) => Ok(code),
+    }
+}
+
+/// `kb vars <id|query>`.
+pub fn run_vars(
+    platform: &impl Platform,
+    root: &Path,
+    text: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, json)? {
+        Next::Entry(id) => {
+            let entry = kb.entry(&id).map_err(io_error)?;
+            let plan = varres::plan_vars(&entry);
+            let (memory, _) = kb.remembered(&id);
+            let env = |name: &str| std::env::var(name).ok();
+            write_stdout(&varcli::vars_report(&plan, &id, &env, Some(&memory), json));
+            Ok(ExitCode::SUCCESS)
+        }
+        Next::Choose => {
+            eprintln!("kb: several close matches; use an exact ID");
+            Ok(ExitCode::from(1))
+        }
         Next::Done(code) => Ok(code),
     }
 }
@@ -337,6 +639,12 @@ pub fn run_ui(
         clipboard: ClipboardSettings::from_settings(&loaded.settings),
         editor: loaded.settings.editor().map(str::to_string),
         config_problems: loaded.warnings.len(),
+        fill_variables: matches!(
+            post,
+            PostPick::Copy | PostPick::Print(PrintMode::Payload) | PostPick::Use(_)
+        ),
+        remember_vars: loaded.settings.vars_remember()
+            && !matches!(post, PostPick::Use(o) if !o.remember),
         // Timing tests set this so the background refresh does not add noise.
         refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
     };
@@ -348,6 +656,18 @@ pub fn run_ui(
     }
     match outcome? {
         Outcome::Picked { id } => run_pick(platform, root, loaded, &id, post),
+        Outcome::Resolved { id, values, print } => {
+            let mut opts = match post {
+                PostPick::Use(o) => o.clone(),
+                _ => UseOpts {
+                    remember: true,
+                    ..UseOpts::default()
+                },
+            };
+            opts.print |= print || matches!(post, PostPick::Print(PrintMode::Payload));
+            let kb = Kb::open(root).map_err(io_error)?;
+            deliver_values(platform, &kb, &loaded.settings, &id, values, &opts)
+        }
         Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
     }
 }

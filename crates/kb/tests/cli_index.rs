@@ -149,7 +149,7 @@ fn reindex_keeps_usage_and_prunes_the_vanished() {
             "sql/orders-by-status": {"count": 4, "last_used": 1_790_000_000, "hash": "0000000000000001"},
             "gone/entry": {"count": 1, "last_used": 1_790_000_000, "hash": "0000000000000002"}
         },
-        "vars": {"region": "eu"}
+        "future": {"region": "eu"}
     });
     fs::create_dir_all(root.join(".kb")).unwrap();
     fs::write(root.join(".kb/state.json"), state.to_string()).unwrap();
@@ -165,7 +165,7 @@ fn reindex_keeps_usage_and_prunes_the_vanished() {
         serde_json::from_slice(&fs::read(root.join(".kb/state.json")).unwrap()).unwrap();
     assert_eq!(after["usage"]["sql/orders-by-status"]["count"], 4);
     assert!(after["usage"].get("gone/entry").is_none());
-    assert_eq!(after["vars"]["region"], "eu");
+    assert_eq!(after["future"]["region"], "eu");
 }
 
 #[cfg(unix)]

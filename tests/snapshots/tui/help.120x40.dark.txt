@@ -9,8 +9,9 @@
 │ cmd    Tail pod logs                         ││ ── payload ───────────────────────────────────────────────────────── │
 │        #k8s #prod                            ││ 1 redis-cli --scan --pattern 'roles:*' | xargs redis-cli del         │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Alt-P              zoom preview                          │ │
-│ │ Ctrl-Y             copy payload                         ←                  cursor left                           │ │
+│ │ Enter              pick and exit                        Shift-PgUp         preview page                          │ │
+│ │ Ctrl-Y             copy payload                         Alt-P              zoom preview                          │ │
+│ │ Alt-C              copy template                        ←                  cursor left                           │ │
 │ │ Ctrl-E             edit entry                           →                  cursor right                          │ │
 │ │ ↓  Ctrl-N  Ctrl-J  next result                          Home  Ctrl-A       line start                            │ │
 │ │ ↑  Ctrl-P  Ctrl-K  previous result                      End                line end                              │ │
@@ -23,7 +24,6 @@
 │ │ Shift-↓            scroll preview                       F1                 help                                  │ │
 │ │ Shift-↑            scroll preview                       Esc                clear / quit                          │ │
 │ │ Shift-PgDn         preview page                         Ctrl-C             exit                                  │ │
-│ │ Shift-PgUp         preview page                                                                                  │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │

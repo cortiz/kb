@@ -49,10 +49,92 @@ pub fn frecency(record: Option<&UsageRecord>, now: SystemTime) -> f64 {
     (1.0 - (-(r.count as f64) / 5.0).exp()) * 0.5_f64.powf(age_days / 30.0)
 }
 
+/// How many recent values are kept per variable name.
+pub const RECENT_VALUES: usize = 20;
+
+/// Remembered variable values (spec 006): the last value used per entry, and recent values per
+/// variable name across the KB. Never holds a `secret` variable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VarMemory {
+    pub entries: BTreeMap<String, BTreeMap<String, String>>,
+    pub recent: BTreeMap<String, Vec<String>>,
+}
+
+impl VarMemory {
+    /// Remembers `values` (name, value) as used in `id`. A value that looks like a credential is
+    /// not stored; its name is returned.
+    pub fn remember(&mut self, id: &str, values: &[(String, String)]) -> Vec<String> {
+        let mut skipped = Vec::new();
+        for (name, value) in values {
+            if !crate::lint::secrets::scan_secrets(value).hits.is_empty() {
+                skipped.push(name.clone());
+                continue;
+            }
+            self.entries
+                .entry(id.to_string())
+                .or_default()
+                .insert(name.clone(), value.clone());
+            let recent = self.recent.entry(name.clone()).or_default();
+            recent.retain(|v| v != value);
+            recent.insert(0, value.clone());
+            recent.truncate(RECENT_VALUES);
+        }
+        skipped
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.recent.is_empty()
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::json!({ "entries": self.entries, "recent": self.recent })
+    }
+
+    /// Reads what it can; anything malformed is dropped rather than resetting the state.
+    fn from_json(v: Value) -> VarMemory {
+        let strings = |v: &Value| -> BTreeMap<String, String> {
+            v.as_object()
+                .map(|o| {
+                    o.iter()
+                        .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let entries = v
+            .get("entries")
+            .and_then(Value::as_object)
+            .map(|o| o.iter().map(|(id, m)| (id.clone(), strings(m))).collect())
+            .unwrap_or_default();
+        let recent = v
+            .get("recent")
+            .and_then(Value::as_object)
+            .map(|o| {
+                o.iter()
+                    .map(|(name, list)| {
+                        let list = list
+                            .as_array()
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|x| x.as_str().map(str::to_string))
+                                    .take(RECENT_VALUES)
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        (name.clone(), list)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        VarMemory { entries, recent }
+    }
+}
+
 /// The contents of `state.json`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct State {
     pub usage: BTreeMap<String, UsageRecord>,
+    pub vars: VarMemory,
     /// Top-level keys this version doesn't know; kept on write for later milestones.
     extra: Map<String, Value>,
 }
@@ -100,6 +182,9 @@ impl State {
             );
         }
         obj.insert("usage".into(), Value::Object(usage));
+        if !self.vars.is_empty() {
+            obj.insert("vars".into(), self.vars.to_json());
+        }
         let mut text = serde_json::to_string_pretty(&Value::Object(obj)).unwrap_or_default();
         text.push('\n');
         let tmp = dir.join(format!("state.json.tmp-{}", std::process::id()));
@@ -155,6 +240,9 @@ impl State {
             }
         }
         for (old, new) in &moves {
+            if let Some(mem) = self.vars.entries.remove(old) {
+                self.vars.entries.entry(new.clone()).or_insert(mem);
+            }
             if let Some(rec) = self.usage.remove(old) {
                 self.usage.entry(new.clone()).or_insert(rec);
             }
@@ -166,7 +254,9 @@ impl State {
     pub fn prune(&mut self, existing: &BTreeSet<String>) -> bool {
         let before = self.usage.len();
         self.usage.retain(|id, _| existing.contains(id));
-        self.usage.len() != before
+        let before_vars = self.vars.entries.len();
+        self.vars.entries.retain(|id, _| existing.contains(id));
+        self.usage.len() != before || self.vars.entries.len() != before_vars
     }
 }
 
@@ -178,6 +268,10 @@ fn parse(text: &[u8]) -> Option<State> {
     if version == 0 || version > STATE_VERSION {
         return None;
     }
+    let vars = obj
+        .remove("vars")
+        .map(VarMemory::from_json)
+        .unwrap_or_default();
     let Value::Object(raw) = obj.remove("usage")? else {
         return None;
     };
@@ -195,7 +289,11 @@ fn parse(text: &[u8]) -> Option<State> {
             },
         );
     }
-    Some(State { usage, extra: obj })
+    Some(State {
+        usage,
+        vars,
+        extra: obj,
+    })
 }
 
 #[cfg(test)]
@@ -249,7 +347,7 @@ mod tests {
         std::fs::create_dir(d.path().join(".kb")).unwrap();
         std::fs::write(
             d.path().join(".kb/state.json"),
-            r#"{"state_version":1,"usage":{},"vars":{"region":"eu"}}"#,
+            r#"{"state_version":1,"usage":{},"future":{"region":"eu"}}"#,
         )
         .unwrap();
         let (mut s, n) = State::load(d.path());
@@ -258,7 +356,7 @@ mod tests {
         s.save(d.path()).unwrap();
         let (s2, _) = State::load(d.path());
         assert_eq!(s2.usage["a/b"].count, 1);
-        assert_eq!(s2.extra["vars"]["region"], "eu");
+        assert_eq!(s2.extra["future"]["region"], "eu");
         let names: Vec<_> = std::fs::read_dir(d.path().join(".kb"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
@@ -324,5 +422,102 @@ mod tests {
         assert!(s.refresh_hash("keep", 9) && !s.refresh_hash("keep", 9));
         assert!(s.prune(&["keep".to_string()].into()));
         assert_eq!(s.usage.keys().collect::<Vec<_>>(), vec!["keep"]);
+    }
+
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn memory_round_trips_and_keeps_usage() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = State::default();
+        s.record("a", 1, at(5));
+        assert!(
+            s.vars
+                .remember("a", &pairs(&[("env", "prod"), ("n", "30")]))
+                .is_empty()
+        );
+        s.save(d.path()).unwrap();
+        let (s2, n) = State::load(d.path());
+        assert!(n.is_none());
+        assert_eq!(s2.vars, s.vars);
+        assert_eq!(s2.vars.entries["a"]["env"], "prod");
+        assert_eq!(s2.vars.recent["n"], vec!["30"]);
+        assert_eq!(s2.usage["a"].count, 1);
+        assert_eq!(STATE_VERSION, 1);
+    }
+
+    #[test]
+    fn no_memory_means_no_vars_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = State::default();
+        s.record("a", 1, at(5));
+        s.save(d.path()).unwrap();
+        let text = std::fs::read_to_string(d.path().join(".kb/state.json")).unwrap();
+        assert!(!text.contains("vars"), "{text}");
+    }
+
+    #[test]
+    fn malformed_memory_is_dropped_not_fatal() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join(".kb")).unwrap();
+        for bad in [
+            r#"{"state_version":1,"usage":{},"vars":"x"}"#,
+            r#"{"state_version":1,"usage":{},"vars":{"entries":[],"recent":5}}"#,
+            r#"{"state_version":1,"usage":{},"vars":{"entries":{"a":{"n":3}},"recent":{"n":[1,"ok"]}}}"#,
+        ] {
+            std::fs::write(d.path().join(".kb/state.json"), bad).unwrap();
+            let (s, n) = State::load(d.path());
+            assert!(n.is_none(), "{bad}");
+            assert!(s.vars.entries.values().all(|m| m.is_empty()), "{bad}");
+        }
+        let (s, _) = State::load(d.path());
+        assert_eq!(s.vars.recent["n"], vec!["ok"]);
+    }
+
+    #[test]
+    fn recent_values_are_most_recent_first_unique_and_capped() {
+        let mut m = VarMemory::default();
+        for i in 0..25 {
+            m.remember("a", &pairs(&[("n", &i.to_string())]));
+        }
+        assert_eq!(m.recent["n"].len(), RECENT_VALUES);
+        assert_eq!(m.recent["n"][0], "24");
+        assert!(!m.recent["n"].contains(&"4".to_string()));
+        m.remember("b", &pairs(&[("n", "10")]));
+        assert_eq!(m.recent["n"][0], "10");
+        assert_eq!(m.recent["n"].iter().filter(|v| *v == "10").count(), 1);
+        assert_eq!(m.entries["a"]["n"], "24");
+        assert_eq!(m.entries["b"]["n"], "10");
+    }
+
+    #[test]
+    fn credential_looking_values_are_not_remembered() {
+        let mut m = VarMemory::default();
+        let skipped = m.remember(
+            "a",
+            &pairs(&[("k", "AKIAIOSFODNN7EXAMPLE"), ("env", "prod")]),
+        );
+        assert_eq!(skipped, vec!["k"]);
+        assert!(!m.entries["a"].contains_key("k") && m.entries["a"]["env"] == "prod");
+        assert!(!m.recent.contains_key("k"));
+    }
+
+    #[test]
+    fn memory_follows_renames_and_is_pruned() {
+        let mut s = State::default();
+        s.record("old", 42, at(5));
+        s.vars.remember("old", &pairs(&[("env", "prod")]));
+        let added: BTreeMap<String, u64> = [("new".to_string(), 42)].into();
+        assert!(s.carry_renames(&["old".to_string()].into(), &added));
+        assert_eq!(s.vars.entries["new"]["env"], "prod");
+        assert!(!s.vars.entries.contains_key("old"));
+        s.vars.remember("gone", &pairs(&[("env", "dev")]));
+        assert!(s.prune(&["new".to_string()].into()));
+        assert!(!s.vars.entries.contains_key("gone"));
+        assert!(s.vars.recent.contains_key("env"));
     }
 }

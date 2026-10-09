@@ -425,3 +425,106 @@ fn config_list_under_100ms_and_doctor_measured() {
         "config list median {list:?}"
     );
 }
+
+// ---- M5: variables ----
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn a_keystroke_in_the_variable_form_redraws_within_16ms() {
+    // SC-002 (spec 006): preview and frame after each keystroke, for a 1,000-line payload
+    let _serial = serial();
+    use kb_cli::tui::app::AppState;
+    use kb_cli::tui::form::{FormSpec, FormState, Then};
+    use kb_cli::tui::keys::{Code, Key};
+    use kb_cli::tui::theme::Theme;
+    use kb_core::entry::parse_entry;
+    use kb_core::varres::{Inputs, plan_vars, prefill};
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+
+    let payload: String = (0..1000)
+        .map(|i| format!("line {i}: {{{{a}}}} {{{{b}}}} {{{{c}}}} {{{{d}}}} {{{{e}}}} and some text to fill the line\n"))
+        .collect();
+    let front = "vars:\n  a: { kind: text, default: x }\n  b: { kind: number, default: 1 }\n  c: { kind: enum, options: [p, q], default: p }\n  d: { kind: text, default: y }\n  e: { kind: text, default: z }\n";
+    let text = format!(
+        "---\nkb_format: 1\ntype: cmd\ntitle: Big\nshell: bash\n{front}---\n\n```\n{payload}```\n"
+    );
+    let entry = parse_entry("x", "x.md", text.into_bytes()).entry.unwrap();
+    let plan = plan_vars(&entry);
+    let bindings = prefill(
+        &plan,
+        &Inputs {
+            flags: &[],
+            env: &|_| None,
+            memory: None,
+        },
+    );
+    let spec = FormSpec {
+        id: "x".into(),
+        title: "Big".into(),
+        plan,
+        bindings,
+        recent: Default::default(),
+    };
+    let mut state = AppState::new(Default::default(), (200, 60), "", "~/kb".into());
+    state.form = Some(Box::new(FormState::open(spec, Then::Exit, None, None)));
+    let theme = Theme::dark();
+    let area = Rect::new(0, 0, 200, 60);
+    let mut times = Vec::new();
+    for i in 0..200 {
+        let start = Instant::now();
+        let form = state.form.as_mut().unwrap();
+        form.focus = 0; // the text field `a`
+        form.handle_key(Key::new(Code::Char(if i % 2 == 0 { 'k' } else { 'j' }), 0));
+        let mut buf = Buffer::empty(area);
+        kb_cli::tui::view::draw(&state, &theme, area, &mut buf);
+        times.push(start.elapsed());
+    }
+    times.sort();
+    let p95 = times[189];
+    println!(
+        "form keystroke + frame, 1000 lines: p95 {p95:?}, max {:?}",
+        times[199]
+    );
+    assert!(p95 < Duration::from_millis(16), "p95 {p95:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn use_by_id_with_defaults_under_100ms() {
+    // constitution VII: CLI cold start of 100 ms, for a command that plans, resolves and prints
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    generate(&root);
+    backdate(&root);
+    assert!(
+        kb_in(&root)
+            .arg("reindex")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let id = "group-01/entry-00001"; // a sumo entry with an enum and a number, both with defaults
+    let run = || {
+        let start = Instant::now();
+        let out = kb_in(&root)
+            .args(["use", id, "-y", "--print"])
+            .output()
+            .unwrap();
+        let took = start.elapsed();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&out.stdout).contains("{{"));
+        took
+    };
+    run();
+    let runs: Vec<Duration> = (0..7).map(|_| run()).collect();
+    let m = median(runs.clone());
+    println!("kb use <id> -y --print on {ENTRIES} entries: median {m:?} (runs {runs:?})");
+    assert!(m < Duration::from_millis(100), "median {m:?}");
+}

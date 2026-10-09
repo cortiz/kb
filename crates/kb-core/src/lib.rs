@@ -17,6 +17,7 @@ pub mod root;
 pub mod search;
 pub mod source;
 pub mod usage;
+pub mod varres;
 pub mod vars;
 pub mod walk;
 pub mod yaml;

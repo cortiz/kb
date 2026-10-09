@@ -30,6 +30,32 @@ impl VarKind {
     }
 }
 
+/// How a value is escaped when it is substituted (`escape:` under a variable).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Escape {
+    /// Quote by where the variable lands: shell in `cmd`, percent-encoding in `url`.
+    #[default]
+    Auto,
+    None,
+    Shell,
+    Sql,
+}
+
+impl Escape {
+    /// The values `escape:` accepts.
+    pub const NAMES: [&'static str; 4] = ["auto", "none", "shell", "sql"];
+
+    pub fn from_name(name: &str) -> Option<Escape> {
+        match name {
+            "auto" => Some(Escape::Auto),
+            "none" => Some(Escape::None),
+            "shell" => Some(Escape::Shell),
+            "sql" => Some(Escape::Sql),
+            _ => None,
+        }
+    }
+}
+
 /// Where a reference was found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefLocation {
@@ -57,6 +83,7 @@ pub struct Variable {
     pub options: Vec<String>,
     pub description: Option<String>,
     pub env: Option<String>,
+    pub escape: Escape,
     pub references: Vec<VarRef>,
 }
 
@@ -141,6 +168,7 @@ pub(crate) fn collect(
                                 options: Vec::new(),
                                 description: None,
                                 env: None,
+                                escape: Escape::Auto,
                                 references: Vec::new(),
                             });
                             vars.last_mut().expect("just pushed")
@@ -247,6 +275,7 @@ fn definition(name: &str, key_offset: usize, def: &Node, sink: &mut Sink<'_>) ->
         options: Vec::new(),
         description: None,
         env: None,
+        escape: Escape::Auto,
         references: Vec::new(),
     };
     if !matches!(def, Node::Map { .. }) {
@@ -294,6 +323,24 @@ fn definition(name: &str, key_offset: usize, def: &Node, sink: &mut Sink<'_>) ->
         .and_then(Node::as_str)
         .map(str::to_string);
     var.env = def.get("env").and_then(Node::as_str).map(str::to_string);
+    if let Some(node) = def.get("escape") {
+        match node.as_str().and_then(Escape::from_name) {
+            Some(escape) => var.escape = escape,
+            None => {
+                let shown = node.scalar().unwrap_or("");
+                let fix = match crate::lint::suggest::suggest(shown, &Escape::NAMES) {
+                    Some(s) => format!("use \"{s}\""),
+                    None => "use one of auto, none, shell, sql".into(),
+                };
+                sink.push(
+                    RuleCode::InvalidEscape,
+                    node.span().start,
+                    format!("unknown escape \"{shown}\"; expected auto, none, shell or sql"),
+                    Some(fix),
+                );
+            }
+        }
+    }
     if let Some(options) = def.get("options") {
         match options {
             Node::Seq { items, .. } => {
@@ -574,5 +621,37 @@ mod tests {
         assert_eq!(v.kind, VarKind::Secret);
         assert_eq!(v.default, None);
         assert_eq!(v.env.as_deref(), Some("API_TOKEN"));
+    }
+
+    #[test]
+    fn escape_is_read_and_checked() {
+        let at = |v: &str| {
+            let out = entry(
+                &format!("vars:\n  a: {{ kind: text, escape: {v} }}\n"),
+                "{{a}}",
+            );
+            (out.findings, out.entry.unwrap().vars()[0].escape)
+        };
+        for (name, want) in [
+            ("auto", Escape::Auto),
+            ("none", Escape::None),
+            ("shell", Escape::Shell),
+            ("sql", Escape::Sql),
+        ] {
+            let (findings, got) = at(name);
+            assert!(findings.is_empty(), "{name}: {findings:?}");
+            assert_eq!(got, want);
+        }
+        let out = entry("vars:\n  a: { kind: text }\n", "{{a}}");
+        assert_eq!(out.entry.unwrap().vars()[0].escape, Escape::Auto);
+        let out = entry("vars:\n  t: { kind: secret, escape: shell }\n", "{{t}}");
+        assert!(out.findings.is_empty());
+        let out = entry("vars:\n  a: { kind: text, escape: shel }\n", "{{a}}");
+        let f = &out.findings[0];
+        assert_eq!((f.line, f.column, f.code), (6, 28, RuleCode::InvalidEscape));
+        assert_eq!(f.fix.as_deref(), Some("use \"shell\""));
+        assert_eq!(out.entry.unwrap().vars()[0].escape, Escape::Auto);
+        let out = entry("vars:\n  a: { kind: text, escape: [shell] }\n", "{{a}}");
+        assert_eq!(out.findings[0].code, RuleCode::InvalidEscape);
     }
 }

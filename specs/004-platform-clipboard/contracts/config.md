@@ -36,6 +36,9 @@ trim_trailing_newline = true
 
 [opener]
 command = ""
+
+[vars]
+remember = true     # M5: remember the values used for variables (never secrets)
 ```
 
 ## Precedence (FR-015)
@@ -43,7 +46,7 @@ command = ""
 flag → environment variable → file → default, per key. Environment names: `KB_ROOT`,
 `KB_EDITOR`, `KB_THEME`, `KB_TUI_ENTER`, `KB_TUI_MOUSE`, `KB_CLIPBOARD_METHOD`,
 `KB_CLIPBOARD_COMMAND`, `KB_CLIPBOARD_OSC52_MAX_BYTES`, `KB_CLIPBOARD_TRIM_TRAILING_NEWLINE`,
-`KB_OPENER_COMMAND`. An empty variable counts as unset.
+`KB_OPENER_COMMAND`, `KB_VARS_REMEMBER` (added by M5). An empty variable counts as unset.
 
 The editor additionally falls back to `$VISUAL`, `$EDITOR`, `vi` (FR-013) below the file value.
 

@@ -25,6 +25,10 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     buf.set_style(area, Style::default());
     let full = state.layout_mode == LayoutMode::FullPreview;
     let screen = layout::layout(area, full);
+    if let (Screen::Ok(_), Some(form)) = (&screen, &state.form) {
+        super::form_view::draw_form(state, form, theme, area, buf);
+        return;
+    }
     let Screen::Ok(l) = screen else {
         let msg = "Terminal too small";
         let x = area.x + area.width.saturating_sub(width(msg) as u16) / 2;
@@ -767,6 +771,7 @@ fn bar_kind(state: &AppState) -> BarKind {
     let blank = state.input.is_blank();
     match state.mode() {
         Mode::TooSmall => BarKind::TooSmall,
+        Mode::Form => BarKind::TooSmall,
         Mode::Help => BarKind::Help,
         Mode::FullPreview => BarKind::FullPreview,
         Mode::Search => {

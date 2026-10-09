@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::{Map, Value, json};
 
 use crate::entry::{Entry, EntryType, Shell, TypeFields};
-use crate::vars::VarKind;
+use crate::vars::{Escape, VarKind};
 
 /// What a pick writes to stdout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -110,6 +110,10 @@ fn fields_json(entry: &Entry) -> Value {
     Value::Object(m)
 }
 
+fn escape_name(e: Escape) -> &'static str {
+    Escape::NAMES[e as usize]
+}
+
 /// The entry as the document in `specs/003-tui-core/contracts/entry.schema.json`.
 pub fn entry_json(entry: &Entry, abs_path: &Path) -> Value {
     let vars: Vec<Value> = entry
@@ -126,6 +130,7 @@ pub fn entry_json(entry: &Entry, abs_path: &Path) -> Value {
             m.insert("options".into(), json!(v.options));
             m.insert("description".into(), json!(v.description));
             m.insert("env".into(), json!(v.env));
+            m.insert("escape".into(), json!(escape_name(v.escape)));
             Value::Object(m)
         })
         .collect();

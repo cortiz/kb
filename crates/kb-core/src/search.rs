@@ -1,7 +1,7 @@
 //! The `Kb` handle: search, lookup, usage and index management.
 
 use std::cell::Cell;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -309,6 +309,42 @@ impl Kb {
             path: self.root.join(".kb/state.json"),
             message: e.to_string(),
         })
+    }
+
+    /// Counts one use of `id` and remembers the variable values it was used with (spec 006),
+    /// in one write. Returns the names of values that were not remembered because they look like
+    /// credentials.
+    pub fn record_resolved_use(
+        &self,
+        id: &str,
+        now: SystemTime,
+        values: &[(String, String)],
+    ) -> Result<Vec<String>, KbError> {
+        let (path, _) = self.entry_file(id)?;
+        let bytes = std::fs::read(&path).map_err(|e| KbError::Io {
+            path: path.clone(),
+            message: e.to_string(),
+        })?;
+        let (mut state, _) = State::load(&self.root);
+        state.record(id, content_hash(&bytes), now);
+        let skipped = state.vars.remember(id, values);
+        state.save(&self.root).map_err(|e| KbError::Io {
+            path: self.root.join(".kb/state.json"),
+            message: e.to_string(),
+        })?;
+        Ok(skipped)
+    }
+
+    /// The values remembered for `id`.
+    pub fn remembered(
+        &self,
+        id: &str,
+    ) -> (BTreeMap<String, String>, BTreeMap<String, Vec<String>>) {
+        let (state, _) = State::load(&self.root);
+        (
+            state.vars.entries.get(id).cloned().unwrap_or_default(),
+            state.vars.recent,
+        )
     }
 
     /// What `kb show --print <mode>` prints for `id` (and what picking it in the TUI prints).

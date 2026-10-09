@@ -118,6 +118,7 @@ pub const SEARCH: u8 = 1;
 pub const FULL: u8 = 2;
 pub const HELP: u8 = 4;
 pub const SMALL: u8 = 8;
+pub const FORM: u8 = 16;
 pub const ALL: u8 = SEARCH | FULL | HELP | SMALL;
 
 /// What the UI is showing, for key resolution.
@@ -127,6 +128,8 @@ pub enum Mode {
     FullPreview,
     Help,
     TooSmall,
+    /// The variable form is open; it handles its own keys.
+    Form,
 }
 
 impl Mode {
@@ -136,6 +139,7 @@ impl Mode {
             Mode::FullPreview => FULL,
             Mode::Help => HELP,
             Mode::TooSmall => SMALL,
+            Mode::Form => FORM,
         }
     }
 }
@@ -144,6 +148,8 @@ impl Mode {
 pub enum Command {
     Pick,
     Copy,
+    /// Alt-C: copy the payload with its `{{variables}}` left in.
+    CopyTemplate,
     Edit,
     Down,
     Up,
@@ -263,6 +269,15 @@ pub const BINDINGS: &[Binding] = &[
         display: "Ctrl-Y",
         label: "copy the payload and stay open",
         bar: bar(4, 4, "^Y copy"),
+    },
+    Binding {
+        keys: &[Key::new(Code::Char('c'), ALT)],
+        modes: SF,
+        command: Command::CopyTemplate,
+        group: Group::Pick,
+        display: "Alt-C",
+        label: "copy the payload with its {{variables}} left in",
+        bar: None,
     },
     Binding {
         keys: &[ctrl('e')],
@@ -661,6 +676,7 @@ pub fn short_label(c: Command) -> &'static str {
     match c {
         Command::Pick => "pick and exit",
         Command::Copy => "copy payload",
+        Command::CopyTemplate => "copy template",
         Command::Edit => "edit entry",
         Command::Down => "next result",
         Command::Up => "previous result",
