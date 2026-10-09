@@ -851,6 +851,8 @@ fn deleting_the_kb_dir_changes_only_frecency_order() {
 fn a_garbage_index_or_state_file_is_recovered() {
     let (d, mut kb) = fixture();
     run(&mut kb, "x");
+    // overwriting the file under an open connection would be fixed up when it closes
+    kb.held = None;
     std::fs::write(d.path().join(".kb/index.db"), "garbage").unwrap();
     std::fs::write(d.path().join(".kb/state.json"), "{").unwrap();
     let o = run(&mut kb, "latency");
@@ -918,4 +920,160 @@ fn damage_found_while_querying_triggers_one_rebuild_and_a_retry() {
     );
     // and the index is healthy afterwards
     assert!(run(&mut kb, "5xx auth").notices.is_empty());
+}
+
+// ---- M3 additions: refresh/query, counts, result fields, lint_entry ----
+
+#[test]
+fn refresh_then_query_equals_search() {
+    let (_d, mut kb) = fixture();
+    let (_d2, mut other) = fixture();
+    let r = kb.refresh().unwrap();
+    assert_eq!((r.indexed, r.skipped), (32, 0));
+    let table = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/search/queries.tsv"),
+    )
+    .unwrap();
+    for line in table
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .take(10)
+    {
+        let q = Query::parse(line.split('\t').next().unwrap());
+        let a = kb.query(&q, now()).unwrap();
+        let b = other.search(&q, now()).unwrap();
+        assert_eq!(ids(&a), ids(&b), "{line}");
+        assert_eq!(a.type_counts, b.type_counts);
+    }
+}
+
+#[test]
+fn query_uses_the_held_index_and_search_refreshes_it() {
+    let (d, mut kb) = fixture();
+    kb.refresh().unwrap();
+    std::fs::write(
+        d.path().join("sumo/zeppelin.md"),
+        entry("Zeppelin", "", "x", ""),
+    )
+    .unwrap();
+    assert!(
+        kb.query(&Query::parse("zeppelin"), now())
+            .unwrap()
+            .results
+            .is_empty()
+    );
+    assert_eq!(
+        ids(&kb.search(&Query::parse("zeppelin"), now()).unwrap()),
+        vec!["sumo/zeppelin"]
+    );
+    // a query on a fresh handle builds the index itself and reports it
+    let (_d2, mut fresh) = fixture();
+    let o = fresh.query(&Query::parse("auth"), now()).unwrap();
+    assert!(
+        o.notices
+            .iter()
+            .any(|n| matches!(n, Notice::Rebuilt { entries: 32 }))
+    );
+}
+
+#[test]
+fn query_still_drops_files_that_are_gone() {
+    let (d, mut kb) = fixture();
+    kb.refresh().unwrap();
+    std::fs::remove_file(d.path().join("sumo/5xx-by-authorizer.md")).unwrap();
+    let o = kb.query(&Query::parse("5xx auth"), now()).unwrap();
+    assert!(!ids(&o).contains(&"sumo/5xx-by-authorizer"));
+}
+
+#[test]
+fn type_counts_ignore_the_type_filter() {
+    let (_d, mut kb) = fixture();
+    let plain = run(&mut kb, "latency");
+    let cw = run(&mut kb, "latency type:cw");
+    assert_eq!(plain.type_counts, cw.type_counts);
+    assert!(cw.results.iter().all(|r| r.entry_type == EntryType::Cw));
+    assert_eq!(cw.total, cw.results.len());
+    assert!(plain.total > cw.total);
+    let cw_index = EntryType::ALL
+        .iter()
+        .position(|t| *t == EntryType::Cw)
+        .unwrap();
+    assert_eq!(cw.type_counts[cw_index], cw.total);
+    assert_eq!(plain.type_counts.iter().sum::<usize>(), plain.total);
+    let all = run(&mut kb, "");
+    assert_eq!(all.type_counts.iter().sum::<usize>(), 32);
+    assert_eq!((all.indexed, all.skipped), (32, 0));
+}
+
+#[test]
+fn typo_matches_are_considered_when_the_type_filtered_page_is_not_full() {
+    let (_d, mut kb) = fixture();
+    // one exact `link` match would fill nothing at limit 20; the typo path must still run
+    let o = run(&mut kb, "type:sumo authroizer");
+    assert!(ids(&o).contains(&"sumo/5xx-by-authorizer"), "{:?}", ids(&o));
+    let mut q = Query::parse("type:link authorizer");
+    q.limit = 1;
+    assert!(kb.search(&q, now()).unwrap().results.is_empty());
+}
+
+#[test]
+fn results_carry_use_count_updated_and_modified() {
+    let (d, mut kb) = fixture();
+    let r = run(&mut kb, "5xx auth").results.remove(0);
+    assert_eq!(r.id, "sumo/5xx-by-authorizer");
+    assert_eq!(r.updated.as_deref(), Some("2026-09-30"));
+    assert_eq!(r.use_count, 0);
+    let mtime = std::fs::metadata(d.path().join("sumo/5xx-by-authorizer.md"))
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    assert_eq!(r.modified, Some(mtime));
+    kb.record_use("sumo/5xx-by-authorizer", now()).unwrap();
+    kb.record_use("sumo/5xx-by-authorizer", now()).unwrap();
+    let r = run(&mut kb, "5xx auth").results.remove(0);
+    assert_eq!(r.use_count, 2);
+    let other = run(&mut kb, "latency prod").results.remove(0);
+    assert_eq!(other.updated, None);
+}
+
+#[test]
+fn lint_entry_reports_errors_only() {
+    let (d, kb) = fixture();
+    assert!(kb.lint_entry("sql/orders-by-status").unwrap().is_empty());
+    let p = d.path().join("sql/orders-by-status.md");
+    let text = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, text.replace("type: sql", "type: nope")).unwrap();
+    let findings = kb.lint_entry("sql/orders-by-status").unwrap();
+    assert!(!findings.is_empty());
+    assert!(
+        findings
+            .iter()
+            .all(|f| f.severity == crate::lint::Severity::Error)
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code.to_string().starts_with("KB001"))
+    );
+    assert!(matches!(kb.lint_entry("nope/x"), Err(KbError::NotFound(_))));
+}
+
+#[test]
+fn a_version_one_index_is_rebuilt() {
+    let (d, mut kb) = fixture();
+    run(&mut kb, "x");
+    {
+        let c = Connection::open(d.path().join(".kb/index.db")).unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let o = run(&mut kb, "auth");
+    assert!(
+        o.notices
+            .iter()
+            .any(|n| matches!(n, Notice::Rebuilt { entries: 32 }))
+    );
+    assert_eq!(crate::index::INDEX_VERSION, 2);
 }

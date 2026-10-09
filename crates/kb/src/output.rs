@@ -310,6 +310,9 @@ mod tests {
     fn result() -> SearchResult {
         SearchResult {
             id: "sumo/5xx-by-authorizer".into(),
+            use_count: 0,
+            updated: None,
+            modified: None,
             entry_type: EntryType::Sumo,
             title: "5xx by authorizer".into(),
             tags: vec!["auth".into(), "lambda".into()],

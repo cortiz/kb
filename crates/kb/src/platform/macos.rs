@@ -14,6 +14,23 @@ impl Platform for MacOs {
     fn config_file(&self) -> Option<PathBuf> {
         self.home_dir().map(|h| config_file(&h))
     }
+
+    fn has_terminal(&self) -> bool {
+        super::unix::has_terminal()
+    }
+
+    fn open_tty(&self) -> std::io::Result<std::fs::File> {
+        super::unix::open_tty()
+    }
+
+    fn run_editor(
+        &self,
+        path: &Path,
+        tty: &std::fs::File,
+        interrupt: &dyn Fn() -> bool,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        super::unix::run_editor(path, tty, interrupt)
+    }
 }
 
 /// `~/Library/Application Support/kb/config.yml`.

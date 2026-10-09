@@ -46,3 +46,11 @@ whose title equals a common word. The over-1-MB entry is not committed: tests ge
 | `prompt/postmortem-template` | `gateway` appears only in its notes |
 
 The directory holds only entries and `queries.tsv` (kb ignores non-`.md` files), so this description lives here and not in a `README.md` that would itself count as an entry.
+
+## `tui/`: the TUI preview KB
+
+A third lint-clean KB (seven entries) for the M3 preview and snapshot tests: a long Sumo query with
+Markdown notes, a command with `enum`, `text` and `secret` variables and an escaped `\{{literal}}`,
+a prompt whose title mixes CJK and emoji, a link with a very long URL, a code entry with a symbol and
+an end line, a SQL entry with comments, strings and numbers, and a CloudWatch entry with log groups.
+Every entry has an `updated:` date so the preview's "edited" value does not depend on file times.

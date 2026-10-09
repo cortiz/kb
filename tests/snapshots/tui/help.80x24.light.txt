@@ -1,0 +1,141 @@
+ kb · ~/kb · 32 entries
+ ›                                                                      32 / 32
+  ┌ keys ────────────────────────────────────────────────────────────────────┐
+┌ │ Enter              pick and exit    Alt-P              zoom preview      │─┐
+│ │ Ctrl-Y             copy payload     ←                  cursor left       │ │
+│ │ Ctrl-E             edit entry       →                  cursor right      │ │
+│ │ ↓  Ctrl-N  Ctrl-J  next result      Home  Ctrl-A       line start        │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result  End                line end          │ │
+│ │ PgDn               page down        Backspace          delete, drop ch…  │ │
+│ │ PgUp               page up          Delete             delete            │ │
+│ │ Ctrl-End           last result      Ctrl-W             delete word       │ │
+│ │ Ctrl-Home          first result     Ctrl-U             clear line        │ │
+│ │ Tab                next type        Ctrl-L             refresh           │ │
+│ │ Shift-Tab          previous type    ?                  help              │ │
+│ │ Shift-↓            scroll preview   F1                 help              │ │
+│ │ Shift-↑            scroll preview   Esc                clear / quit      │ │
+│ │ Shift-PgDn         preview page     Ctrl-C             exit              │ │
+│ │ Shift-PgUp         preview page                                          │ │
+│ │                                                                          │ │
+│ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;     │ │
+│ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                              │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+ any key closes
+--- styles ---
+0:0..3 bold
+0:3..23 fg=241
+1:0..3 fg=166 bold
+1:3..4 reverse
+1:72..80 fg=241
+2:1..2 fg=17 bg=153 bold
+2:2..3 fg=246 bg=153 bold
+2:3..9 fg=241 bg=153 bold
+2:9..78 fg=246
+3:0..1 fg=246
+3:1..2 fg=241
+3:2..3 fg=246
+3:3..10 fg=241
+3:10..80 fg=246
+4:0..1 fg=246
+4:1..2 bg=254
+4:2..3 fg=246 bg=254 bold
+4:3..8 fg=34 bg=254 bold
+4:8..77 bg=254
+4:77..78 fg=246 bg=254
+4:78..79 bg=254
+4:79..80 fg=246
+5:0..1 fg=246
+5:1..2 bg=254
+5:2..3 fg=246 bg=254
+5:3..9 bg=254
+5:9..15 fg=241 bg=254
+5:15..77 bg=254
+5:77..78 fg=246 bg=254
+5:78..79 bg=254
+5:79..80 fg=246
+6:0..1 fg=246
+6:2..3 fg=246 bold
+6:3..8 fg=34 bold
+6:77..78 fg=246
+6:79..80 fg=246
+7:0..1 fg=246
+7:2..3 fg=246
+7:9..16 fg=241
+7:17..22 fg=241
+7:77..78 fg=246
+7:79..80 fg=246
+8:0..1 fg=246
+8:2..3 fg=246 bold
+8:3..8 fg=34 bold
+8:77..78 fg=246
+8:79..80 fg=246
+9:0..1 fg=246
+9:2..3 fg=246
+9:9..13 fg=241
+9:14..19 fg=241
+9:77..78 fg=246
+9:79..80 fg=246
+10:0..1 fg=246
+10:2..3 fg=246 bold
+10:3..8 fg=34 bold
+10:77..78 fg=246
+10:79..80 fg=246
+11:0..1 fg=246
+11:2..3 fg=246
+11:9..17 fg=241
+11:77..78 fg=246
+11:79..80 fg=246
+12:0..1 fg=246
+12:2..3 fg=246 bold
+12:3..8 fg=34 bold
+12:77..78 fg=246
+12:79..80 fg=246
+13:0..1 fg=246
+13:2..3 fg=246
+13:9..13 fg=241
+13:77..78 fg=246
+13:79..80 fg=246
+14:0..1 fg=246
+14:2..3 fg=246 bold
+14:3..8 fg=131 bold
+14:77..78 fg=246
+14:79..80 fg=246
+15:0..1 fg=246
+15:2..3 fg=246
+15:9..14 fg=241
+15:15..19 fg=241
+15:77..78 fg=246
+15:79..80 fg=246
+16:0..1 fg=246
+16:2..3 fg=246 bold
+16:3..8 fg=131 bold
+16:77..78 fg=246
+16:79..80 fg=246
+17:0..1 fg=246
+17:2..3 fg=246
+17:9..13 fg=241
+17:77..78 fg=246
+17:79..80 fg=246
+18:0..1 fg=246
+18:2..3 fg=246 bold
+18:3..8 fg=131 bold
+18:77..78 fg=246
+18:79..80 fg=246
+19:0..1 fg=246
+19:2..3 fg=246
+19:4..72 fg=241
+19:77..78 fg=246
+19:79..80 fg=246
+20:0..1 fg=246
+20:2..3 fg=246 bold
+20:3..4 fg=106 bold
+20:4..8 fg=241 bold
+20:8..47 fg=241
+20:77..78 fg=246
+20:79..80 fg=246
+21:0..1 fg=246
+21:2..78 fg=246
+21:79..80 fg=246
+22:0..80 fg=246
+23:1..15 fg=241

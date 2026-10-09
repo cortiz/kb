@@ -55,4 +55,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # M1 to M3 timing budgets, including the TUI ones (first frame, keystroke latency, frame time).
+      # They run one at a time (a mutex in perf.rs) and need `pgrep`, present on both runners.
       - run: cargo test --release -p kb --test perf -- --ignored --nocapture

@@ -1,0 +1,43 @@
+%YAML 1.2
+---
+name: CloudWatch Logs Insights
+file_extensions: [cwi]
+scope: source.cwi
+contexts:
+  main:
+    - match: '#.*$'
+      scope: comment.line.number-sign.cwi
+    - match: '"'
+      scope: punctuation.definition.string.begin.cwi
+      push: double_quoted
+    - match: "'"
+      scope: punctuation.definition.string.begin.cwi
+      push: single_quoted
+    - match: '/(?:[^/\\\n]|\\.)+/[a-z]*'
+      scope: string.regexp.cwi
+    - match: '\b(?i:fields|filter|stats|sort|limit|parse|display|dedup|like|in|as|by|and|or|not|desc|asc|unmask|pattern|diff)\b'
+      scope: keyword.control.cwi
+    - match: '\b(?i:count|count_distinct|sum|avg|min|max|pct|stddev|bin|ispresent|isblank|isempty|strlen|concat|ts|earliest|latest|sortsFirst|sortsLast|toupper|tolower|trim|ltrim|rtrim|replace|substr|abs|ceil|floor|sqrt|datefloor|dateceil|fromMillis|toMillis)(?=\s*\()'
+      scope: support.function.cwi
+    - match: '@[A-Za-z_][A-Za-z0-9_.]*'
+      scope: variable.other.field.cwi
+    - match: '\b\d+(?:\.\d+)?\b'
+      scope: constant.numeric.cwi
+    - match: '\|'
+      scope: keyword.operator.pipe.cwi
+    - match: '=~|[=!<>]=?|[-+*/%]'
+      scope: keyword.operator.cwi
+  double_quoted:
+    - meta_scope: string.quoted.double.cwi
+    - match: '\\.'
+      scope: constant.character.escape.cwi
+    - match: '"'
+      scope: punctuation.definition.string.end.cwi
+      pop: true
+  single_quoted:
+    - meta_scope: string.quoted.single.cwi
+    - match: '\\.'
+      scope: constant.character.escape.cwi
+    - match: "'"
+      scope: punctuation.definition.string.end.cwi
+      pop: true

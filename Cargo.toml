@@ -19,8 +19,23 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+syntect = { version = "5", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy", "yaml-load"] }
+signal-hook = "0.3"
+# the same crossterm ratatui uses; the feature lets the UI read keys from /dev/tty when stdin is a pipe
+crossterm = { version = "0.29", features = ["use-dev-tty"] }
+unicode-width = "0.2"
+vt100 = "0.15"
+portable-pty = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }
 unicode-normalization = "0.1"
 clap = { version = "4", features = ["derive"] }
 assert_cmd = "2"
 tempfile = "3"
+
+# Highlighting regexes are compiled and run at runtime; debug builds are ~10x slower otherwise.
+[profile.dev.package.syntect]
+opt-level = 2
+
+[profile.dev.package.fancy-regex]
+opt-level = 2

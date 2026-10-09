@@ -1,0 +1,88 @@
+ kb · ~/kb · 8 entries
+ ›                                                                                                                8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
+│ cmd    Deploy with secret token              ││ Very long documentation link                                         │
+│        #deploy #prod                         ││ https://wiki.example.com/engineering/operations/runbooks/payments/in │
+│ code   Retry handler with symbol             ││ cident-response/escalation-policy-and-contacts-for-the-on-call-rotat │
+│        #api #retry                           ││ ion?view=full&section=contacts                                       │
+│ cw     Lambda timeouts by function           ││ link · #docs · edited 2026-07-14                                     │
+│        #prod #lambda                         ││ link/long-url.md                                                     │
+│ link   Very long documentation link          ││                                                                      │
+│        #docs                                 ││ ── notes ─────────────────────────────────────────────────────────── │
+│ prompt 日本語のタイトル 🚀 とても長いタイト… ││ Where to look when payments page you at night.                       │
+│        #日本語 #🚀 #ops                      ││                                                                      │
+│ prompt Summarize an incident                 ││                                                                      │
+│        #incident #ai                         ││                                                                      │
+│ sql    Orders by status with comments        ││                                                                      │
+│        #db #orders                           ││                                                                      │
+│ sumo   Long Sumo query with sixty lines      ││                                                                      │
+│        #prod #logs #long                     ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+│                                              ││                                                                      │
+└──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
+ ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:114..120 dim
+2:1..8 bold+reverse
+3:1..10 dim
+3:49..58 dim
+4:2..8 bold
+4:50..78 bold
+5:9..16 dim
+5:17..22 dim
+5:50..118 underline
+6:2..8 bold
+6:50..118 underline
+7:9..13 dim
+7:14..20 dim
+7:50..80 underline
+8:2..8 bold
+8:50..54 bold
+8:54..82 dim
+9:9..14 dim
+9:15..22 dim
+9:50..66 dim
+10:1..2 reverse
+10:2..8 bold+reverse
+10:8..47 reverse
+11:1..9 reverse
+11:9..14 dim+reverse
+11:14..47 reverse
+12:2..8 bold
+13:9..11 dim
+13:12..13 dim
+13:14..15 dim
+13:17..19 dim
+13:21..25 dim
+14:2..8 bold
+15:9..18 dim
+15:19..22 dim
+16:2..8 bold
+17:9..12 dim
+17:13..20 dim
+18:2..8 bold
+19:9..14 dim
+19:15..20 dim
+19:21..26 dim
+39:1..74 dim

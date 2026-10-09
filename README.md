@@ -5,8 +5,8 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
-> Status: milestone M2 (entry format, `kb lint`, `kb search`). The TUI, variables at use time and
-> actions arrive in later milestones.
+> Status: milestone M3 (entry format, `kb lint`, `kb search`, the terminal UI). Variables at use
+> time, native clipboard and actions arrive in later milestones.
 
 ## Building
 
@@ -196,6 +196,76 @@ a file and the next search sees it, with no command to run. It is disposable: de
 and it is rebuilt (you only lose usage counts in `.kb/state.json`). `kb index status` shows what is
 indexed, and `kb reindex` rebuilds it from scratch. Both are git-ignored through `.kb/.gitignore`,
 which kb creates whenever it creates `.kb/`.
+
+## Using the TUI
+
+```sh
+kb                      # open the UI; type to search, Enter to pick
+kb 5xx auth             # open it with the search line already filled in
+kb | pbcopy             # the pick goes to stdout, so it pipes (macOS; use xclip or wl-copy on Linux)
+x=$(kb --print id)      # --print: payload (default), id, path or json
+kb show sumo/5xx-by-authorizer     # what Enter prints for that entry, without the UI
+kb edit sumo/5xx-by-authorizer     # what Ctrl-E does, without the UI
+```
+
+The list updates on every keystroke from the same search as `kb search` (so `type:cw`, `tag:prod `,
+`-tag:stage `, `"exact phrase"` all work; a filter followed by a space becomes a chip, and
+Backspace on an empty line removes the last one). Tab and Shift-Tab cycle the type filter. The right
+side previews the selected entry: syntax-highlighted payload with line numbers, `{variables}`
+marked and listed, type-specific fields, notes rendered from Markdown.
+
+Enter prints the entry and exits (it also counts as a use, which ranks the entry higher next time).
+Until the native clipboard arrives, Enter does not copy; pipe it, or press Ctrl-Y to ask the terminal
+to copy the payload (OSC 52: works in most modern terminals, over SSH, and in tmux with
+`set -g set-clipboard on`). Esc clears the search line, and on an empty one exits with code 130
+without printing anything. The UI is drawn on the terminal, never on stdout, so redirecting stdout
+is safe; with no terminal at all, `kb` prints the help and exits 2.
+
+| Key | Action |
+|-----|--------|
+| `Enter` | pick: print the entry and exit |
+| `Ctrl-Y` | copy the payload (terminal clipboard) |
+| `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
+| `↓  Ctrl-N  Ctrl-J` | select the next result |
+| `↑  Ctrl-P  Ctrl-K` | select the previous result |
+| `PgDn` | down one page |
+| `PgUp` | up one page |
+| `Ctrl-End` | last result |
+| `Ctrl-Home` | first result |
+| `Tab` | next type filter |
+| `Shift-Tab` | previous type filter |
+| `Shift-↓` | scroll the preview one line down |
+| `Shift-↑` | scroll the preview one line up |
+| `Shift-PgDn` | scroll the preview one page down |
+| `Shift-PgUp` | scroll the preview one page up |
+| `Alt-P` | full-screen preview (narrow terminals) |
+| `←` | cursor left |
+| `→` | cursor right |
+| `Home  Ctrl-A` | start of the line |
+| `End` | end of the line |
+| `Backspace` | delete before the cursor; on an empty line remove the last filter chip |
+| `Delete` | delete at the cursor |
+| `Ctrl-W` | delete the previous word |
+| `Ctrl-U` | clear the line |
+| `Ctrl-L` | refresh from disk |
+| `?` | this help (when the text line is empty) |
+| `F1` | this help, always |
+| `Esc` | clear the query; exit when it is empty |
+| `Ctrl-C` | exit immediately |
+| `` |  |
+| `` |  |
+| `` |  |
+| `` |  |
+| `` |  |
+| typing | edit the query |
+
+Terminals that keep Shift-PgUp/PgDn or Ctrl-Home/End for themselves never send them to kb; use
+PgUp/PgDn, Shift-↑/↓ and Alt-P instead. Below 100 columns only the list shows and Alt-P zooms the
+preview; below 60×15 kb shows "Terminal too small" until you resize.
+
+Settings in the config file (`theme: auto|dark|light`, `mouse: true|false`) and `NO_COLOR` are
+described in [`specs/003-tui-core/contracts/config.md`](specs/003-tui-core/contracts/config.md).
+`theme: auto` reads `COLORFGBG` and otherwise assumes a dark background.
 
 ## JSON output
 

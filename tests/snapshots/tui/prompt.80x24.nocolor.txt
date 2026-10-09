@@ -1,0 +1,39 @@
+ kb · ~/kb · 8 entries
+ ›                                                                        8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ preview ─────────────────────────────────────────────────────────────────────┐
+│ Summarize an incident                                                        │
+│ prompt · #incident #ai · edited 2026-05-20                                   │
+│ prompt/summarize.md                                                          │
+│                                                                              │
+│ ── payload ───────────────────────────────────────────────────────────────── │
+│ 1 Summarize the incident below in five bullets: impact, timeline, cause,     │
+│ 2 fix and follow-ups. Keep each bullet under 20 words.                       │
+│                                                                              │
+│ ── notes ─────────────────────────────────────────────────────────────────── │
+│ Paste the timeline under the prompt before sending it.                       │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Enter pick · ^Y copy · ^E edit · S-↑↓ scroll · Alt-P back
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:74..80 dim
+2:1..8 bold+reverse
+3:1..10 dim
+4:2..23 bold
+5:2..8 bold
+5:8..44 dim
+6:2..21 dim
+9:2..4 dim
+10:2..4 dim
+23:1..58 dim

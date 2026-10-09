@@ -88,6 +88,16 @@ fn search_fixture_kb_is_lint_clean() {
 }
 
 #[test]
+fn tui_fixture_kb_is_lint_clean() {
+    let root = fixtures().join("tui");
+    let report = lint(&root, &[]).unwrap();
+    assert_eq!(report.entries, md_files(&root).len());
+    assert!(report.entries >= 7);
+    assert!(report.findings.is_empty(), "{:#?}", report.findings);
+    assert!(report.suppressions.is_empty());
+}
+
+#[test]
 fn invalid_fixtures_match_expectations() {
     assert!(check_dir("invalid") >= 37);
 }

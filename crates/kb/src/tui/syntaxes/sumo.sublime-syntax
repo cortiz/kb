@@ -1,0 +1,29 @@
+%YAML 1.2
+---
+name: Sumo Logic
+file_extensions: [sumo]
+scope: source.sumo
+contexts:
+  main:
+    - match: '//.*$'
+      scope: comment.line.double-slash.sumo
+    - match: '"'
+      scope: punctuation.definition.string.begin.sumo
+      push: double_quoted
+    - match: '\b(?i:where|parse|json|count|sum|avg|min|max|by|sort|top|limit|timeslice|fields|if|as|nodrop|lookup|join|extract|format|formatdate|tolowercase|touppercase|concat|desc|asc|and|or|not|in|like|matches|regex|field|multi|auto)\b'
+      scope: keyword.control.sumo
+    - match: '\b(?:_sourceCategory|_sourceHost|_sourceName|_source|_index|_collector|_messageTime|_raw|_view)\b'
+      scope: variable.other.field.sumo
+    - match: '\b\d+(?:\.\d+)?\b'
+      scope: constant.numeric.sumo
+    - match: '\|'
+      scope: keyword.operator.pipe.sumo
+    - match: '=~|[=!<>]=?|\*'
+      scope: keyword.operator.sumo
+  double_quoted:
+    - meta_scope: string.quoted.double.sumo
+    - match: '\\.'
+      scope: constant.character.escape.sumo
+    - match: '"'
+      scope: punctuation.definition.string.end.sumo
+      pop: true

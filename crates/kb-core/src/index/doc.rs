@@ -15,6 +15,7 @@ pub struct Doc {
     pub tags: Vec<String>,
     pub vars: Vec<String>,
     pub code_repo: Option<String>,
+    pub updated: Option<String>,
     /// FTS columns: title, tags, id, meta, payload, notes.
     pub cols: [String; 6],
 }
@@ -104,6 +105,7 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
         tags,
         vars: entry.vars().iter().map(|v| v.name.clone()).collect(),
         code_repo,
+        updated: entry.updated().map(str::to_string),
     })
 }
 

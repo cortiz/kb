@@ -18,6 +18,23 @@ impl Platform for Linux {
             self.home_dir().as_deref(),
         )
     }
+
+    fn has_terminal(&self) -> bool {
+        super::unix::has_terminal()
+    }
+
+    fn open_tty(&self) -> std::io::Result<std::fs::File> {
+        super::unix::open_tty()
+    }
+
+    fn run_editor(
+        &self,
+        path: &Path,
+        tty: &std::fs::File,
+        interrupt: &dyn Fn() -> bool,
+    ) -> std::io::Result<Option<std::process::ExitStatus>> {
+        super::unix::run_editor(path, tty, interrupt)
+    }
 }
 
 /// `$XDG_CONFIG_HOME/kb/config.yml`, else `~/.config/kb/config.yml`. A relative or empty

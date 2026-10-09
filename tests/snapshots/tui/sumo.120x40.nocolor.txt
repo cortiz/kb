@@ -1,0 +1,117 @@
+ kb · ~/kb · 8 entries
+ ›                                                                                                                8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
+│ cmd    Deploy with secret token              ││ Long Sumo query with sixty lines                                     │
+│        #deploy #prod                         ││ sumo · #prod #logs #long · edited 2026-09-30                         │
+│ code   Retry handler with symbol             ││ sumo/long-query.md                                                   │
+│        #api #retry                           ││                                                                      │
+│ cw     Lambda timeouts by function           ││ ── payload ───────────────────────────────────────────────────────── │
+│        #prod #lambda                         ││  1 _sourceCategory=prod/api                                          │
+│ link   Very long documentation link          ││  2 | where status >= 401 | count by host_1                           │
+│        #docs                                 ││  3 | where status >= 402 | count by host_2                           │
+│ prompt 日本語のタイトル 🚀 とても長いタイト… ││  4 // stage 3: filter and count                                      │
+│        #日本語 #🚀 #ops                      ││  5 | where status >= 404 | count by host_4                           │
+│ prompt Summarize an incident                 ││  6 | where status >= 405 | count by host_5                           │
+│        #incident #ai                         ││  7 // stage 6: filter and count                                      │
+│ sql    Orders by status with comments        ││  8 | where status >= 407 | count by host_7                           │
+│        #db #orders                           ││  9 | where status >= 408 | count by host_8                           │
+│ sumo   Long Sumo query with sixty lines      ││ 10 // stage 9: filter and count                                      │
+│        #prod #logs #long                     ││ 11 | where status >= 410 | count by host_10                          │
+│                                              ││ 12 | where status >= 411 | count by host_11                          │
+│                                              ││ 13 // stage 12: filter and count                                     │
+│                                              ││ 14 | where status >= 413 | count by host_13                          │
+│                                              ││ 15 | where status >= 414 | count by host_14                          │
+│                                              ││ 16 // stage 15: filter and count                                     │
+│                                              ││ 17 | where status >= 416 | count by host_16                          │
+│                                              ││ 18 | where status >= 417 | count by host_17                          │
+│                                              ││ 19 // stage 18: filter and count                                     │
+│                                              ││ 20 | where status >= 419 | count by host_19                          │
+│                                              ││ 21 | where status >= 420 | count by host_20                          │
+│                                              ││ 22 // stage 21: filter and count                                     │
+│                                              ││ 23 | where status >= 422 | count by host_22                          │
+│                                              ││ 24 | where status >= 423 | count by host_23                          │
+│                                              ││ 25 // stage 24: filter and count                                     │
+│                                              ││ 26 | where status >= 425 | count by host_25                          │
+│                                              ││ 27 | where status >= 426 | count by host_26                          │
+│                                              ││ 28 // stage 27: filter and count                                     │
+│                                              ││ 29 | where status >= 428 | count by host_28                   ↓ more │
+└──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
+ ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · S-↑↓ scroll · ? help · Esc quit
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:114..120 dim
+2:1..8 bold+reverse
+3:1..10 dim
+3:49..58 dim
+4:2..8 bold
+4:50..82 bold
+5:9..16 dim
+5:17..22 dim
+5:50..54 bold
+5:54..94 dim
+6:2..8 bold
+6:50..68 dim
+7:9..13 dim
+7:14..20 dim
+8:2..8 bold
+9:9..14 dim
+9:15..22 dim
+9:50..53 dim
+10:2..8 bold
+10:50..53 dim
+11:9..14 dim
+11:50..53 dim
+12:2..8 bold
+12:50..53 dim
+13:9..11 dim
+13:12..13 dim
+13:14..15 dim
+13:17..19 dim
+13:21..25 dim
+13:50..53 dim
+14:2..8 bold
+14:50..53 dim
+15:9..18 dim
+15:19..22 dim
+15:50..53 dim
+16:2..8 bold
+16:50..53 dim
+17:9..12 dim
+17:13..20 dim
+17:50..53 dim
+18:1..2 reverse
+18:2..8 bold+reverse
+18:8..47 reverse
+18:50..53 dim
+19:1..9 reverse
+19:9..14 dim+reverse
+19:14..15 reverse
+19:15..20 dim+reverse
+19:20..21 reverse
+19:21..26 dim+reverse
+19:26..47 reverse
+19:50..53 dim
+20:50..53 dim
+21:50..53 dim
+22:50..53 dim
+23:50..53 dim
+24:50..53 dim
+25:50..53 dim
+26:50..53 dim
+27:50..53 dim
+28:50..53 dim
+29:50..53 dim
+30:50..53 dim
+31:50..53 dim
+32:50..53 dim
+33:50..53 dim
+34:50..53 dim
+35:50..53 dim
+36:50..53 dim
+37:50..53 dim
+37:112..118 dim
+39:1..88 dim

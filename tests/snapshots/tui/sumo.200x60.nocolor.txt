@@ -1,0 +1,157 @@
+ kb · ~/kb · 8 entries
+ ›                                                                                                                                                                                                8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ results ─────────────────────────────────────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ cmd    Deploy with secret token                                              ││ Long Sumo query with sixty lines                                                                                     │
+│        #deploy #prod                                                         ││ sumo · #prod #logs #long · edited 2026-09-30                                                                         │
+│ code   Retry handler with symbol                                             ││ sumo/long-query.md                                                                                                   │
+│        #api #retry                                                           ││                                                                                                                      │
+│ cw     Lambda timeouts by function                                           ││ ── payload ───────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│        #prod #lambda                                                         ││  1 _sourceCategory=prod/api                                                                                          │
+│ link   Very long documentation link                                          ││  2 | where status >= 401 | count by host_1                                                                           │
+│        #docs                                                                 ││  3 | where status >= 402 | count by host_2                                                                           │
+│ prompt 日本語のタイトル 🚀 とても長いタイトルがここに続きます。端末の幅を超… ││  4 // stage 3: filter and count                                                                                      │
+│        #日本語 #🚀 #ops                                                      ││  5 | where status >= 404 | count by host_4                                                                           │
+│ prompt Summarize an incident                                                 ││  6 | where status >= 405 | count by host_5                                                                           │
+│        #incident #ai                                                         ││  7 // stage 6: filter and count                                                                                      │
+│ sql    Orders by status with comments                                        ││  8 | where status >= 407 | count by host_7                                                                           │
+│        #db #orders                                                           ││  9 | where status >= 408 | count by host_8                                                                           │
+│ sumo   Long Sumo query with sixty lines                                      ││ 10 // stage 9: filter and count                                                                                      │
+│        #prod #logs #long                                                     ││ 11 | where status >= 410 | count by host_10                                                                          │
+│                                                                              ││ 12 | where status >= 411 | count by host_11                                                                          │
+│                                                                              ││ 13 // stage 12: filter and count                                                                                     │
+│                                                                              ││ 14 | where status >= 413 | count by host_13                                                                          │
+│                                                                              ││ 15 | where status >= 414 | count by host_14                                                                          │
+│                                                                              ││ 16 // stage 15: filter and count                                                                                     │
+│                                                                              ││ 17 | where status >= 416 | count by host_16                                                                          │
+│                                                                              ││ 18 | where status >= 417 | count by host_17                                                                          │
+│                                                                              ││ 19 // stage 18: filter and count                                                                                     │
+│                                                                              ││ 20 | where status >= 419 | count by host_19                                                                          │
+│                                                                              ││ 21 | where status >= 420 | count by host_20                                                                          │
+│                                                                              ││ 22 // stage 21: filter and count                                                                                     │
+│                                                                              ││ 23 | where status >= 422 | count by host_22                                                                          │
+│                                                                              ││ 24 | where status >= 423 | count by host_23                                                                          │
+│                                                                              ││ 25 // stage 24: filter and count                                                                                     │
+│                                                                              ││ 26 | where status >= 425 | count by host_25                                                                          │
+│                                                                              ││ 27 | where status >= 426 | count by host_26                                                                          │
+│                                                                              ││ 28 // stage 27: filter and count                                                                                     │
+│                                                                              ││ 29 | where status >= 428 | count by host_28                                                                          │
+│                                                                              ││ 30 | where status >= 429 | count by host_29                                                                          │
+│                                                                              ││ 31 // stage 30: filter and count                                                                                     │
+│                                                                              ││ 32 | where status >= 431 | count by host_31                                                                          │
+│                                                                              ││ 33 | where status >= 432 | count by host_32                                                                          │
+│                                                                              ││ 34 // stage 33: filter and count                                                                                     │
+│                                                                              ││ 35 | where status >= 434 | count by host_34                                                                          │
+│                                                                              ││ 36 | where status >= 435 | count by host_35                                                                          │
+│                                                                              ││ 37 // stage 36: filter and count                                                                                     │
+│                                                                              ││ 38 | where status >= 437 | count by host_37                                                                          │
+│                                                                              ││ 39 | where status >= 438 | count by host_38                                                                          │
+│                                                                              ││ 40 // stage 39: filter and count                                                                                     │
+│                                                                              ││ 41 | where status >= 440 | count by host_40                                                                          │
+│                                                                              ││ 42 | where status >= 441 | count by host_41                                                                          │
+│                                                                              ││ 43 // stage 42: filter and count                                                                                     │
+│                                                                              ││ 44 | where status >= 443 | count by host_43                                                                          │
+│                                                                              ││ 45 | where status >= 444 | count by host_44                                                                          │
+│                                                                              ││ 46 // stage 45: filter and count                                                                                     │
+│                                                                              ││ 47 | where status >= 446 | count by host_46                                                                          │
+│                                                                              ││ 48 | where status >= 447 | count by host_47                                                                          │
+│                                                                              ││ 49 // stage 48: filter and count                                                                              ↓ more │
+└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · S-↑↓ scroll · ? help · Esc quit
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:194..200 dim
+2:1..8 bold+reverse
+3:1..10 dim
+3:81..90 dim
+4:2..8 bold
+4:82..114 bold
+5:9..16 dim
+5:17..22 dim
+5:82..86 bold
+5:86..126 dim
+6:2..8 bold
+6:82..100 dim
+7:9..13 dim
+7:14..20 dim
+8:2..8 bold
+9:9..14 dim
+9:15..22 dim
+9:82..85 dim
+10:2..8 bold
+10:82..85 dim
+11:9..14 dim
+11:82..85 dim
+12:2..8 bold
+12:82..85 dim
+13:9..11 dim
+13:12..13 dim
+13:14..15 dim
+13:17..19 dim
+13:21..25 dim
+13:82..85 dim
+14:2..8 bold
+14:82..85 dim
+15:9..18 dim
+15:19..22 dim
+15:82..85 dim
+16:2..8 bold
+16:82..85 dim
+17:9..12 dim
+17:13..20 dim
+17:82..85 dim
+18:1..2 reverse
+18:2..8 bold+reverse
+18:8..79 reverse
+18:82..85 dim
+19:1..9 reverse
+19:9..14 dim+reverse
+19:14..15 reverse
+19:15..20 dim+reverse
+19:20..21 reverse
+19:21..26 dim+reverse
+19:26..79 reverse
+19:82..85 dim
+20:82..85 dim
+21:82..85 dim
+22:82..85 dim
+23:82..85 dim
+24:82..85 dim
+25:82..85 dim
+26:82..85 dim
+27:82..85 dim
+28:82..85 dim
+29:82..85 dim
+30:82..85 dim
+31:82..85 dim
+32:82..85 dim
+33:82..85 dim
+34:82..85 dim
+35:82..85 dim
+36:82..85 dim
+37:82..85 dim
+38:82..85 dim
+39:82..85 dim
+40:82..85 dim
+41:82..85 dim
+42:82..85 dim
+43:82..85 dim
+44:82..85 dim
+45:82..85 dim
+46:82..85 dim
+47:82..85 dim
+48:82..85 dim
+49:82..85 dim
+50:82..85 dim
+51:82..85 dim
+52:82..85 dim
+53:82..85 dim
+54:82..85 dim
+55:82..85 dim
+56:82..85 dim
+57:82..85 dim
+57:192..198 dim
+59:1..88 dim

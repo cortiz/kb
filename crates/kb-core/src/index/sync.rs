@@ -177,8 +177,16 @@ fn delete_entry(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 fn insert_doc(conn: &Connection, id: &str, doc: &Doc, vocab: bool) -> rusqlite::Result<()> {
     let tags = serde_json::to_string(&doc.tags).unwrap_or_else(|_| "[]".into());
     conn.execute(
-        "INSERT INTO entries(id, type, title, title_fold, tags, code_repo) VALUES (?1,?2,?3,?4,?5,?6)",
-        params![id, doc.entry_type, doc.title, doc.title_fold, tags, doc.code_repo],
+        "INSERT INTO entries(id, type, title, title_fold, tags, code_repo, updated) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+        params![
+            id,
+            doc.entry_type,
+            doc.title,
+            doc.title_fold,
+            tags,
+            doc.code_repo,
+            doc.updated
+        ],
     )?;
     let rowid = conn.last_insert_rowid();
     conn.execute(

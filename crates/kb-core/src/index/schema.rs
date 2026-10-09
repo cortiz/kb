@@ -2,7 +2,7 @@
 //! [`INDEX_VERSION`] means "rebuild", never "migrate".
 
 /// Bump when the schema or the way documents are built changes.
-pub const INDEX_VERSION: u32 = 1;
+pub const INDEX_VERSION: u32 = 2;
 
 /// BM25 weights for the FTS columns, in column order: title, tags, id, meta, payload, notes
 /// (spec FR-012: title, tags, ID, variable names and type-specific fields, payload, notes).
@@ -29,7 +29,7 @@ CREATE TABLE files(
     hash INTEGER NOT NULL, status TEXT NOT NULL, reason TEXT);
 CREATE TABLE entries(
     id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL, title_fold TEXT NOT NULL,
-    tags TEXT NOT NULL, code_repo TEXT);
+    tags TEXT NOT NULL, code_repo TEXT, updated TEXT);
 CREATE INDEX entries_title_fold ON entries(title_fold);
 CREATE INDEX entries_type ON entries(type);
 CREATE INDEX entries_code_repo ON entries(code_repo);

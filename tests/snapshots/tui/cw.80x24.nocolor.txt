@@ -1,0 +1,45 @@
+ kb · ~/kb · 8 entries
+ ›                                                                        8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ preview ─────────────────────────────────────────────────────────────────────┐
+│ Lambda timeouts by function                                                  │
+│ cw · #prod #lambda · edited 2026-09-12                                       │
+│ cw/with-fields.md                                                            │
+│                                                                              │
+│ ── payload ───────────────────────────────────────────────────────────────── │
+│ 1 fields @timestamp, @message, @logStream                                    │
+│ 2 | filter @message like /Task timed out/                                    │
+│ 3 | stats count(*) as n by @logStream                                        │
+│ 4 | sort n desc                                                              │
+│ 5 | limit 20                                                                 │
+│                                                                              │
+│ ── fields ────────────────────────────────────────────────────────────────── │
+│ log groups /aws/lambda/api, /aws/lambda/worker                               │
+│ range      -1h                                                               │
+│ region     eu-west-1                                                         │
+│                                                                              │
+│ ── notes ─────────────────────────────────────────────────────────────────── │
+│ Check the function memory before raising the timeout.                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Enter pick · ^Y copy · ^E edit · S-↑↓ scroll · Alt-P back
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:74..80 dim
+2:1..8 bold+reverse
+3:1..10 dim
+4:2..29 bold
+5:2..4 bold
+5:4..40 dim
+6:2..19 dim
+9:2..4 dim
+10:2..4 dim
+11:2..4 dim
+12:2..4 dim
+13:2..4 dim
+16:2..13 dim
+17:2..13 dim
+18:2..13 dim
+23:1..58 dim

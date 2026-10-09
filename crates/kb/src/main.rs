@@ -3,19 +3,20 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use kb_core::config::read_config;
+use kb_core::entry_json::PrintMode;
 use kb_core::init::{apply_init, plan_init};
 use kb_core::lint::{LintError, lint, resolve_scope};
 use kb_core::query::Query;
 use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
-mod color;
-mod output;
-mod platform;
-
-use output::CliError;
-use platform::Platform;
+use kb_cli::output::CliError;
+use kb_cli::platform::{self, Platform};
+use kb_cli::tui::app::Options;
+use kb_cli::tui::{self, Outcome};
+use kb_cli::{color, commands, output};
 
 /// A terminal knowledge base for operational snippets.
 #[derive(Parser)]
@@ -27,6 +28,52 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Args, Default)]
+struct TuiArgs {
+    /// Initial text for the search line.
+    query: Vec<String>,
+    /// What Enter prints: payload, id, path or json.
+    #[arg(long, value_name = "MODE", default_value = "payload", value_parser = parse_print)]
+    print: PrintMode,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+impl TuiArgs {
+    /// The text for the search line: the words, then each excluded tag as `-tag:x`.
+    fn initial_query(&self) -> String {
+        let mut parts: Vec<String> = self.query.clone();
+        parts.extend(self.not_tags.iter().map(|t| format!("-tag:{t}")));
+        parts.join(" ")
+    }
+}
+
+fn parse_print(s: &str) -> Result<PrintMode, String> {
+    PrintMode::parse(s).ok_or_else(|| format!("expected one of {}", PrintMode::NAMES.join(", ")))
+}
+
+#[derive(Args)]
+struct ShowArgs {
+    /// The entry ID, for example `sumo/5xx-by-authorizer`.
+    id: String,
+    /// What to print: payload, id, path or json.
+    #[arg(long, value_name = "MODE", default_value = "payload", value_parser = parse_print)]
+    print: PrintMode,
+    /// Same as `--print json`.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct EditArgs {
+    /// The entry ID.
+    id: String,
+    /// Print errors as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Subcommand)]
@@ -42,6 +89,12 @@ enum Command {
     /// Inspect the search index.
     #[command(subcommand)]
     Index(IndexCommand),
+    /// Open the terminal UI (the same as running `kb` with no subcommand).
+    Tui(TuiArgs),
+    /// Print an entry the way picking it in the UI does.
+    Show(ShowArgs),
+    /// Open an entry's file in $VISUAL / $EDITOR.
+    Edit(EditArgs),
 }
 
 #[derive(Subcommand)]
@@ -132,21 +185,64 @@ fn rewrite_not_tag(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<std::f
     out
 }
 
+/// `kb 5xx auth` and plain `kb` open the UI: when the first thing after the global options is
+/// not a subcommand (or a help or version flag), `tui` is inserted there. This is done before
+/// clap sees the arguments because clap cannot mix free words with subcommands after a global
+/// option.
+fn insert_tui(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
+    let known: Vec<String> = Cli::command()
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .chain(["help".to_string()])
+        .collect();
+    let mut i = 1;
+    while i < args.len() {
+        let Some(a) = args[i].to_str() else {
+            break;
+        };
+        if a == "--root" {
+            i += 2;
+        } else if a.starts_with("--root=") {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    let first = args.get(i).and_then(|a| a.to_str());
+    let leave = match first {
+        Some("-h" | "--help" | "-V" | "--version") => true,
+        Some(a) => known.iter().any(|k| k == a),
+        None => false,
+    };
+    if leave {
+        return args;
+    }
+    let mut out = args;
+    out.insert(i.min(out.len()), "tui".into());
+    out
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse_from(rewrite_not_tag(std::env::args_os()));
+    let cli = Cli::parse_from(insert_tui(rewrite_not_tag(std::env::args_os())));
     let json = match &cli.command {
         Command::Init(a) => a.json,
         Command::Lint(a) => a.json,
         Command::Search(a) => a.json,
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
+        Command::Show(a) => a.json,
+        Command::Edit(a) => a.json,
+        Command::Tui(_) => false,
     };
-    match run(cli) {
-        Ok(code) => code,
-        Err(e) => {
+    // A panic has already restored the terminal and printed its message (see the hook in
+    // `tui::terminal`); it ends the program with the usual error code instead of 101.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(cli))) {
+        Ok(Ok(code)) => code,
+        Ok(Err(e)) => {
             output::print_error(&e, json);
             ExitCode::from(2)
         }
+        Err(_) => ExitCode::from(2),
     }
 }
 
@@ -165,6 +261,9 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
+        Command::Show(args) => run_show(&root, &args),
+        Command::Edit(args) => commands::run_edit(&platform, &root, &args.id),
+        Command::Tui(args) => run_tui(&platform, &root, &args),
     }
 }
 
@@ -225,6 +324,57 @@ fn lint_error(e: LintError) -> CliError {
     CliError::new(kind, e.to_string())
 }
 
+fn run_show(root: &std::path::Path, args: &ShowArgs) -> Result<ExitCode, CliError> {
+    use std::io::Write;
+    let mode = if args.json {
+        PrintMode::Json
+    } else {
+        args.print
+    };
+    let out = commands::run_show(root, &args.id, mode)?;
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(out.as_bytes());
+    let _ = stdout.flush();
+    Ok(ExitCode::SUCCESS)
+}
+
+fn run_tui(
+    platform: &impl Platform,
+    root: &std::path::Path,
+    args: &TuiArgs,
+) -> Result<ExitCode, CliError> {
+    use std::io::Write;
+    if !platform.has_terminal() {
+        let mut help = Cli::command();
+        let _ = help.write_long_help(&mut std::io::stderr());
+        eprintln!("\nkb: the terminal UI needs a terminal; use `kb search` in scripts");
+        return Ok(ExitCode::from(2));
+    }
+    let config = read_config(platform.config_file().as_deref())
+        .map_err(|e| CliError::new("config", e.to_string()))?;
+    let options = Options {
+        print: args.print,
+        mouse: config.mouse,
+        theme: config.theme,
+        // Timing tests set this so the background refresh does not add noise.
+        refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
+    };
+    match tui::run(platform, root, &args.initial_query(), options)
+        .map_err(|e| CliError::new("io", e))?
+    {
+        Outcome::Picked { output, warnings } => {
+            for w in warnings {
+                eprintln!("kb: warning: {w}");
+            }
+            let mut stdout = std::io::stdout();
+            let _ = stdout.write_all(output.as_bytes());
+            let _ = stdout.flush();
+            Ok(ExitCode::SUCCESS)
+        }
+        Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+    }
+}
+
 fn kb_error(e: kb_core::search::KbError) -> CliError {
     CliError::new("io", e.to_string())
 }
@@ -283,13 +433,92 @@ fn run_index_status(root: &std::path::Path, args: &JsonArgs) -> Result<ExitCode,
 
 #[cfg(test)]
 mod tests {
-    use super::rewrite_not_tag;
+    use super::{insert_tui, rewrite_not_tag};
+
+    fn tui(args: &[&str]) -> Vec<String> {
+        insert_tui(args.iter().map(Into::into).collect())
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn free_words_and_bare_kb_open_the_ui() {
+        assert_eq!(tui(&["kb"]), ["kb", "tui"]);
+        assert_eq!(tui(&["kb", "5xx", "auth"]), ["kb", "tui", "5xx", "auth"]);
+        assert_eq!(
+            tui(&["kb", "--root", "/k", "5xx"]),
+            ["kb", "--root", "/k", "tui", "5xx"]
+        );
+        assert_eq!(tui(&["kb", "--root=/k"]), ["kb", "--root=/k", "tui"]);
+        assert_eq!(
+            tui(&["kb", "--print", "id", "x"]),
+            ["kb", "tui", "--print", "id", "x"]
+        );
+        assert_eq!(tui(&["kb", "serach", "x"]), ["kb", "tui", "serach", "x"]);
+    }
+
+    #[test]
+    fn subcommands_and_help_are_left_alone() {
+        for a in [
+            &["kb", "lint"][..],
+            &["kb", "--root", "/k", "search", "x"],
+            &["kb", "--root=/k", "index", "status"],
+            &["kb", "tui", "x"],
+            &["kb", "show", "a/b"],
+            &["kb", "--help"],
+            &["kb", "-V"],
+            &["kb", "help", "lint"],
+            &["kb", "--root", "/k", "--version"],
+        ] {
+            assert_eq!(tui(a), a, "{a:?}");
+        }
+    }
 
     fn run(args: &[&str]) -> Vec<String> {
         rewrite_not_tag(args.iter().map(Into::into))
             .into_iter()
             .map(|a| a.into_string().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn minus_tag_works_for_the_ui_too() {
+        use clap::Parser;
+        for args in [
+            &["kb", "latency", "-tag:stage"][..],
+            &["kb", "-tag:stage"],
+            &[
+                "kb",
+                "--root",
+                "/k",
+                "type:cw",
+                "-tag:stage",
+                "-tag:old",
+                "x",
+            ],
+            &["kb", "tui", "x", "-tag:stage"],
+        ] {
+            let rewritten = insert_tui(rewrite_not_tag(args.iter().map(Into::into)));
+            let cli =
+                super::Cli::try_parse_from(rewritten).unwrap_or_else(|e| panic!("{args:?}: {e}"));
+            let super::Command::Tui(t) = cli.command else {
+                panic!("{args:?} is not the UI");
+            };
+            assert!(
+                t.initial_query().contains("-tag:stage"),
+                "{args:?}: {}",
+                t.initial_query()
+            );
+        }
+        let cli = super::Cli::try_parse_from(insert_tui(rewrite_not_tag(
+            ["kb", "type:cw", "-tag:stage", "x"].iter().map(Into::into),
+        )))
+        .unwrap();
+        let super::Command::Tui(t) = cli.command else {
+            panic!()
+        };
+        assert_eq!(t.initial_query(), "type:cw x -tag:stage");
     }
 
     #[test]

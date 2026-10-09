@@ -136,6 +136,12 @@ pub struct Snippet {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchResult {
     pub id: String,
+    /// Times the entry was used (from `.kb/state.json`; 0 when never).
+    pub use_count: u64,
+    /// The entry's `updated:` value as written, if it has one.
+    pub updated: Option<String>,
+    /// The file's modification time, unix seconds.
+    pub modified: Option<i64>,
     pub entry_type: EntryType,
     pub title: String,
     pub tags: Vec<String>,
@@ -151,9 +157,26 @@ pub struct SearchOutcome {
     pub results: Vec<SearchResult>,
     /// Matches before the limit (at most 1,000 for text queries).
     pub total: usize,
+    /// Candidates per entry type (index = `EntryType::ALL` order) for the text and non-type
+    /// filters, before the type filter and paging.
+    pub type_counts: [usize; 7],
+    /// Entries in the index.
+    pub indexed: usize,
+    /// Entries left out of the index because of errors.
+    pub skipped: usize,
     /// No file in the KB was indexed or skipped.
     pub kb_empty: bool,
     pub notices: Vec<Notice>,
+}
+
+/// What a refresh found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Refresh {
+    pub indexed: usize,
+    pub skipped: usize,
+    /// Rebuilt, read-only and state-reset notices (not the skipped count).
+    pub notices: Vec<Notice>,
+    pub duration: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +194,8 @@ pub struct Kb {
     pub(crate) after_query: Option<Box<dyn Fn()>>,
     /// How many times the vocabulary was scanned for typo variants.
     pub(crate) vocab_scans: Cell<usize>,
+    /// The synced index kept between `refresh` and `query`.
+    held: Option<index::Index>,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -221,6 +246,7 @@ impl Kb {
             reader: Box::new(FsReader),
             after_query: None,
             vocab_scans: Cell::new(0),
+            held: None,
         })
     }
 
@@ -253,6 +279,11 @@ impl Kb {
         Ok((path, rel))
     }
 
+    /// The absolute path of the entry file, checking that it exists.
+    pub fn entry_path(&self, id: &str) -> Result<PathBuf, KbError> {
+        self.entry_file(id).map(|(path, _)| path)
+    }
+
     /// Looks up one entry by ID (FR-024). Doesn't use the index.
     pub fn entry(&self, id: &str) -> Result<Entry, KbError> {
         let (path, rel) = self.entry_file(id)?;
@@ -280,6 +311,14 @@ impl Kb {
         })
     }
 
+    /// What `kb show --print <mode>` prints for `id` (and what picking it in the TUI prints).
+    pub fn pick(&self, id: &str, mode: crate::entry_json::PrintMode) -> Result<String, KbError> {
+        let (path, _) = self.entry_file(id)?;
+        let entry = self.entry(id)?;
+        crate::entry_json::pick_output(&entry, &path, mode)
+            .map_err(|e| KbError::Unreadable(format!("{id}: {e}")))
+    }
+
     pub fn usage(&self, id: &str) -> Option<UsageRecord> {
         State::load(&self.root).0.usage.get(id).cloned()
     }
@@ -301,100 +340,170 @@ impl Kb {
         if changed {
             let _ = state.save(&self.root);
         }
-        Ok(ReindexReport {
+        let report = ReindexReport {
             indexed: synced.index.indexed(),
             skipped: synced.index.skipped(),
             duration: started.elapsed(),
-        })
+        };
+        self.held = Some(synced.index);
+        Ok(report)
     }
 
-    /// Searches (FR-023). Brings the index up to date first (FR-002).
-    pub fn search(&mut self, query: &Query, now: SystemTime) -> Result<SearchOutcome, KbError> {
+    /// Walks the KB and brings the index up to date (FR-002); the synced index is kept for
+    /// `query`. Re-opens the index file every time, so a file replaced by another process is
+    /// noticed.
+    pub fn refresh(&mut self) -> Result<Refresh, KbError> {
+        self.refresh_with(false)
+    }
+
+    fn refresh_with(&mut self, force: bool) -> Result<Refresh, KbError> {
+        let started = Instant::now();
         let walk = self.walk()?;
         let (mut state, state_notice) = State::load(&self.root);
+        self.held = None;
+        let synced = index::open_synced(&self.root, &walk, self.reader.as_ref(), force)?;
+        if apply_facts(&mut state, &synced) {
+            let _ = state.save(&self.root);
+        }
+        let mut notices = synced.notices.clone();
+        notices.extend(state_notice);
+        let refresh = Refresh {
+            indexed: synced.index.indexed(),
+            skipped: synced.index.skipped(),
+            notices,
+            duration: started.elapsed(),
+        };
+        self.held = Some(synced.index);
+        Ok(refresh)
+    }
+
+    /// Searches (FR-023): `refresh` then `query`.
+    pub fn search(&mut self, query: &Query, now: SystemTime) -> Result<SearchOutcome, KbError> {
+        let refresh = self.refresh()?;
+        let mut outcome = self.query(query, now)?;
+        let mut notices = refresh.notices;
+        notices.append(&mut outcome.notices);
+        if refresh.skipped > 0 {
+            notices.push(Notice::Skipped {
+                count: refresh.skipped,
+            });
+        }
+        outcome.notices = notices;
+        Ok(outcome)
+    }
+
+    /// Searches the held index without walking the files (see `refresh`). Refreshes first when
+    /// there is no held index yet; rebuilds once if the index turns out to be corrupt.
+    pub fn query(&mut self, query: &Query, now: SystemTime) -> Result<SearchOutcome, KbError> {
+        let mut notices = Vec::new();
+        if self.held.is_none() {
+            notices = self.refresh()?.notices;
+        }
         let mut attempt = 0;
         loop {
-            let synced = index::open_synced(&self.root, &walk, self.reader.as_ref(), attempt > 0)?;
-            match self.run(&synced, query, &state, now) {
+            let (state, _) = State::load(&self.root);
+            let Some(index) = self.held.as_ref() else {
+                return Err(KbError::Index("no index".into()));
+            };
+            match self.run(index, query, &state, now) {
                 Ok(mut outcome) => {
-                    if apply_facts(&mut state, &synced) {
-                        let _ = state.save(&self.root);
-                    }
-                    let mut notices = synced.notices.clone();
-                    notices.extend(state_notice);
                     for h in &query.hints {
                         notices.push(match h {
                             Hint::UnknownFilter(k) => Notice::UnknownFilter { key: k.clone() },
                             Hint::UnknownType(n) => Notice::UnknownType { name: n.clone() },
                         });
                     }
-                    let skipped = synced.index.skipped();
-                    if skipped > 0 {
-                        notices.push(Notice::Skipped { count: skipped });
-                    }
-                    outcome.kb_empty = synced.index.indexed() + skipped == 0;
                     outcome.notices = notices;
                     return Ok(outcome);
                 }
-                Err(Fail::Corrupt) if attempt == 0 => attempt += 1,
+                Err(Fail::Corrupt) if attempt == 0 => {
+                    attempt += 1;
+                    notices = self.refresh_with(true)?.notices;
+                }
                 Err(Fail::Corrupt) => return Err(KbError::Index("the index is corrupt".into())),
                 Err(Fail::Other(e)) => return Err(e),
             }
         }
     }
 
+    /// The errors `kb lint` would report for this entry's file (empty when it is valid).
+    pub fn lint_entry(&self, id: &str) -> Result<Vec<crate::lint::Finding>, KbError> {
+        let (path, rel) = self.entry_file(id)?;
+        let bytes = std::fs::read(&path).map_err(|e| KbError::Io {
+            path: path.clone(),
+            message: e.to_string(),
+        })?;
+        let file = crate::walk::WalkEntry {
+            id: id.to_string(),
+            rel_path: rel,
+            abs_path: path,
+        };
+        let mut findings = crate::lint::check_file(&file, bytes).findings;
+        findings.retain(|f| f.severity == crate::lint::Severity::Error);
+        findings.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        Ok(findings)
+    }
+
     fn run(
         &self,
-        synced: &Synced,
+        index: &index::Index,
         q: &Query,
         state: &State,
         now: SystemTime,
     ) -> Result<SearchOutcome, Fail> {
-        let conn = &synced.index.conn;
+        let conn = &index.conn;
         let (filter_sql, filter_params) = filters(q);
         let mut cands: Vec<Cand> = Vec::new();
         let mut expr_for_highlight: Option<String> = None;
 
         if q.is_empty() {
-            let sql = format!("SELECT e.id FROM entries e WHERE {filter_sql}");
+            let sql = format!("SELECT e.id, e.type FROM entries e WHERE {filter_sql}");
             let mut stmt = conn.prepare(&sql)?;
-            let ids = stmt.query_map(params_from_iter(filter_params.iter()), |r| {
-                r.get::<_, String>(0)
+            let rows = stmt.query_map(params_from_iter(filter_params.iter()), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })?;
-            for id in ids {
-                let id = id?;
+            for row in rows {
+                let (id, ty) = row?;
+                let Some(ty) = EntryType::from_name(&ty) else {
+                    continue;
+                };
                 let f = frecency(state.usage.get(&id), now);
                 cands.push(Cand {
                     id,
+                    ty,
                     score: f,
                     tier: Tier::Exact,
                 });
             }
         } else {
             let base = terms_expr(q, &HashMap::new(), true);
-            let mut rel: HashMap<String, f64> = HashMap::new();
+            let mut rel: HashMap<String, (EntryType, f64)> = HashMap::new();
             if let Some(expr) = &base {
-                for (id, s) in fts_query(conn, expr, &filter_sql, &filter_params)? {
-                    rel.insert(id, s);
+                for (id, ty, s) in fts_query(conn, expr, &filter_sql, &filter_params)? {
+                    rel.insert(id, (ty, s));
                 }
                 expr_for_highlight = Some(expr.clone());
             }
             // Whole-word matches get a bonus.
             let mut exact: HashSet<String> = HashSet::new();
             if let Some(expr) = terms_expr(q, &HashMap::new(), false) {
-                for (id, _) in fts_query(conn, &expr, &filter_sql, &filter_params)? {
+                for (id, _, _) in fts_query(conn, &expr, &filter_sql, &filter_params)? {
                     exact.insert(id);
                 }
             }
-            let mut typo: HashMap<String, f64> = HashMap::new();
-            if q.limit == 0 || rel.len() < q.limit {
+            let mut typo: HashMap<String, (EntryType, f64)> = HashMap::new();
+            let visible = rel
+                .values()
+                .filter(|(ty, _)| q.types.is_empty() || q.types.contains(ty))
+                .count();
+            if q.limit == 0 || visible < q.limit {
                 let variants = self.variants(conn, q)?;
                 if !variants.is_empty()
                     && let Some(expr) = terms_expr(q, &variants, true)
                 {
-                    for (id, s) in fts_query(conn, &expr, &filter_sql, &filter_params)? {
+                    for (id, ty, s) in fts_query(conn, &expr, &filter_sql, &filter_params)? {
                         if !rel.contains_key(&id) {
-                            typo.insert(id, s);
+                            typo.insert(id, (ty, s));
                         }
                     }
                     expr_for_highlight = Some(expr);
@@ -404,42 +513,63 @@ impl Kb {
                 .split_whitespace()
                 .collect::<Vec<_>>()
                 .join(" ");
-            let mut title_hits: HashSet<String> = HashSet::new();
+            let mut title_hits: HashMap<String, EntryType> = HashMap::new();
             if !title_key.is_empty() {
-                let sql =
-                    format!("SELECT e.id FROM entries e WHERE e.title_fold = ? AND {filter_sql}");
+                let sql = format!(
+                    "SELECT e.id, e.type FROM entries e WHERE e.title_fold = ? AND {filter_sql}"
+                );
                 let mut p = vec![Value::Text(title_key)];
                 p.extend(filter_params.iter().cloned());
                 let mut stmt = conn.prepare(&sql)?;
-                let ids = stmt.query_map(params_from_iter(p.iter()), |r| r.get::<_, String>(0))?;
-                for id in ids {
-                    title_hits.insert(id?);
+                let rows = stmt.query_map(params_from_iter(p.iter()), |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?;
+                for row in rows {
+                    let (id, ty) = row?;
+                    if let Some(ty) = EntryType::from_name(&ty) {
+                        title_hits.insert(id, ty);
+                    }
                 }
             }
-            let mut push = |id: String, relevance: f64, tier: Tier, all_exact: bool| {
-                let f = frecency(state.usage.get(&id), now);
-                let mut score = relevance * (1.0 + FRECENCY_BOOST * f);
-                if all_exact {
-                    score *= EXACT_BONUS;
-                }
-                let tier = if title_hits.contains(&id) {
-                    Tier::TitleExact
-                } else {
-                    tier
+            let mut push =
+                |id: String, ty: EntryType, relevance: f64, tier: Tier, all_exact: bool| {
+                    let f = frecency(state.usage.get(&id), now);
+                    let mut score = relevance * (1.0 + FRECENCY_BOOST * f);
+                    if all_exact {
+                        score *= EXACT_BONUS;
+                    }
+                    let tier = if title_hits.contains_key(&id) {
+                        Tier::TitleExact
+                    } else {
+                        tier
+                    };
+                    cands.push(Cand {
+                        id,
+                        ty,
+                        score,
+                        tier,
+                    });
                 };
-                cands.push(Cand { id, score, tier });
-            };
-            for (id, r) in &rel {
-                push(id.clone(), *r, Tier::Exact, exact.contains(id));
+            for (id, (ty, r)) in &rel {
+                push(id.clone(), *ty, *r, Tier::Exact, exact.contains(id));
             }
-            for (id, r) in &typo {
-                push(id.clone(), *r, Tier::Typo, false);
+            for (id, (ty, r)) in &typo {
+                push(id.clone(), *ty, *r, Tier::Typo, false);
             }
-            for id in &title_hits {
+            for (id, ty) in &title_hits {
                 if !rel.contains_key(id) && !typo.contains_key(id) {
-                    push(id.clone(), 0.0, Tier::Exact, true);
+                    push(id.clone(), *ty, 0.0, Tier::Exact, true);
                 }
             }
+        }
+        let mut type_counts = [0usize; 7];
+        for c in &cands {
+            if let Some(i) = EntryType::ALL.iter().position(|t| *t == c.ty) {
+                type_counts[i] += 1;
+            }
+        }
+        if !q.types.is_empty() {
+            cands.retain(|c| q.types.contains(&c.ty));
         }
         cands.sort_by(|a, b| {
             a.tier
@@ -458,7 +588,7 @@ impl Kb {
             if results.len() >= want {
                 break;
             }
-            let Some(mut r) = load_result(conn, &cand)? else {
+            let Some(mut r) = load_result(conn, &cand, state)? else {
                 continue;
             };
             if !self.root.join(&r.path).is_file() {
@@ -469,10 +599,14 @@ impl Kb {
             }
             results.push(r);
         }
+        let (indexed, skipped) = (index.indexed(), index.skipped());
         Ok(SearchOutcome {
             results,
             total,
-            kb_empty: false,
+            type_counts,
+            indexed,
+            skipped,
+            kb_empty: indexed + skipped == 0,
             notices: Vec::new(),
         })
     }
@@ -514,6 +648,7 @@ impl Kb {
 
 struct Cand {
     id: String,
+    ty: EntryType,
     score: f64,
     tier: Tier,
 }
@@ -565,11 +700,6 @@ fn filters(q: &Query) -> (String, Vec<Value>) {
     let mut params: Vec<Value> = Vec::new();
     if q.types.is_empty() && !q.bad_types.is_empty() {
         conds.push("0".into());
-    }
-    if !q.types.is_empty() {
-        let marks = vec!["?"; q.types.len()].join(",");
-        conds.push(format!("e.type IN ({marks})"));
-        params.extend(q.types.iter().map(|t| Value::Text(t.name().into())));
     }
     for t in &q.tags {
         conds.push("EXISTS (SELECT 1 FROM entry_tags t WHERE t.id = e.id AND t.tag = ?)".into());
@@ -632,10 +762,10 @@ fn fts_query(
     expr: &str,
     filter_sql: &str,
     filter_params: &[Value],
-) -> Result<Vec<(String, f64)>, rusqlite::Error> {
+) -> Result<Vec<(String, EntryType, f64)>, rusqlite::Error> {
     let w = WEIGHTS;
     let sql = format!(
-        "SELECT e.id, -bm25(fts, {}, {}, {}, {}, {}, {}) AS rel \
+        "SELECT e.id, e.type, -bm25(fts, {}, {}, {}, {}, {}, {}) AS rel \
          FROM fts JOIN entries e ON e.rowid = fts.rowid \
          WHERE fts MATCH ? AND {filter_sql} ORDER BY rel DESC, e.id LIMIT {CANDIDATE_CAP}",
         w[0], w[1], w[2], w[3], w[4], w[5]
@@ -644,15 +774,30 @@ fn fts_query(
     p.extend(filter_params.iter().cloned());
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(p.iter()), |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, f64>(2)?,
+        ))
     })?;
-    rows.collect()
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, ty, rel) = row?;
+        if let Some(ty) = EntryType::from_name(&ty) {
+            out.push((id, ty, rel));
+        }
+    }
+    Ok(out)
 }
 
-fn load_result(conn: &Connection, cand: &Cand) -> Result<Option<SearchResult>, Fail> {
+fn load_result(
+    conn: &Connection,
+    cand: &Cand,
+    state: &State,
+) -> Result<Option<SearchResult>, Fail> {
     let row = conn.query_row(
-        "SELECT e.type, e.title, e.tags, f.path FROM entries e JOIN files f ON f.id = e.id \
-         WHERE e.id = ?1",
+        "SELECT e.type, e.title, e.tags, f.path, e.updated, f.mtime_ns FROM entries e \
+         JOIN files f ON f.id = e.id WHERE e.id = ?1",
         [&cand.id],
         |r| {
             Ok((
@@ -660,10 +805,12 @@ fn load_result(conn: &Connection, cand: &Cand) -> Result<Option<SearchResult>, F
                 r.get::<_, String>(1)?,
                 r.get::<_, String>(2)?,
                 r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, i64>(5)?,
             ))
         },
     );
-    let (ty, title, tags, path) = match row {
+    let (ty, title, tags, path, updated, mtime_ns) = match row {
         Ok(r) => r,
         Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
         Err(e) => return Err(e.into()),
@@ -673,6 +820,9 @@ fn load_result(conn: &Connection, cand: &Cand) -> Result<Option<SearchResult>, F
     };
     Ok(Some(SearchResult {
         id: cand.id.clone(),
+        use_count: state.usage.get(&cand.id).map_or(0, |u| u.count),
+        updated,
+        modified: Some(mtime_ns / 1_000_000_000),
         entry_type,
         title,
         tags: serde_json::from_str(&tags).unwrap_or_default(),

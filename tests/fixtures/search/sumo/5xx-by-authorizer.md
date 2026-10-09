@@ -3,6 +3,7 @@ kb_format: 1
 type: sumo
 title: 5xx by authorizer
 tags: [auth, lambda]
+updated: 2026-09-30
 ---
 
 ```

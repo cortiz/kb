@@ -7,6 +7,9 @@ use std::time::{Duration, SystemTime};
 
 use assert_cmd::Command;
 
+pub mod pty;
+pub mod snapshot;
+
 pub fn fixtures() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }

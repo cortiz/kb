@@ -175,3 +175,169 @@ fn typo_search_under_100ms() {
     println!("typo search median: {m:?}");
     assert!(m < Duration::from_millis(50), "median {m:?}");
 }
+
+// ---- the TUI (SC-001, SC-002, SC-005, FR-019) ----
+
+use support::pty::{ENTER, Session, Spec};
+
+fn tui_home(root: &Path) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    // the KB lives where the test generated it; HOME only has to exist
+    let _ = root;
+    home
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn first_frame_under_100ms() {
+    let _serial = serial();
+    let dir = indexed_kb();
+    let home = tui_home(dir.path());
+    let run = || {
+        let started = Instant::now();
+        let mut s = Session::spawn(&Spec::new(&[], home.path(), dir.path()));
+        s.wait_for(" kb");
+        let took = started.elapsed();
+        s.send(support::pty::CTRL_C);
+        s.wait_exit();
+        took
+    };
+    run(); // warm the file system cache
+    let m = median((0..10).map(|_| run()).collect());
+    println!("first frame median: {m:?}");
+    assert!(m < Duration::from_millis(100), "median {m:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn keystroke_to_updated_list_under_50ms() {
+    let _serial = serial();
+    let dir = indexed_kb();
+    let home = tui_home(dir.path());
+    for (label, timer) in [("refresh timer off", false), ("refresh timer on", true)] {
+        let mut spec = Spec::new(&[], home.path(), dir.path());
+        if !timer {
+            spec = spec.env("KB_TUI_NO_REFRESH_TIMER", "1");
+        }
+        let mut s = Session::spawn(&spec);
+        s.wait_for("10000 entries");
+        s.wait_for("Enter pick");
+        let mut times = Vec::new();
+        for c in "kubectl".chars() {
+            let before = s.rows()[1].clone();
+            let started = Instant::now();
+            s.send(c.to_string().as_bytes());
+            s.wait_until("the counter changed", |t| {
+                t.lines().nth(1).is_some_and(|l| l != before)
+            });
+            times.push(started.elapsed());
+        }
+        let m = median(times.clone());
+        println!(
+            "keystroke to list ({label}): median {m:?}, worst {:?}",
+            times.iter().max().unwrap()
+        );
+        assert!(m < Duration::from_millis(50), "{label}: median {m:?}");
+        s.send(support::pty::CTRL_C);
+        s.wait_exit();
+    }
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn one_frame_with_ten_thousand_results_under_16ms() {
+    let _serial = serial();
+    use kb_cli::tui::app::{Action, AppState, Options, Page};
+    use kb_cli::tui::theme::Theme;
+    use kb_core::entry::EntryType;
+    use kb_core::search::{SearchResult, Tier};
+    let results: Vec<SearchResult> = (0..10_000)
+        .map(|i| SearchResult {
+            id: format!("group-{:02}/entry-{i:05}", i % 50),
+            use_count: (i % 7) as u64,
+            updated: None,
+            modified: Some(1_790_000_000),
+            entry_type: EntryType::ALL[i % 7],
+            title: format!("A reasonably long title for entry number {i} with some words"),
+            tags: vec!["prod".into(), "logs".into(), "perf".into()],
+            path: format!("group-{:02}/entry-{i:05}.md", i % 50),
+            score: 1.0,
+            tier: Tier::Exact,
+            matches: vec![],
+            snippet: None,
+        })
+        .collect();
+    let mut state = AppState::new(Options::default(), (200, 60), "", "~/kb".into());
+    state.update(
+        Action::Refreshed(kb_cli::tui::app::RefreshInfo {
+            indexed: 10_000,
+            skipped: 0,
+            duration: Duration::ZERO,
+        }),
+        Instant::now(),
+    );
+    let g = state.search_gen;
+    state.update(
+        Action::Results(
+            g,
+            Page {
+                results,
+                total: 10_000,
+                type_counts: [1_429, 1_429, 1_429, 1_429, 1_428, 1_428, 1_428],
+                indexed: 10_000,
+                skipped: 0,
+                notices: vec![],
+            },
+        ),
+        Instant::now(),
+    );
+    let theme = Theme::dark();
+    let area = ratatui::layout::Rect::new(0, 0, 200, 60);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    kb_cli::tui::view::draw(&state, &theme, area, &mut buf);
+    let times: Vec<Duration> = (0..50)
+        .map(|_| {
+            let started = Instant::now();
+            kb_cli::tui::view::draw(&state, &theme, area, &mut buf);
+            started.elapsed()
+        })
+        .collect();
+    let m = median(times.clone());
+    println!(
+        "draw with 10,000 results: median {m:?}, worst {:?}",
+        times.iter().max().unwrap()
+    );
+    assert!(m < Duration::from_millis(16), "median {m:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn finding_and_picking_a_named_entry_under_5s() {
+    let _serial = serial();
+    let dir = indexed_kb();
+    let home = tui_home(dir.path());
+    let text = fs::read_to_string(generated_path(dir.path(), 4_321)).unwrap();
+    let title = text
+        .lines()
+        .find_map(|l| l.strip_prefix("title: "))
+        .unwrap()
+        .to_string();
+    let out = home.path().join("out");
+    let mut spec = Spec::new(&[], home.path(), dir.path());
+    spec.out = Some(out.clone());
+    let started = Instant::now();
+    let mut s = Session::spawn(&spec);
+    s.wait_for("10000 entries");
+    s.type_text(&title);
+    s.wait_until("the entry", |t| {
+        t.lines()
+            .nth(4)
+            .is_some_and(|l| l.contains(&title[..title.len().min(30)]))
+    });
+    s.send(ENTER);
+    assert_eq!(s.wait_exit(), 0);
+    let took = started.elapsed();
+    println!("start to pick of {title:?}: {took:?}");
+    assert!(took < Duration::from_secs(5), "{took:?}");
+    assert!(fs::read_to_string(&out).unwrap().len() > 10);
+}

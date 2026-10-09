@@ -1,0 +1,197 @@
+ kb · ~/kb · 8 entries
+ ›                                                                                                                                                                                                8 / 8
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+┌ results ─────────────────────────────────────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ cmd    Deploy with secret token                                              ││ 日本語のタイトル 🚀 とても長いタイトルがここに続きます。端末の幅を超えても表示が崩れないことを確認します 🎉🎉        │
+│        #deploy #prod                                                         ││ prompt · #日本語 #🚀 #ops · edited 2026-08-01                                                                        │
+│ code   Retry handler with symbol                                             ││ prompt/cjk-and-emoji.md                                                                                              │
+│        #api #retry                                                           ││                                                                                                                      │
+│ cw     Lambda timeouts by function                                           ││ ── payload ───────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│        #prod #lambda                                                         ││ 1 次のインシデントを要約してください 🔥                                                                              │
+│ link   Very long documentation link                                          ││                                                                                                                      │
+│        #docs                                                                 ││ ── notes ─────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│ prompt 日本語のタイトル 🚀 とても長いタイトルがここに続きます。端末の幅を超… ││ メモ: 絵文字と全角文字の幅を確認する。                                                                               │
+│        #日本語 #🚀 #ops                                                      ││                                                                                                                      │
+│ prompt Summarize an incident                                                 ││                                                                                                                      │
+│        #incident #ai                                                         ││                                                                                                                      │
+│ sql    Orders by status with comments                                        ││                                                                                                                      │
+│        #db #orders                                                           ││                                                                                                                      │
+│ sumo   Long Sumo query with sixty lines                                      ││                                                                                                                      │
+│        #prod #logs #long                                                     ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit
+--- styles ---
+0:0..3 bold
+0:3..22 dim
+1:0..3 bold
+1:3..4 reverse
+1:194..200 dim
+2:1..8 bold+reverse
+3:1..10 dim
+3:81..90 dim
+4:2..8 bold
+4:82..83 bold
+4:84..85 bold
+4:86..87 bold
+4:88..89 bold
+4:90..91 bold
+4:92..93 bold
+4:94..95 bold
+4:96..97 bold
+4:98..100 bold
+4:101..103 bold
+4:104..105 bold
+4:106..107 bold
+4:108..109 bold
+4:110..111 bold
+4:112..113 bold
+4:114..115 bold
+4:116..117 bold
+4:118..119 bold
+4:120..121 bold
+4:122..123 bold
+4:124..125 bold
+4:126..127 bold
+4:128..129 bold
+4:130..131 bold
+4:132..133 bold
+4:134..135 bold
+4:136..137 bold
+4:138..139 bold
+4:140..141 bold
+4:142..143 bold
+4:144..145 bold
+4:146..147 bold
+4:148..149 bold
+4:150..151 bold
+4:152..153 bold
+4:154..155 bold
+4:156..157 bold
+4:158..159 bold
+4:160..161 bold
+4:162..163 bold
+4:164..165 bold
+4:166..167 bold
+4:168..169 bold
+4:170..171 bold
+4:172..173 bold
+4:174..175 bold
+4:176..177 bold
+4:178..179 bold
+4:180..181 bold
+4:182..183 bold
+4:184..185 bold
+4:186..188 bold
+4:189..190 bold
+5:9..16 dim
+5:17..22 dim
+5:82..88 bold
+5:88..93 dim
+5:94..95 dim
+5:96..97 dim
+5:98..101 dim
+5:102..127 dim
+6:2..8 bold
+6:82..105 dim
+7:9..13 dim
+7:14..20 dim
+8:2..8 bold
+9:9..14 dim
+9:15..22 dim
+9:82..84 dim
+10:2..8 bold
+11:9..14 dim
+12:1..2 reverse
+12:2..8 bold+reverse
+12:8..10 reverse
+12:11..12 reverse
+12:13..14 reverse
+12:15..16 reverse
+12:17..18 reverse
+12:19..20 reverse
+12:21..22 reverse
+12:23..24 reverse
+12:25..27 reverse
+12:28..30 reverse
+12:31..32 reverse
+12:33..34 reverse
+12:35..36 reverse
+12:37..38 reverse
+12:39..40 reverse
+12:41..42 reverse
+12:43..44 reverse
+12:45..46 reverse
+12:47..48 reverse
+12:49..50 reverse
+12:51..52 reverse
+12:53..54 reverse
+12:55..56 reverse
+12:57..58 reverse
+12:59..60 reverse
+12:61..62 reverse
+12:63..64 reverse
+12:65..66 reverse
+12:67..68 reverse
+12:69..70 reverse
+12:71..72 reverse
+12:73..74 reverse
+12:75..76 reverse
+12:77..79 reverse
+13:1..9 reverse
+13:9..11 dim+reverse
+13:12..13 dim+reverse
+13:14..15 dim+reverse
+13:16..17 reverse
+13:17..19 dim+reverse
+13:20..21 reverse
+13:21..25 dim+reverse
+13:25..79 reverse
+14:2..8 bold
+15:9..18 dim
+15:19..22 dim
+16:2..8 bold
+17:9..12 dim
+17:13..20 dim
+18:2..8 bold
+19:9..14 dim
+19:15..20 dim
+19:21..26 dim
+59:1..74 dim
