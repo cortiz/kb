@@ -1,0 +1,24 @@
+[workspace]
+members = ["crates/kb-core", "crates/kb"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+repository = "https://github.com/cortiz/kb"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.dependencies]
+kb-core = { path = "crates/kb-core" }
+saphyr-parser = "0.1"
+pulldown-cmark = { version = "0.13", default-features = false }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+clap = { version = "4", features = ["derive"] }
+assert_cmd = "2"
+tempfile = "3"

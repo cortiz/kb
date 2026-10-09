@@ -51,7 +51,7 @@ performance test run in release mode in CI.
 **Constraints**: no network, no telemetry. No writes to the KB root except entries and `.kb/`.
 Never rewrite a file with an unsupported `kb_format`. Secret values never appear in output.
 
-**Scale/Scope**: 7 entry types, 44 lint rules, 2 commands, KBs up to about 10,000 entries of
+**Scale/Scope**: 7 entry types, 48 lint rules, 2 commands, KBs up to about 10,000 entries of
 up to about 1 MB each.
 
 ## Constitution Check

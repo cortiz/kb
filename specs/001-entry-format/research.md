@@ -109,8 +109,10 @@ described below (`saphyr-parser` 0.1.0, `pulldown-cmark` 0.13.4, Rust 1.97).
 ## R8. Type suggestions ("did you mean")
 
 - **Decision**: suggest a known value when it is a prefix of the input (`sumologic` → `sumo`) or
-  within Levenshtein distance 2 (`cdm` → `cmd`), preferring the prefix match. The same helper is
-  used for unknown keys (`tilte` → `title`) and for `shell` values. Levenshtein is about 15 lines.
+  within edit distance 2 (`cdm` → `cmd`), preferring the prefix match. The distance is optimal
+  string alignment (Levenshtein plus swaps of two adjacent characters), so a swapped pair costs 1
+  and `cdm` picks `cmd` over `cw`. The same helper is used for unknown keys (`tilte` → `title`) and
+  for `shell` values. The distance function is about 20 lines.
 - **Alternatives considered**: `strsim` is not worth a dependency for one function.
 
 ## R9. Dates (FR-005)

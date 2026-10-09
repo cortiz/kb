@@ -1,0 +1,23 @@
+[package]
+name = "kb"
+description = "A terminal knowledge base for operational snippets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "kb"
+path = "src/main.rs"
+
+[dependencies]
+kb-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+[package]
+name = "kb-core"
+description = "Core library for kb: entry format, parser, validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+saphyr-parser.workspace = true
+pulldown-cmark.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[test]]
+name = "lint_fixtures"
+path = "../../tests/lint_fixtures.rs"
+
+[[test]]
+name = "roundtrip"
+path = "../../tests/roundtrip.rs"
+
+[lints]
+workspace = true
