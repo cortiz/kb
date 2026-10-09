@@ -232,3 +232,119 @@ fn info_and_suppressed_counts_and_lines() {
         "3 entries, 0 errors, 0 warnings, 1 info, 2 suppressed\n"
     );
 }
+
+fn keys(v: &serde_json::Value) -> Vec<String> {
+    let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+    k.sort();
+    k
+}
+
+#[test]
+fn json_report_matches_the_schema() {
+    let (_d, root) = valid_kb();
+    fs::write(
+        root.join("sql/bad.md"),
+        "---\nkb_format: 1\ntype: sql\ntitle: T\nowner: me\n---\n\n```\nselect 1;\n```\n",
+    )
+    .unwrap();
+    let before = fs::read(root.join("sql/bad.md")).unwrap();
+    let (out, code) = stdout(
+        kb().arg("--root")
+            .arg(&root)
+            .args(["lint", "--json", "--strict"]),
+    );
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(&out).expect("one JSON document");
+    assert_eq!(
+        keys(&v),
+        vec!["findings", "root", "summary", "suppressions", "version"]
+    );
+    assert_eq!(v["version"], 1);
+    assert_eq!(
+        keys(&v["summary"]),
+        vec![
+            "entries",
+            "errors",
+            "failed",
+            "info",
+            "suppressed",
+            "warnings"
+        ]
+    );
+    assert_eq!(v["summary"]["info"], 1);
+    assert_eq!(v["summary"]["failed"], false);
+    let f = &v["findings"][0];
+    assert_eq!(
+        keys(f),
+        vec![
+            "code", "column", "fix", "id", "line", "message", "path", "severity"
+        ]
+    );
+    assert_eq!(f["severity"], "info");
+    assert_eq!(f["code"], "KB016-unknown-key");
+    assert_eq!(f["path"], "sql/bad.md");
+    assert_eq!(f["id"], "sql/bad");
+    assert_eq!(
+        (f["line"].as_u64(), f["column"].as_u64()),
+        (Some(5), Some(1))
+    );
+    assert!(f["fix"].is_null());
+    assert_eq!(
+        fs::read(root.join("sql/bad.md")).unwrap(),
+        before,
+        "lint never changes files"
+    );
+}
+
+#[test]
+fn json_codes_and_severities_are_well_formed() {
+    let root = fixtures().join("invalid");
+    let (out, code) = stdout(kb().arg("--root").arg(&root).args(["lint", "--json"]));
+    assert_eq!(code, 1);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["summary"]["failed"], true);
+    for f in v["findings"].as_array().unwrap() {
+        let code = f["code"].as_str().unwrap();
+        assert!(
+            code.len() > 6
+                && code.starts_with("KB")
+                && code[2..5].bytes().all(|b| b.is_ascii_digit())
+                && &code[5..6] == "-",
+            "{code}"
+        );
+        assert!(["error", "warning", "info"].contains(&f["severity"].as_str().unwrap()));
+    }
+}
+
+#[test]
+fn json_suppressions() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    fs::create_dir_all(&root).unwrap();
+    fs::copy(fixtures().join("secrets/suppressed.md"), root.join("s.md")).unwrap();
+    let (out, _) = stdout(kb().arg("--root").arg(&root).args(["lint", "--json"]));
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["summary"]["suppressed"], 2);
+    assert_eq!(keys(&v["suppressions"][0]), vec!["code", "line", "path"]);
+}
+
+#[test]
+fn json_usage_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = kb()
+        .arg("--root")
+        .arg(dir.path().join("missing"))
+        .args(["lint", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let v: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(v["error"]["kind"], "usage");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("does not exist")
+    );
+}

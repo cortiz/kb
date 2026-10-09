@@ -230,6 +230,12 @@ impl<'a> Builder<'a> {
                     saphyr_parser::ScalarStyle::Literal => ScalarStyle::Literal,
                     saphyr_parser::ScalarStyle::Folded => ScalarStyle::Folded,
                 };
+                let mut sp = sp;
+                if let Some(end) = self.closing_quote(sp.start, style) {
+                    // The parser's end marker can run past the closing quote, over trailing
+                    // spaces and a comment; the value ends at the quote.
+                    sp.end = end;
+                }
                 Ok(Node::Scalar {
                     value: value.into_owned(),
                     style,
@@ -310,6 +316,30 @@ impl<'a> Builder<'a> {
             }
             _ => Err(self.syntax(sp.start, "unexpected YAML structure")),
         }
+    }
+
+    /// Absolute offset just after the closing quote of a quoted scalar starting at `start`.
+    fn closing_quote(&self, start: usize, style: ScalarStyle) -> Option<usize> {
+        let rel = start - self.base;
+        let bytes = self.text.as_bytes();
+        let quote = match style {
+            ScalarStyle::Single => b'\'',
+            ScalarStyle::Double => b'"',
+            _ => return None,
+        };
+        if bytes.get(rel) != Some(&quote) {
+            return None;
+        }
+        let mut i = rel + 1;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' if quote == b'"' => i += 2,
+                b'\'' if quote == b'\'' && bytes.get(i + 1) == Some(&b'\'') => i += 2,
+                b if b == quote => return Some(self.base + i + 1),
+                _ => i += 1,
+            }
+        }
+        None
     }
 
     fn collection_props(&mut self, at: usize, anchor: usize, tagged: bool) {
@@ -501,6 +531,16 @@ mod tests {
         assert_eq!(r.get("d").unwrap().as_int(), Some(147));
         let (k, _) = r.entry("c").unwrap();
         assert_eq!(&text[k.span.clone()], "c");
+    }
+
+    #[test]
+    fn quoted_spans_stop_at_the_closing_quote() {
+        let text = "a: \"H \\\" i\"   # c\nb: 'it''s'  # c\nc: { d: \"q\" }  # c\n";
+        let r = root(text);
+        assert_eq!(slice(text, r.get("a").unwrap()), "\"H \\\" i\"");
+        assert_eq!(r.get("a").unwrap().as_str(), Some("H \" i"));
+        assert_eq!(slice(text, r.get("b").unwrap()), "'it''s'");
+        assert_eq!(slice(text, r.get("c").unwrap().get("d").unwrap()), "\"q\"");
     }
 
     #[test]

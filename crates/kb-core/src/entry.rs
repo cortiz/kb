@@ -177,7 +177,6 @@ pub struct Entry {
     pub(crate) id: String,
     pub(crate) path: String,
     pub(crate) source: Source,
-    #[allow(dead_code)] // read by `edit.rs` (User Story 3)
     pub(crate) split: Split,
     pub(crate) tree: Node,
     pub(crate) kb_format: Option<u32>,

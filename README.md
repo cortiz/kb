@@ -162,3 +162,22 @@ sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type "sumologic"; expected o
 Exit codes: `0` no errors (and no warnings with `--strict`), `1` findings failed the run, `2` usage
 or I/O error, such as a missing KB root. Every rule code is listed in
 [`specs/001-entry-format/contracts/lint-rules.md`](specs/001-entry-format/contracts/lint-rules.md).
+
+## JSON output
+
+Both commands take `--json` and print a single JSON document, so kb composes with `jq`, `fzf` and
+scripts:
+
+```sh
+kb lint --json | jq -r '.findings[] | select(.severity == "error") | "\(.path):\(.line) \(.code)"'
+kb lint --json | jq '.summary'
+kb init ~/kb --json | jq '.created'
+```
+
+The formats are defined in
+[`lint-report.schema.json`](specs/001-entry-format/contracts/lint-report.schema.json) and
+[`init-report.schema.json`](specs/001-entry-format/contracts/init-report.schema.json). On a usage or
+I/O error (exit code `2`), `--json` prints `{"error": {"kind": "...", "message": "..."}}`.
+
+kb never changes an entry while reading it: parsing then writing an unmodified file reproduces it
+byte for byte, including comments, quoting and line endings.

@@ -367,6 +367,24 @@ impl LintReport {
         i32::from(failed)
     }
 
+    /// The `kb lint --json` document (contracts/lint-report.schema.json, version 1).
+    pub fn to_json(&self, strict: bool) -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "root": self.root.to_string_lossy(),
+            "summary": {
+                "entries": self.entries,
+                "errors": self.count(Severity::Error),
+                "warnings": self.count(Severity::Warning),
+                "info": self.count(Severity::Info),
+                "suppressed": self.suppressions.len(),
+                "failed": self.exit_code(strict) != 0,
+            },
+            "findings": self.findings,
+            "suppressions": self.suppressions,
+        })
+    }
+
     /// `284 entries, 0 errors, 0 warnings`, plus info and suppressed counts when non-zero.
     pub fn summary_line(&self) -> String {
         let plural =

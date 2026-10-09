@@ -129,7 +129,11 @@ fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliErro
     let cwd = std::env::current_dir().map_err(|e| CliError::new("io", e.to_string()))?;
     let scope = resolve_scope(root, &cwd, &args.paths).map_err(lint_error)?;
     let report = lint(root, &scope).map_err(lint_error)?;
-    output::print_lint(&report, args.quiet);
+    if args.json {
+        println!("{}", report.to_json(args.strict));
+    } else {
+        output::print_lint(&report, args.quiet);
+    }
     Ok(ExitCode::from(
         u8::try_from(report.exit_code(args.strict)).unwrap_or(1),
     ))
