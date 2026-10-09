@@ -1,0 +1,3 @@
+_sourceCategory=prod/k8s/payments
+| json "log" nodrop
+| where log matches "*timeout*"

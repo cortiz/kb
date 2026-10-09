@@ -14,8 +14,8 @@ use std::process::ExitStatus;
 use std::time::Duration;
 
 use super::{
-    ConfigPaths, CopyTool, Editor, Environment, NativeTool, Opened, OpenerCommand, Os, Platform,
-    ToolError, clipboard, config_paths,
+    ConfigPaths, CopyTool, Editor, Environment, GitOutput, MAX_READ_BYTES, NativeTool, Opened,
+    OpenerCommand, Os, Platform, TempFile, ToolError, clipboard, config_paths,
 };
 
 /// How a fake clipboard program behaves. A program that is not in the table is not installed.
@@ -25,6 +25,21 @@ pub enum FakeTool {
     Fail(i32),
     Hang,
 }
+
+/// How a fake clipboard read program behaves. A program that is not in the table is not installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FakeRead {
+    /// Prints this text.
+    Text(String),
+    /// Prints these bytes (not necessarily UTF-8).
+    Bytes(Vec<u8>),
+    /// Is installed and exits with this status, printing nothing.
+    Fail(i32),
+    Timeout,
+}
+
+type GitScript = Box<dyn Fn(&[String]) -> Result<GitOutput, ToolError>>;
+type EditEffect = Box<dyn Fn(&Path)>;
 
 /// Something the code under test asked the platform to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +51,9 @@ pub enum Call {
     TmuxPassthrough,
     ResolveEditor,
     RunEditor { command: String, path: PathBuf },
+    RunReadTool { tool: String },
+    RunGit { args: Vec<String> },
+    PrivateTempFile { extension: String },
 }
 
 pub struct FakePlatform {
@@ -48,6 +66,12 @@ pub struct FakePlatform {
     /// What `$VISUAL` and `$EDITOR` hold.
     pub visual: Option<String>,
     pub editor_var: Option<String>,
+    pub reads: BTreeMap<String, FakeRead>,
+    git: Option<GitScript>,
+    /// Runs when the editor "opens" a file: what the user did in it.
+    edit: Option<EditEffect>,
+    /// The editor's exit status.
+    pub editor_exit: i32,
     calls: RefCell<Vec<Call>>,
 }
 
@@ -82,12 +106,44 @@ impl FakePlatform {
             terminal: true,
             visual: None,
             editor_var: None,
+            reads: BTreeMap::new(),
+            git: None,
+            edit: None,
+            editor_exit: 0,
             calls: RefCell::new(Vec::new()),
         }
     }
 
     pub fn with_tool(mut self, name: &str, behaviour: FakeTool) -> FakePlatform {
         self.tools.insert(name.to_string(), behaviour);
+        self
+    }
+
+    /// Installs a clipboard read program that behaves like `behaviour`.
+    pub fn with_read(mut self, name: &str, behaviour: FakeRead) -> FakePlatform {
+        self.tools.insert(name.to_string(), FakeTool::Ok);
+        self.reads.insert(name.to_string(), behaviour);
+        self
+    }
+
+    /// Installs `git`, answering every call with `script`.
+    pub fn with_git(
+        mut self,
+        script: impl Fn(&[String]) -> Result<GitOutput, ToolError> + 'static,
+    ) -> FakePlatform {
+        self.tools.insert("git".to_string(), FakeTool::Ok);
+        self.git = Some(Box::new(script));
+        self
+    }
+
+    /// What happens to the file when the editor runs on it.
+    pub fn with_edit(mut self, effect: impl Fn(&Path) + 'static) -> FakePlatform {
+        self.edit = Some(Box::new(effect));
+        self
+    }
+
+    pub fn with_editor_exit(mut self, code: i32) -> FakePlatform {
+        self.editor_exit = code;
         self
     }
 
@@ -212,6 +268,44 @@ impl Platform for FakePlatform {
         }
     }
 
+    fn run_read_tool(&self, tool: &NativeTool, _timeout: Duration) -> Result<Vec<u8>, ToolError> {
+        self.record(Call::RunReadTool {
+            tool: tool.name.to_string(),
+        });
+        let bytes = match self.reads.get(tool.name) {
+            None => return Err(ToolError::NotFound),
+            Some(FakeRead::Text(s)) => s.clone().into_bytes(),
+            Some(FakeRead::Bytes(b)) => b.clone(),
+            Some(FakeRead::Fail(code)) => return Err(ToolError::Failed(Some(*code))),
+            Some(FakeRead::Timeout) => return Err(ToolError::TimedOut),
+        };
+        if bytes.len() > MAX_READ_BYTES {
+            return Err(ToolError::TooLarge);
+        }
+        Ok(bytes)
+    }
+
+    fn run_git(
+        &self,
+        _root: &Path,
+        args: &[&str],
+        _timeout: Duration,
+    ) -> Result<GitOutput, ToolError> {
+        let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
+        self.record(Call::RunGit { args: args.clone() });
+        match &self.git {
+            Some(script) => script(&args),
+            None => Err(ToolError::NotFound),
+        }
+    }
+
+    fn private_temp_file(&self, extension: &str, contents: &[u8]) -> io::Result<TempFile> {
+        self.record(Call::PrivateTempFile {
+            extension: extension.to_string(),
+        });
+        super::unix::private_temp_file(extension, contents)
+    }
+
     fn opener(&self, override_cmd: Option<&str>) -> OpenerCommand {
         let default = match self.env.os {
             Os::MacOs => "open",
@@ -254,7 +348,10 @@ impl Platform for FakePlatform {
             command: editor.command.clone(),
             path: path.to_path_buf(),
         });
-        Ok(Some(ExitStatus::from_raw(0)))
+        if let Some(effect) = &self.edit {
+            effect(path);
+        }
+        Ok(Some(ExitStatus::from_raw(self.editor_exit << 8)))
     }
 }
 
@@ -318,6 +415,31 @@ mod tests {
             command: "nvim".into(),
             path: PathBuf::from("/x/e.md")
         }));
+        let p = FakePlatform::new(linux_env(&[]))
+            .with_read("xclip", FakeRead::Text("pasted".into()))
+            .with_git(|args| {
+                Ok(GitOutput {
+                    code: Some(0),
+                    stdout: args.join(" "),
+                    stderr: String::new(),
+                })
+            });
+        let t = Duration::from_secs(2);
+        assert_eq!(
+            p.run_read_tool(&clipboard::XCLIP_OUT, t),
+            Ok(b"pasted".to_vec())
+        );
+        assert_eq!(
+            p.run_read_tool(&clipboard::XSEL_OUT, t),
+            Err(ToolError::NotFound)
+        );
+        let git = p.run_git(Path::new("/kb"), &["status", "-s"], t).unwrap();
+        assert!(git.success() && git.stdout == "status -s");
+        let temp = p.private_temp_file("md", b"hello").unwrap();
+        assert_eq!(temp.read_to_string().unwrap(), "hello");
+        let path = temp.path().to_path_buf();
+        drop(temp);
+        assert!(!path.exists(), "dropped temp files are deleted");
     }
 
     #[test]

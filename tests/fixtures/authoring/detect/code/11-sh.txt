@@ -1,0 +1,1 @@
+https://github.com/acme/ops/blob/main/scripts/rotate.sh#L3-L9

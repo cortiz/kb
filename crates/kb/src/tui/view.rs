@@ -25,6 +25,10 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     buf.set_style(area, Style::default());
     let full = state.layout_mode == LayoutMode::FullPreview;
     let screen = layout::layout(area, full);
+    if let (Screen::Ok(_), Some(add)) = (&screen, &state.add) {
+        super::add_view::draw_add(state, add, theme, area, buf);
+        return;
+    }
     if let (Screen::Ok(_), Some(form)) = (&screen, &state.form) {
         super::form_view::draw_form(state, form, theme, area, buf);
         return;

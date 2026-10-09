@@ -1,13 +1,15 @@
 //! The state of the UI and how it changes. `update` is a pure function of the state, the action
 //! and the time; everything impure (terminal, threads, clock) lives in `tui/mod.rs`.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use crate::platform::clipboard::ClipboardSettings;
-use kb_core::config::ThemeChoice;
+use crate::platform::clipboard::{ClipboardSettings, ReadOutcome};
+use kb_core::author::{Draft, DraftOptions, DraftSource};
+use kb_core::config::{PathTemplate, ThemeChoice};
 use kb_core::search::{Notice, SearchResult};
 use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 
+use super::add::{AddEvent, AddState};
 use super::form::{FormEvent, FormSpec, FormState, Submission, Then};
 use super::input::{Change, SearchInput};
 use super::keys::{self, Command, Key, Mode};
@@ -38,6 +40,19 @@ pub struct Options {
     pub fill_variables: bool,
     /// The form remembers the values it was used with (`vars.remember` and `--no-remember`).
     pub remember_vars: bool,
+    /// Where the add form puts new entries (`path_template`).
+    pub path_template: PathTemplate,
+    /// Color the body in the add form (false for `NO_COLOR`).
+    pub highlight: bool,
+    /// `kb add` opens the UI on the add form: closing it ends the UI.
+    pub start_add: Option<Box<StartAdd>>,
+}
+
+/// The draft `kb add` hands to the UI, and why the clipboard could not be read, if it could not.
+#[derive(Debug, Clone)]
+pub struct StartAdd {
+    pub draft: Draft,
+    pub unavailable: Option<String>,
 }
 
 impl Default for Options {
@@ -47,6 +62,9 @@ impl Default for Options {
             config_problems: 0,
             fill_variables: true,
             remember_vars: true,
+            path_template: PathTemplate::default(),
+            highlight: true,
+            start_add: None,
             theme: ThemeChoice::Auto,
             clipboard: ClipboardSettings::default(),
             editor: None,
@@ -134,6 +152,18 @@ pub enum Action {
     FormChanged(Box<FormSpec>),
     /// The form was used (Ctrl-Y): it closes.
     FormDone,
+    /// Ctrl-N read the clipboard.
+    ClipboardRead {
+        outcome: ReadOutcome,
+        now: SystemTime,
+    },
+    /// Tags in use in the KB, most used first.
+    TagCounts(Vec<(String, u32)>),
+    /// Ctrl-E in the add form returned: the new body (`None`: unchanged or cancelled) or why not.
+    BodyEdited(Result<Option<String>, String>),
+    /// The new entry was written.
+    Saved(String),
+    SaveFailed(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +188,15 @@ pub enum Effect {
     /// The form passed validation: check the entry did not change, then use it.
     SubmitForm(Box<Submission>),
     EditEntry(String),
+    /// Ctrl-N: read the clipboard (and ask for the tags in use) to open the add form.
+    ReadClipboard,
+    LoadTags,
+    /// Ctrl-E in the add form: edit this text in the editor.
+    EditBody(String),
+    /// Ctrl-S in the add form: write the entry.
+    SaveDraft(Box<Draft>),
+    /// `kb add`'s form saved this entry: leave the UI.
+    Added(String),
     Quit(i32),
 }
 
@@ -194,6 +233,12 @@ pub struct AppState {
     /// Values typed in a form that was closed with Esc, by entry ID (this session only).
     pub form_session:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+    /// The add form, when it is open.
+    pub add: Option<Box<AddState>>,
+    /// Tags in use in the KB with their counts, for completion in the add form.
+    pub tags: Vec<(String, u32)>,
+    /// The UI was started by `kb add`: it ends with the form.
+    pub started_by_add: bool,
 }
 
 impl AppState {
@@ -229,14 +274,33 @@ impl AppState {
             loaded: false,
             form: None,
             form_session: std::collections::BTreeMap::new(),
+            add: None,
+            tags: Vec::new(),
+            started_by_add: false,
         }
+    }
+
+    /// `kb add` starts on the form, with the list behind it only for the tags.
+    pub fn open_start_add(&mut self, start: StartAdd, now: SystemTime) {
+        self.started_by_add = true;
+        self.open_add(start.draft, start.unavailable, now);
+    }
+
+    fn open_add(&mut self, draft: Draft, unavailable: Option<String>, now: SystemTime) {
+        self.add = Some(Box::new(AddState::open(
+            draft,
+            self.tags.clone(),
+            unavailable,
+            now,
+            self.options.highlight,
+        )));
     }
 
     pub fn mode(&self) -> Mode {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
-        } else if self.form.is_some() {
+        } else if self.form.is_some() || self.add.is_some() {
             Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
@@ -270,7 +334,11 @@ impl AppState {
 
     /// The first message to send when the UI starts.
     pub fn start(&self) -> Vec<Effect> {
-        vec![Effect::Refresh]
+        if self.started_by_add {
+            vec![Effect::Refresh, Effect::LoadTags]
+        } else {
+            vec![Effect::Refresh]
+        }
     }
 
     fn search_effect(&mut self, limit: usize) -> Effect {
@@ -358,6 +426,9 @@ impl AppState {
                 if self.message.as_ref().is_some_and(|m| m.expires.is_none()) {
                     self.message = None;
                 }
+                if self.add.is_some() {
+                    return self.add_key(e);
+                }
                 if self.form.is_some() {
                     return self.form_key(e);
                 }
@@ -367,6 +438,10 @@ impl AppState {
                 }
             }
             Action::Paste(text) => {
+                if let Some(add) = &mut self.add {
+                    add.paste(&text);
+                    return Vec::new();
+                }
                 if let Some(form) = &mut self.form {
                     form.paste(&text);
                     return Vec::new();
@@ -476,6 +551,63 @@ impl AppState {
                 self.form = None;
                 Vec::new()
             }
+            Action::ClipboardRead { outcome, now: at } => {
+                let opts = DraftOptions {
+                    path_template: self.options.path_template.clone(),
+                    ..DraftOptions::default()
+                };
+                let (draft, unavailable) = match outcome {
+                    ReadOutcome::Text(text) => {
+                        (Draft::from_text(&text, DraftSource::Clipboard, &opts), None)
+                    }
+                    ReadOutcome::Empty => (Draft::empty(DraftSource::Empty, None, &opts), None),
+                    ReadOutcome::Unavailable(why) => (
+                        Draft::empty(DraftSource::Empty, None, &opts),
+                        Some(why.explain()),
+                    ),
+                };
+                self.open_add(draft, unavailable, at);
+                Vec::new()
+            }
+            Action::TagCounts(tags) => {
+                if let Some(add) = &mut self.add {
+                    add.known_tags.clone_from(&tags);
+                }
+                self.tags = tags;
+                Vec::new()
+            }
+            Action::BodyEdited(result) => {
+                if let Some(add) = &mut self.add {
+                    match result {
+                        Ok(new) => add.body_edited(new),
+                        Err(message) => add.message = Some(message),
+                    }
+                }
+                Vec::new()
+            }
+            Action::Saved(id) => {
+                let title = self
+                    .add
+                    .take()
+                    .map(|a| a.draft.title.clone())
+                    .unwrap_or_default();
+                if self.started_by_add {
+                    return vec![Effect::Added(id)];
+                }
+                // show the new entry: the search line holds its title, so it is found whatever
+                // the list showed before, and it is the selection
+                self.input = SearchInput::new(&title);
+                self.selected_id = Some(id.clone());
+                self.say(&format!("Saved {id}"), MessageKind::Info, now, true);
+                self.status.refreshing = true;
+                vec![Effect::Refresh]
+            }
+            Action::SaveFailed(message) => {
+                if let Some(add) = &mut self.add {
+                    add.save_failed(message);
+                }
+                Vec::new()
+            }
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
@@ -483,6 +615,32 @@ impl AppState {
                 }
                 vec![Effect::Refresh]
             }
+        }
+    }
+
+    /// A key while the add form is open.
+    fn add_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(add) = self.add.as_mut() else {
+            return Vec::new();
+        };
+        match add.handle_key(key) {
+            AddEvent::None => Vec::new(),
+            AddEvent::Close => {
+                self.add = None;
+                if self.started_by_add {
+                    vec![Effect::Quit(130)]
+                } else {
+                    Vec::new()
+                }
+            }
+            AddEvent::Save(draft) => vec![Effect::SaveDraft(draft)],
+            AddEvent::EditBody(text) => vec![Effect::EditBody(text)],
         }
     }
 
@@ -639,6 +797,9 @@ impl AppState {
                     Vec::new()
                 }
             },
+            Command::AddEntry => vec![Effect::ReadClipboard],
+            // rename and delete are built with the management commands
+            Command::RenameEntry | Command::DeleteEntry => Vec::new(),
             Command::Refresh => {
                 self.status.refreshing = true;
                 vec![Effect::Refresh]

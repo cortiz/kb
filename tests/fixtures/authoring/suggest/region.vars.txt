@@ -1,0 +1,1 @@
+region|text|us-east-1|

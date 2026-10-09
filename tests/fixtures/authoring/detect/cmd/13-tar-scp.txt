@@ -1,0 +1,1 @@
+tar -czf backup.tar.gz /var/data && scp backup.tar.gz host:/tmp

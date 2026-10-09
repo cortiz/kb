@@ -250,7 +250,7 @@ fn render(value: &FieldValue, style: Option<ScalarStyle>) -> Result<String, Edit
     }
 }
 
-fn double_quoted(s: &str) -> String {
+pub(crate) fn double_quoted(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -268,7 +268,7 @@ fn double_quoted(s: &str) -> String {
 }
 
 /// True when `s` reads back as the same string if written without quotes.
-fn is_plain_safe(s: &str) -> bool {
+pub(crate) fn is_plain_safe(s: &str) -> bool {
     let Some(first) = s.chars().next() else {
         return false;
     };

@@ -435,6 +435,50 @@ fn check_opener(platform: &impl Platform, env: &Environment, loaded: &Loaded) ->
 }
 
 /// Runs every check.
+/// Whether `kb add` can read the clipboard here. Only looks for the programs: the clipboard
+/// itself is never read, because doctor output gets pasted into bug reports.
+fn check_clipboard_read(platform: &impl Platform, env: &Environment) -> Check {
+    if env.ssh {
+        return Check::new(
+            "clipboard-read",
+            Status::Warn,
+            "cannot read the clipboard over SSH",
+        )
+        .hint("over SSH kb add uses stdin or an empty form");
+    }
+    let tools = clipboard::read_tools_for(env);
+    let mut details = Vec::new();
+    let mut found = None;
+    for tool in &tools {
+        let there = platform.find_tool(tool.name).is_some();
+        details.push(format!(
+            "{}: {}",
+            tool.name,
+            if there { "found" } else { "not found" }
+        ));
+        if there && found.is_none() {
+            found = Some(tool.name);
+        }
+    }
+    let mut check = match found {
+        Some(name) => Check::new("clipboard-read", Status::Pass, format!("reads with {name}")),
+        None => {
+            let hint = tools.first().map_or(
+                "install wl-clipboard (Wayland) or xclip / xsel (X11); no display found",
+                |t| t.install_hint,
+            );
+            Check::new(
+                "clipboard-read",
+                Status::Warn,
+                "cannot read the clipboard: no read tool found",
+            )
+            .hint(hint)
+        }
+    };
+    check.details = details;
+    check
+}
+
 pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
     let env = platform.env();
     let (clipboard_check, alternatives) = check_clipboard(platform, &env, loaded);
@@ -463,6 +507,7 @@ pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
         check_session(&env),
         clipboard_check,
         alternatives,
+        check_clipboard_read(platform, &env),
         check_true_color(&env),
         check_editor(platform, loaded),
         check_opener(platform, &env, loaded),
@@ -522,6 +567,7 @@ mod tests {
     fn healthy_mac() -> FakePlatform {
         FakePlatform::new(mac_env(&[("COLORTERM", "truecolor")]))
             .with_tool("pbcopy", FakeTool::Ok)
+            .with_tool("pbpaste", FakeTool::Ok)
             .with_tool("vi", FakeTool::Ok)
             .with_tool("open", FakeTool::Ok)
     }
@@ -555,6 +601,7 @@ mod tests {
                 "session",
                 "clipboard",
                 "clipboard-alternatives",
+                "clipboard-read",
                 "true-color",
                 "editor",
                 "opener"
@@ -999,5 +1046,55 @@ mod tests {
         let (_d2, missing) = (0, root.join("nope"));
         let failed = run(&p, &missing, &defaults()).render(false);
         assert!(failed.contains("FAIL root"), "{failed}");
+    }
+
+    #[test]
+    fn the_clipboard_read_check_looks_for_the_read_tools_only() {
+        let (_d, root) = root();
+        let r = run(&healthy_mac(), &root, &defaults());
+        let c = r.check("clipboard-read").unwrap();
+        assert_eq!(
+            (c.status, c.summary.as_str()),
+            (Status::Pass, "reads with pbpaste")
+        );
+        assert_eq!(c.details, ["pbpaste: found"]);
+        // never reads the clipboard
+        let p = healthy_mac();
+        let _ = run(&p, &root, &defaults());
+        assert!(
+            p.calls()
+                .iter()
+                .all(|c| !matches!(c, crate::platform::fake::Call::RunReadTool { .. }))
+        );
+
+        let wayland = FakePlatform::new(linux_env(&[("WAYLAND_DISPLAY", "w")]));
+        let r = run(&wayland, &root, &defaults());
+        let c = r.check("clipboard-read").unwrap();
+        assert_eq!(c.status, Status::Warn);
+        assert_eq!(c.hint.as_deref(), Some("install wl-clipboard"));
+
+        let x11 =
+            FakePlatform::new(linux_env(&[("DISPLAY", ":0")])).with_tool("xsel", FakeTool::Ok);
+        let r = run(&x11, &root, &defaults());
+        let c = r.check("clipboard-read").unwrap();
+        assert_eq!(c.summary, "reads with xsel");
+        assert_eq!(c.details, ["xclip: not found", "xsel: found"]);
+
+        let ssh = FakePlatform::new(mac_env(&[("SSH_TTY", "/dev/pts/1")]))
+            .with_tool("pbpaste", FakeTool::Ok);
+        let c = run(&ssh, &root, &defaults())
+            .check("clipboard-read")
+            .unwrap()
+            .clone();
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.hint.unwrap().contains("stdin or an empty form"));
+
+        let none = FakePlatform::new(linux_env(&[]));
+        let c = run(&none, &root, &defaults())
+            .check("clipboard-read")
+            .unwrap()
+            .clone();
+        assert_eq!(c.status, Status::Warn);
+        assert!(c.hint.unwrap().contains("wl-clipboard"));
     }
 }

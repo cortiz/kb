@@ -1,0 +1,3 @@
+fields @timestamp, @requestId, @message
+| filter @requestId = "abc-123"
+| sort @timestamp asc

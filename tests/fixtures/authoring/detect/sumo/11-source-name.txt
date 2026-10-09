@@ -1,0 +1,3 @@
+_sourceName=*orders*
+| json field=_raw "status" as status
+| count by status

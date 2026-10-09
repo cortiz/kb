@@ -1,0 +1,1 @@
+show the logs from now-30 minutes ago

@@ -1,0 +1,1 @@
+https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups

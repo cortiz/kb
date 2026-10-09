@@ -1,0 +1,1 @@
+Explain this stack trace to a junior developer. Say which line is probably at fault, why, and how to confirm it before changing anything.

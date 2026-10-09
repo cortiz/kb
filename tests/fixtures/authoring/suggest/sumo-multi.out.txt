@@ -1,0 +1,5 @@
+_sourceCategory={{env}}/lambda/authorizer
+| where status >= 500
+| timeslice {{minutes}}m
+| count by _timeslice
+last -{{minutes_2}}m in {{region}}

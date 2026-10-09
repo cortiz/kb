@@ -1,0 +1,6 @@
+```
+_view=prod_logs
+| parse "[*]" as level
+| timeslice 15m
+| count by _timeslice, level
+```

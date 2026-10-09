@@ -1,0 +1,3 @@
+_sourceCategory=*/nginx
+| parse regex "(?<ip>\d+\.\d+\.\d+\.\d+)"
+| count by ip

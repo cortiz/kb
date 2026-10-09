@@ -1,0 +1,2 @@
+# opts: title=AuthorizerHandler.handleRequest; tags=lambda,auth
+https://github.com/snapfinance/lambda-authorizer/blob/a1b9c3e/src/main/java/com/snap/auth/AuthorizerHandler.java#L147-L160

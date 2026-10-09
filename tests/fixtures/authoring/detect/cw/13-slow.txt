@@ -1,0 +1,4 @@
+filter @duration > 1000
+| fields @requestId, @duration
+| sort @duration desc
+| limit 25

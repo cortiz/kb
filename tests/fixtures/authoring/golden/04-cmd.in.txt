@@ -1,0 +1,2 @@
+# opts: title=Restart api; tags=k8s
+$ kubectl rollout restart deploy/api -n {{ns}}

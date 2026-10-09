@@ -1,0 +1,1 @@
+stats avg(@duration), max(@duration) by bin(1h)

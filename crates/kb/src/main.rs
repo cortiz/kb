@@ -215,6 +215,62 @@ struct EditArgs {
     json: bool,
 }
 
+#[derive(Args)]
+struct AddArgs {
+    /// The title (otherwise a leading comment, a link's host, or you are asked).
+    #[arg(short, long)]
+    title: Option<String>,
+    /// sql, sumo, cw, cmd, prompt, link or code (otherwise detected).
+    #[arg(long = "type", value_name = "TYPE")]
+    ty: Option<String>,
+    /// A tag (repeatable, or comma-separated).
+    #[arg(long = "tag", value_name = "TAG")]
+    tags: Vec<String>,
+    /// The new entry's ID, for example `sql/active-connections` (folders are created).
+    #[arg(long, value_name = "ID")]
+    path: Option<String>,
+    /// Take the body from the clipboard.
+    #[arg(long, conflicts_with_all = ["stdin", "empty"])]
+    clipboard: bool,
+    /// Take the body from stdin.
+    #[arg(long, conflicts_with_all = ["clipboard", "empty"])]
+    stdin: bool,
+    /// Start with no body.
+    #[arg(long, conflicts_with_all = ["clipboard", "stdin"])]
+    empty: bool,
+    /// Write the entry in your editor, from a template, instead of using the form.
+    #[arg(long, conflicts_with = "yes")]
+    editor: bool,
+    /// Never ask: save the entry or fail.
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Print the new entry as `kb show --json` does.
+    #[arg(long)]
+    json: bool,
+}
+
+impl AddArgs {
+    fn into_run(self) -> kb_cli::author::AddArgs {
+        use kb_cli::author::SourceFlag;
+        let source = match (self.clipboard, self.stdin, self.empty) {
+            (true, _, _) => SourceFlag::Clipboard,
+            (_, true, _) => SourceFlag::Stdin,
+            (_, _, true) => SourceFlag::Empty,
+            _ => SourceFlag::Auto,
+        };
+        kb_cli::author::AddArgs {
+            title: self.title,
+            ty: self.ty,
+            tags: self.tags,
+            path: self.path,
+            source,
+            editor: self.editor,
+            yes: self.yes,
+            json: self.json,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Create a KB, or add what is missing to an existing one.
@@ -240,6 +296,8 @@ enum Command {
     Show(ShowArgs),
     /// Open an entry's file in $VISUAL / $EDITOR.
     Edit(EditArgs),
+    /// Add an entry from the clipboard, stdin or an editor template.
+    Add(AddArgs),
     /// Create, inspect and change the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -385,6 +443,7 @@ fn main() -> ExitCode {
         Command::Vars(a) => a.json,
         Command::Show(a) => a.json,
         Command::Edit(a) => a.json,
+        Command::Add(a) => a.json,
         Command::Doctor(a) => a.json,
         Command::Config(c) => match c {
             ConfigCommand::Init(a) | ConfigCommand::List(a) => a.json,
@@ -465,6 +524,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             args.options(),
         ),
         Command::Edit(args) => commands::run_edit(&platform, &root, &loaded, &args.id),
+        Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
         Command::Doctor(a) => commands::run_doctor(&platform, &root, &loaded, a.copy_test, a.json),
         Command::Config(c) => match c {
             ConfigCommand::Init(a) => commands::config_init(&platform, a.json),

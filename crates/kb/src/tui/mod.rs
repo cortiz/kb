@@ -1,5 +1,7 @@
 //! The full-screen terminal UI.
 
+pub mod add;
+pub mod add_view;
 pub mod app;
 pub mod form;
 pub mod form_view;
@@ -17,6 +19,7 @@ pub mod worker;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
+use kb_core::entry::EntryType;
 use kb_core::entry_json::PrintMode;
 use kb_core::search::Kb;
 use kb_core::varres::{self, Source, Value};
@@ -45,6 +48,8 @@ pub enum Outcome {
         values: Vec<(String, Value, Source)>,
         print: bool,
     },
+    /// `kb add`'s form saved a new entry.
+    Added { id: String },
     /// Cancelled or signalled; nothing to print.
     Exit(i32),
 }
@@ -78,7 +83,9 @@ pub fn run(
         .map_err(|e| format!("cannot open the terminal: {e}"))?;
     let (w, h) = size().map_err(|e| format!("cannot read the terminal size: {e}"))?;
     let theme = Theme::resolve(options.theme, &ThemeEnv::detect(&platform.env()));
-    let ui_kb = Kb::open(root).map_err(|e| e.to_string())?;
+    let mut ui_kb = Kb::open(root).map_err(|e| e.to_string())?;
+    let mut options = options;
+    options.highlight = theme.is_color();
     let mouse = options.mouse;
     let editor = options.editor.clone();
     let clipboard_settings = options.clipboard.clone();
@@ -93,11 +100,15 @@ pub fn run(
         initial_query,
         display_root(ui_kb.root(), home.as_deref()),
     );
+    if let Some(start) = state.options.start_add.take() {
+        state.open_start_add(*start, SystemTime::now());
+    }
     let mut worker = Worker::spawn(root.to_path_buf(), theme.is_color());
     let mut pending: Vec<Effect> = state.start();
     let mut picked: Option<String> = None;
     let mut resolved: Option<Submission> = None;
     let mut exit: Option<i32> = None;
+    let mut added: Option<String> = None;
     let mut dirty = true;
     let mut first = true;
 
@@ -210,6 +221,51 @@ pub fn run(
                     }
                     dirty = true;
                 }
+                Effect::ReadClipboard => {
+                    let _ = worker.tx.send(Request::Tags);
+                    let outcome = clipboard::read(platform);
+                    let action = Action::ClipboardRead {
+                        outcome,
+                        now: SystemTime::now(),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::LoadTags => {
+                    let _ = worker.tx.send(Request::Tags);
+                }
+                Effect::SaveDraft(draft) => {
+                    let clock = crate::author::clock();
+                    let action = match crate::author::save_new(&mut ui_kb, &draft, clock.as_ref()) {
+                        Ok(saved) => Action::Saved(saved.id),
+                        Err(e) => Action::SaveFailed(e.message()),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::Added(id) => added = Some(id),
+                Effect::EditBody(text) => {
+                    let ty = state
+                        .add
+                        .as_ref()
+                        .map_or(EntryType::Cmd, |a| a.draft.entry_type);
+                    match edit_body(
+                        platform,
+                        editor.as_deref(),
+                        &mut guard,
+                        &mut terminal,
+                        &text,
+                        ty,
+                        &signals,
+                    ) {
+                        BodyEdit::Done(result) => {
+                            pending
+                                .extend(state.update(Action::BodyEdited(result), Instant::now()));
+                            dirty = true;
+                        }
+                        BodyEdit::Signalled(signal) => exit = Some(exit_code_for_signal(signal)),
+                    }
+                }
                 Effect::EditEntry(id) => {
                     match edit_entry(
                         platform,
@@ -231,7 +287,7 @@ pub fn run(
                 }
             }
         }
-        if picked.is_some() || exit.is_some() || resolved.is_some() {
+        if picked.is_some() || exit.is_some() || resolved.is_some() || added.is_some() {
             break;
         }
         if dirty {
@@ -274,6 +330,7 @@ pub fn run(
                 Reply::Refreshed(info) => Action::Refreshed(RefreshInfo { ..info }),
                 Reply::Results(g, page) => Action::Results(g, page),
                 Reply::Preview(g, model) => Action::PreviewReady(g, model),
+                Reply::Tags(tags) => Action::TagCounts(tags),
                 Reply::Failed(m) => Action::WorkerFailed(m),
             });
         }
@@ -292,6 +349,9 @@ pub fn run(
     guard.restore();
     if let Some(code) = exit {
         return Ok(Outcome::Exit(code));
+    }
+    if let Some(id) = added {
+        return Ok(Outcome::Added { id });
     }
     if let Some(sub) = resolved {
         return Ok(Outcome::Resolved {
@@ -420,6 +480,74 @@ fn copy_selected(
         message: outcome.message_short(),
         sent: outcome.sent(),
     }
+}
+
+/// How the editor session on a draft's body ended.
+enum BodyEdit {
+    /// Back in the UI: the new text, `None` when it did not change, or why it could not be used.
+    Done(Result<Option<String>, String>),
+    /// A termination signal arrived while the editor ran; the editor was killed.
+    Signalled(i32),
+}
+
+/// Ctrl-E in the add form: the body goes to a private temp file (an extension that gets syntax
+/// highlighting), the editor runs on it, and what it holds afterwards is the new body. The file
+/// is deleted whichever way this ends.
+fn edit_body(
+    platform: &impl Platform,
+    editor: Option<&str>,
+    guard: &mut TerminalGuard,
+    terminal: &mut Terminal<CrosstermBackend<std::fs::File>>,
+    text: &str,
+    ty: EntryType,
+    signals: &Signals,
+) -> BodyEdit {
+    let ext = match ty {
+        EntryType::Sql => "sql",
+        EntryType::Cmd => "sh",
+        EntryType::Prompt => "md",
+        _ => "txt",
+    };
+    let temp = match platform.private_temp_file(ext, text.as_bytes()) {
+        Ok(t) => t,
+        Err(e) => return BodyEdit::Done(Err(format!("could not make a temporary file: {e}"))),
+    };
+    let editor = platform.resolve_editor(editor);
+    guard.suspend();
+    let result = guard.writer().and_then(|tty| {
+        platform.run_editor(&editor, temp.path(), &tty, &|| signals.received().is_some())
+    });
+    if matches!(result, Ok(None)) {
+        return BodyEdit::Signalled(signals.received().unwrap_or(15));
+    }
+    let resumed = guard.resume();
+    if let Ok(size) = terminal.size() {
+        let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+    }
+    let status = match result {
+        Ok(Some(status)) => status,
+        Ok(None) => return BodyEdit::Signalled(15),
+        Err(e) => return BodyEdit::Done(Err(format!("could not start the editor: {e}"))),
+    };
+    if let Err(e) = resumed {
+        return BodyEdit::Done(Err(format!("could not return to the UI: {e}")));
+    }
+    if !status.success() {
+        return BodyEdit::Done(Err(
+            "the editor exited with an error; the body is unchanged".into(),
+        ));
+    }
+    let bytes = match temp.read_bytes() {
+        Ok(b) => b,
+        Err(e) => return BodyEdit::Done(Err(format!("could not read the edited body: {e}"))),
+    };
+    let Ok(new) = String::from_utf8(bytes) else {
+        return BodyEdit::Done(Err(
+            "the edited body is not valid UTF-8 text; unchanged".into()
+        ));
+    };
+    let unchanged = new.replace("\r\n", "\n").trim_end() == text.trim_end();
+    BodyEdit::Done(Ok((!unchanged).then_some(new)))
 }
 
 /// How an editor session ended.

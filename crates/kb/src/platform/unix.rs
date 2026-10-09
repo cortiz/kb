@@ -9,7 +9,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 use super::{
-    CopyTool, Display, Editor, Environment, Opened, OpenerCommand, ToolError, pick_editor,
+    CopyTool, Display, Editor, Environment, GitOutput, MAX_READ_BYTES, NativeTool, Opened,
+    OpenerCommand, TempFile, ToolError, pick_editor,
 };
 
 /// Whether the TUI can talk to a user: stdin is a terminal, or the controlling terminal opens.
@@ -134,6 +135,141 @@ pub fn run_tool(mut cmd: Command, text: &str, timeout: Duration) -> Result<(), T
             Err(e) => return Err(ToolError::Io(e.to_string())),
         }
     }
+}
+
+/// Runs `cmd` with no stdin and returns its stdout, at most [`MAX_READ_BYTES`]: a program that
+/// prints more is killed (`TooLarge`), one that runs past `timeout` too (`TimedOut`). The output
+/// is read on a helper thread so a program that blocks on a full pipe cannot hang us.
+pub fn run_read(mut cmd: Command, timeout: Duration) -> Result<Vec<u8>, ToolError> {
+    use std::io::Read;
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => ToolError::NotFound,
+        _ => ToolError::Io(e.to_string()),
+    })?;
+    let mut stdout = child.stdout.take().expect("stdout was piped");
+    let (tx, rx) = std::sync::mpsc::channel();
+    // ends by itself: the read finishes at the limit, at end of output, or when the program is killed
+    std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let read = (&mut stdout)
+            .take(MAX_READ_BYTES as u64 + 1)
+            .read_to_end(&mut out);
+        let _ = tx.send(read.map(|_| out));
+    });
+    let deadline = Instant::now() + timeout;
+    let fail = |child: &mut std::process::Child, e: ToolError| {
+        let _ = child.kill();
+        let _ = child.wait();
+        e
+    };
+    let out = match rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+        Ok(Ok(out)) if out.len() > MAX_READ_BYTES => {
+            return Err(fail(&mut child, ToolError::TooLarge));
+        }
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => return Err(fail(&mut child, ToolError::Io(e.to_string()))),
+        Err(_) => return Err(fail(&mut child, ToolError::TimedOut)),
+    };
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(out),
+            Ok(Some(status)) => return Err(ToolError::Failed(status.code())),
+            Ok(None) if Instant::now() >= deadline => {
+                return Err(fail(&mut child, ToolError::TimedOut));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(e) => return Err(ToolError::Io(e.to_string())),
+        }
+    }
+}
+
+pub fn run_read_tool(tool: &NativeTool, timeout: Duration) -> Result<Vec<u8>, ToolError> {
+    let mut cmd = Command::new(tool.name);
+    cmd.args(tool.args);
+    run_read(cmd, timeout)
+}
+
+/// `git -C <root> <args>`: both streams captured, never asks for a password or a terminal.
+pub fn run_git(root: &Path, args: &[&str], timeout: Duration) -> Result<GitOutput, ToolError> {
+    use std::io::Read;
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(root)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => ToolError::NotFound,
+        _ => ToolError::Io(e.to_string()),
+    })?;
+    let drain = |mut pipe: Box<dyn Read + Send>| {
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = pipe.read_to_end(&mut out);
+            String::from_utf8_lossy(&out).into_owned()
+        })
+    };
+    let out = drain(Box::new(child.stdout.take().expect("stdout was piped")));
+    let err = drain(Box::new(child.stderr.take().expect("stderr was piped")));
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ToolError::TimedOut);
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
+            Err(e) => return Err(ToolError::Io(e.to_string())),
+        }
+    };
+    Ok(GitOutput {
+        code: status.code(),
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    })
+}
+
+/// `kb-<pid>-<random>.<extension>` in the system temp directory, created new with mode `0600`.
+pub fn private_temp_file(extension: &str, contents: &[u8]) -> io::Result<TempFile> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let extension = extension.trim_start_matches('.');
+    for _ in 0..20 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.subsec_nanos());
+        let name = format!(
+            "kb-{}-{:08x}{:04x}.{extension}",
+            std::process::id(),
+            nanos,
+            NEXT.fetch_add(1, Ordering::Relaxed) & 0xffff
+        );
+        let path = std::env::temp_dir().join(name);
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                // the guard removes the file again if the write below fails
+                let temp = TempFile::new(path);
+                file.write_all(contents)?;
+                return Ok(temp);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::other("could not create a temporary file"))
 }
 
 pub fn copy_command(tool: &CopyTool) -> Command {
@@ -516,5 +652,100 @@ mod tests {
             command: script(d.path(), "failopen", "exit 4").display().to_string(),
         };
         assert!(open("x", &failing, &local).is_err());
+    }
+
+    fn read_script(body: &str, timeout_ms: u64) -> Result<Vec<u8>, ToolError> {
+        let d = tempfile::tempdir().unwrap();
+        let p = script(d.path(), "reader", body);
+        run_read(Command::new(p), Duration::from_millis(timeout_ms))
+    }
+
+    #[test]
+    fn a_read_tool_returns_its_stdout() {
+        assert_eq!(
+            read_script("printf 'hello\\nworld'", 5_000),
+            Ok(b"hello\nworld".to_vec())
+        );
+        assert_eq!(read_script("exit 0", 5_000), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_read_tool_that_fails_hangs_or_is_missing_is_reported() {
+        assert_eq!(
+            read_script("printf x; exit 3", 5_000),
+            Err(ToolError::Failed(Some(3)))
+        );
+        assert_eq!(read_script("sleep 5", 200), Err(ToolError::TimedOut));
+        let tool = NativeTool {
+            name: "kb-no-such-reader",
+            args: &[],
+            install_hint: "",
+        };
+        assert_eq!(
+            run_read_tool(&tool, Duration::from_secs(1)),
+            Err(ToolError::NotFound)
+        );
+    }
+
+    #[test]
+    fn a_read_tool_that_prints_too_much_is_stopped() {
+        let out = read_script("head -c 3000000 /dev/zero", 5_000);
+        assert_eq!(out, Err(ToolError::TooLarge));
+        let endless = read_script("yes", 5_000);
+        assert_eq!(endless, Err(ToolError::TooLarge));
+        let exact = read_script(&format!("head -c {MAX_READ_BYTES} /dev/zero"), 5_000).unwrap();
+        assert_eq!(exact.len(), MAX_READ_BYTES);
+    }
+
+    #[test]
+    fn private_temp_files_are_private_in_the_temp_dir_and_deleted_on_drop() {
+        let temp = private_temp_file(".sql", b"select 1").unwrap();
+        let path = temp.path().to_path_buf();
+        assert!(path.starts_with(std::env::temp_dir()));
+        assert_eq!(path.extension().unwrap(), "sql");
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with(&format!("kb-{}-", std::process::id()))
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(temp.read_to_string().unwrap(), "select 1");
+        let other = private_temp_file("sql", b"").unwrap();
+        assert_ne!(other.path(), path);
+        drop(temp);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn git_runs_in_the_root_with_both_streams_captured() {
+        if find_tool("git").is_none() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let version = run_git(d.path(), &["--version"], Duration::from_secs(10)).unwrap();
+        assert!(version.success() && version.stdout.starts_with("git version"));
+        let outside = run_git(
+            d.path(),
+            &["rev-parse", "--is-inside-work-tree"],
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        // not a work tree (unless the temp dir sits inside one): either way it says so without a terminal
+        assert!(outside.code.is_some());
+        let init = run_git(d.path(), &["init", "-q"], Duration::from_secs(10)).unwrap();
+        assert!(init.success(), "{init:?}");
+        let inside = run_git(
+            d.path(),
+            &["rev-parse", "--is-inside-work-tree"],
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        assert_eq!(inside.stdout.trim(), "true");
+        let bad = run_git(d.path(), &["no-such-subcommand"], Duration::from_secs(10)).unwrap();
+        assert!(!bad.success() && !bad.stderr.is_empty());
     }
 }

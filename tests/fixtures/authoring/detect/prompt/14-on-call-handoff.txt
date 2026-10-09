@@ -1,0 +1,1 @@
+Draft an on-call handoff note from the bullet points below. Group items into Ongoing, Resolved, and Watch. Keep names of people out of it unless they own the follow-up.

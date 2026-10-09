@@ -5,7 +5,7 @@ use std::time::Duration;
 use kb_core::config::{ClipboardChoice, Settings};
 
 use super::osc52::{self, TooLarge, Wrap};
-use super::{CopyTool, Display, Environment, NativeTool, Os, Platform};
+use super::{CopyTool, Display, Environment, NativeTool, Os, Platform, ToolError};
 
 /// How long one copy program may take before the next method is tried (FR-009).
 pub const COPY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -31,6 +31,27 @@ pub const XSEL: NativeTool = NativeTool {
     install_hint: "install xclip or xsel",
 };
 
+pub const PBPASTE: NativeTool = NativeTool {
+    name: "pbpaste",
+    args: &[],
+    install_hint: "pbpaste ships with macOS; check that /usr/bin is on PATH",
+};
+pub const WL_PASTE: NativeTool = NativeTool {
+    name: "wl-paste",
+    args: &[],
+    install_hint: "install wl-clipboard",
+};
+pub const XCLIP_OUT: NativeTool = NativeTool {
+    name: "xclip",
+    args: &["-selection", "clipboard", "-out"],
+    install_hint: "install xclip or xsel",
+};
+pub const XSEL_OUT: NativeTool = NativeTool {
+    name: "xsel",
+    args: &["--clipboard", "--output"],
+    install_hint: "install xclip or xsel",
+};
+
 /// macOS: `pbcopy`.
 pub fn mac_tools() -> Vec<NativeTool> {
     vec![PBCOPY]
@@ -48,6 +69,111 @@ pub fn linux_tools(env: &Environment) -> Vec<NativeTool> {
         tools.push(XSEL);
     }
     tools
+}
+
+/// The programs that read the clipboard where `env` is, in the order they are tried: the mirror
+/// of [`tools_for`].
+pub fn read_tools_for(env: &Environment) -> Vec<NativeTool> {
+    match env.os {
+        Os::MacOs => vec![PBPASTE],
+        Os::Linux => {
+            let mut tools = Vec::new();
+            if env.display == Display::Wayland {
+                tools.push(WL_PASTE);
+            }
+            if env.x11 {
+                tools.push(XCLIP_OUT);
+                tools.push(XSEL_OUT);
+            }
+            tools
+        }
+    }
+}
+
+/// How long one read program may take before the next is tried (FR-001).
+pub const READ_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Why the clipboard could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unavailable {
+    /// Over SSH the local clipboard is not the user's; OSC 52 can't be read back.
+    OverSsh,
+    NoTool {
+        hint: String,
+    },
+    Failed(String),
+    TimedOut,
+    TooLarge,
+}
+
+impl Unavailable {
+    /// One line saying why, for stderr or the form header.
+    pub fn explain(&self) -> String {
+        match self {
+            Unavailable::OverSsh => "clipboard not readable over SSH".to_string(),
+            Unavailable::NoTool { hint } => format!("no clipboard read tool found ({hint})"),
+            Unavailable::Failed(why) => format!("clipboard not readable: {why}"),
+            Unavailable::TimedOut => "clipboard read timed out".to_string(),
+            Unavailable::TooLarge => "clipboard content is over 2 MiB".to_string(),
+        }
+    }
+}
+
+/// What reading the clipboard gave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadOutcome {
+    /// Text with `\n` line endings.
+    Text(String),
+    /// Nothing, or something that is not text (an image, a file).
+    Empty,
+    Unavailable(Unavailable),
+}
+
+/// Reads the clipboard text (FR-001 to FR-003, research R10). Never fails: what went wrong is an
+/// `Unavailable` the caller turns into a fallback.
+pub fn read(platform: &impl Platform) -> ReadOutcome {
+    let env = platform.env();
+    if env.ssh {
+        return ReadOutcome::Unavailable(Unavailable::OverSsh);
+    }
+    let tools = read_tools_for(&env);
+    let mut last_error = None;
+    for (i, tool) in tools.iter().enumerate() {
+        match platform.run_read_tool(tool, READ_TIMEOUT) {
+            Ok(bytes) => return read_text(bytes),
+            Err(ToolError::NotFound) => {}
+            Err(ToolError::TooLarge) => return ReadOutcome::Unavailable(Unavailable::TooLarge),
+            Err(ToolError::TimedOut) => last_error = Some(Unavailable::TimedOut),
+            // `wl-paste` exits 1 when nothing is copied: from the last tool that is an empty
+            // clipboard, not a failure
+            Err(ToolError::Failed(_)) if i + 1 == tools.len() => return ReadOutcome::Empty,
+            Err(e @ (ToolError::Failed(_) | ToolError::Io(_))) => {
+                last_error = Some(Unavailable::Failed(e.to_string()));
+            }
+        }
+    }
+    ReadOutcome::Unavailable(last_error.unwrap_or_else(|| Unavailable::NoTool {
+        hint: match tools.first() {
+            Some(first) => first.install_hint.to_string(),
+            None => "install wl-clipboard (Wayland) or xclip / xsel (X11); no display found".into(),
+        },
+    }))
+}
+
+/// Only text is used: bytes that are not UTF-8, or hold a NUL, are an image or a file.
+fn read_text(bytes: Vec<u8>) -> ReadOutcome {
+    let Ok(text) = String::from_utf8(bytes) else {
+        return ReadOutcome::Empty;
+    };
+    if text.contains('\0') {
+        return ReadOutcome::Empty;
+    }
+    let text = kb_core::author::normalize_clipboard(&text);
+    if text.trim().is_empty() {
+        ReadOutcome::Empty
+    } else {
+        ReadOutcome::Text(text)
+    }
 }
 
 /// The programs that apply to `env`, in the order they are tried.
@@ -905,5 +1031,166 @@ mod tests {
         assert_eq!(w.len(), 2, "{w:?}");
         assert_eq!(w[0], "kb: xclip skipped: exited with status 1");
         assert_eq!(w[1], "kb: xsel skipped: not found (install xclip or xsel)");
+    }
+
+    // ---- reading ----
+
+    use super::super::fake::FakeRead;
+
+    fn reader(env: &[(&str, &str)], os_mac: bool) -> FakePlatform {
+        FakePlatform::new(if os_mac {
+            mac_env(env)
+        } else {
+            super::super::fake::linux_env(env)
+        })
+    }
+
+    fn tools_named(env: &Environment) -> Vec<&'static str> {
+        read_tools_for(env).iter().map(|t| t.name).collect()
+    }
+
+    #[test]
+    fn the_read_tool_arguments_are_exact() {
+        assert_eq!(PBPASTE.args, &[] as &[&str]);
+        assert_eq!(WL_PASTE.args, &[] as &[&str]);
+        assert_eq!(XCLIP_OUT.args, ["-selection", "clipboard", "-out"]);
+        assert_eq!(XSEL_OUT.args, ["--clipboard", "--output"]);
+    }
+
+    #[test]
+    fn read_tool_choice_follows_the_environment() {
+        assert_eq!(tools_named(&mac_env(&[])), ["pbpaste"]);
+        assert_eq!(tools_named(&linux(true, false)), ["wl-paste"]);
+        assert_eq!(tools_named(&linux(false, true)), ["xclip", "xsel"]);
+        assert_eq!(
+            tools_named(&linux(true, true)),
+            ["wl-paste", "xclip", "xsel"],
+            "XWayland tries wl-paste first"
+        );
+        assert!(read_tools_for(&linux(false, false)).is_empty());
+        for t in [PBPASTE, WL_PASTE, XCLIP_OUT, XSEL_OUT] {
+            assert!(!t.install_hint.is_empty());
+        }
+    }
+
+    #[test]
+    fn text_is_read_with_the_first_tool_that_works() {
+        let p = reader(&[], true).with_read("pbpaste", FakeRead::Text("select 1\n".into()));
+        assert_eq!(read(&p), ReadOutcome::Text("select 1".into()));
+    }
+
+    #[test]
+    fn over_ssh_nothing_is_tried() {
+        let p = reader(&[("SSH_TTY", "/dev/pts/1")], true)
+            .with_read("pbpaste", FakeRead::Text("x".into()));
+        assert_eq!(read(&p), ReadOutcome::Unavailable(Unavailable::OverSsh));
+        assert!(
+            p.calls()
+                .iter()
+                .all(|c| !matches!(c, Call::RunReadTool { .. })),
+            "{:?}",
+            p.calls()
+        );
+    }
+
+    #[test]
+    fn a_missing_or_hung_or_failing_tool_falls_through_to_the_next() {
+        let env = [("WAYLAND_DISPLAY", "w"), ("DISPLAY", ":0")];
+        let missing = reader(&env, false).with_read("xclip", FakeRead::Text("from xclip".into()));
+        assert_eq!(read(&missing), ReadOutcome::Text("from xclip".into()));
+        let hung = reader(&env, false)
+            .with_read("wl-paste", FakeRead::Timeout)
+            .with_read("xclip", FakeRead::Text("later".into()));
+        assert_eq!(read(&hung), ReadOutcome::Text("later".into()));
+        let failing = reader(&env, false)
+            .with_read("wl-paste", FakeRead::Fail(1))
+            .with_read("xclip", FakeRead::Text("after".into()));
+        assert_eq!(read(&failing), ReadOutcome::Text("after".into()));
+    }
+
+    #[test]
+    fn xwayland_tries_wl_paste_first() {
+        let env = [("WAYLAND_DISPLAY", "w"), ("DISPLAY", ":0")];
+        let p = reader(&env, false)
+            .with_read("wl-paste", FakeRead::Text("one".into()))
+            .with_read("xclip", FakeRead::Text("two".into()));
+        assert_eq!(read(&p), ReadOutcome::Text("one".into()));
+        let ran: Vec<_> = p
+            .calls()
+            .into_iter()
+            .filter(|c| matches!(c, Call::RunReadTool { .. }))
+            .collect();
+        assert_eq!(
+            ran,
+            [Call::RunReadTool {
+                tool: "wl-paste".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn no_tool_is_unavailable_with_the_install_hint() {
+        let p = reader(&[("WAYLAND_DISPLAY", "w")], false);
+        assert_eq!(
+            read(&p),
+            ReadOutcome::Unavailable(Unavailable::NoTool {
+                hint: "install wl-clipboard".into()
+            })
+        );
+        let none = reader(&[], false);
+        let ReadOutcome::Unavailable(Unavailable::NoTool { hint }) = read(&none) else {
+            panic!()
+        };
+        assert!(
+            hint.contains("wl-clipboard") && hint.contains("xclip"),
+            "{hint}"
+        );
+        let timed_out = reader(&[("DISPLAY", ":0")], false)
+            .with_read("xclip", FakeRead::Timeout)
+            .with_read("xsel", FakeRead::Timeout);
+        assert_eq!(
+            read(&timed_out),
+            ReadOutcome::Unavailable(Unavailable::TimedOut)
+        );
+    }
+
+    #[test]
+    fn non_text_is_empty() {
+        for bytes in [
+            vec![0xff, 0xfe, 0x00, 0x01],
+            b"abc\0def".to_vec(),
+            vec![0x89, b'P', b'N', b'G'],
+        ] {
+            let p = reader(&[], true).with_read("pbpaste", FakeRead::Bytes(bytes));
+            assert_eq!(read(&p), ReadOutcome::Empty);
+        }
+    }
+
+    #[test]
+    fn line_endings_are_normalized_and_blank_text_is_empty() {
+        let p = reader(&[], true).with_read("pbpaste", FakeRead::Text("a\r\nb\rc\n\n".into()));
+        assert_eq!(read(&p), ReadOutcome::Text("a\nb\nc".into()));
+        for blank in ["", "  \n\t\r\n"] {
+            let p = reader(&[], true).with_read("pbpaste", FakeRead::Text(blank.into()));
+            assert_eq!(read(&p), ReadOutcome::Empty, "{blank:?}");
+        }
+    }
+
+    #[test]
+    fn more_than_two_mebibytes_is_too_large() {
+        let big = "a".repeat(super::super::MAX_READ_BYTES + 1);
+        let p = reader(&[], true).with_read("pbpaste", FakeRead::Text(big));
+        assert_eq!(read(&p), ReadOutcome::Unavailable(Unavailable::TooLarge));
+    }
+
+    #[test]
+    fn the_last_tool_failing_quietly_means_nothing_is_copied() {
+        let wayland =
+            reader(&[("WAYLAND_DISPLAY", "w")], false).with_read("wl-paste", FakeRead::Fail(1));
+        assert_eq!(read(&wayland), ReadOutcome::Empty);
+        let x11 = reader(&[("DISPLAY", ":0")], false)
+            .with_read("xclip", FakeRead::Fail(1))
+            .with_read("xsel", FakeRead::Fail(1));
+        assert_eq!(read(&x11), ReadOutcome::Empty);
     }
 }

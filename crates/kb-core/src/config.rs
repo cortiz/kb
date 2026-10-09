@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The eleven settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The twelve settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -58,6 +58,13 @@ pub const SETTINGS: &[Setting] = &[
         default: "",
         env: "KB_EDITOR",
         doc: "Command for Ctrl-E and `kb edit`, arguments allowed. Unset: $VISUAL, then $EDITOR, then vi.",
+    },
+    Setting {
+        key: "path_template",
+        kind: Kind::Text,
+        default: "",
+        env: "KB_PATH_TEMPLATE",
+        doc: "Where `kb add` puts new entries: placeholders {type}, {slug} and {tag} (the first tag, else the type); must contain {slug}. Unset: {type}/{slug}.",
     },
     Setting {
         key: "theme",
@@ -380,6 +387,97 @@ impl Settings {
     pub fn opener_command(&self) -> Option<&str> {
         self.optional("opener.command")
     }
+
+    /// The template for new entry IDs; the default when unset (an invalid value was already
+    /// refused with a warning when the settings were loaded).
+    pub fn path_template(&self) -> PathTemplate {
+        self.optional("path_template")
+            .and_then(|t| PathTemplate::parse(t).ok())
+            .unwrap_or_default()
+    }
+}
+
+/// One piece of a [`PathTemplate`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Part {
+    Literal(String),
+    Type,
+    Slug,
+    Tag,
+}
+
+/// Where `kb add` puts a new entry: literal text with `{type}`, `{slug}` and `{tag}` (the first
+/// tag, or the type when there are none). Not a template engine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathTemplate {
+    parts: Vec<Part>,
+}
+
+impl Default for PathTemplate {
+    fn default() -> PathTemplate {
+        PathTemplate {
+            parts: vec![Part::Type, Part::Literal("/".into()), Part::Slug],
+        }
+    }
+}
+
+impl PathTemplate {
+    /// Parses a template. It must contain `{slug}`; `{type}`, `{slug}` and `{tag}` are the only
+    /// placeholders. An empty string is the default, `{type}/{slug}`.
+    pub fn parse(s: &str) -> Result<PathTemplate, String> {
+        if s.is_empty() {
+            return Ok(PathTemplate::default());
+        }
+        let mut parts = Vec::new();
+        let mut rest = s;
+        while !rest.is_empty() {
+            match rest.find(['{', '}']) {
+                None => {
+                    parts.push(Part::Literal(rest.to_string()));
+                    break;
+                }
+                Some(at) => {
+                    if at > 0 {
+                        parts.push(Part::Literal(rest[..at].to_string()));
+                    }
+                    let tail = &rest[at..];
+                    let Some(end) = tail.strip_prefix('{').and_then(|t| t.find('}')) else {
+                        return Err(format!("unbalanced brace in {s:?}"));
+                    };
+                    let name = &tail[1..=end];
+                    parts.push(match name {
+                        "type" => Part::Type,
+                        "slug" => Part::Slug,
+                        "tag" => Part::Tag,
+                        other => {
+                            return Err(format!(
+                                "unknown placeholder {{{other}}}; use {{type}}, {{slug}} or {{tag}}"
+                            ));
+                        }
+                    });
+                    rest = &tail[end + 2..];
+                }
+            }
+        }
+        if !parts.contains(&Part::Slug) {
+            return Err("the template must contain {slug}".into());
+        }
+        Ok(PathTemplate { parts })
+    }
+
+    /// The ID for an entry of type `ty` with this slug and these tags.
+    pub fn render(&self, ty: crate::entry::EntryType, slug: &str, tags: &[String]) -> String {
+        let mut out = String::new();
+        for part in &self.parts {
+            match part {
+                Part::Literal(l) => out.push_str(l),
+                Part::Type => out.push_str(ty.name()),
+                Part::Slug => out.push_str(slug),
+                Part::Tag => out.push_str(tags.first().map_or(ty.name(), String::as_str)),
+            }
+        }
+        out
+    }
 }
 
 /// A setting found in a file, before it is checked.
@@ -469,7 +567,11 @@ impl Loader {
         path: Option<&Path>,
         label: &str,
     ) {
-        match s.kind.check(raw, lenient) {
+        let checked = s.kind.check(raw, lenient).and_then(|v| match s.key {
+            "path_template" => PathTemplate::parse(&v).map(|_| v),
+            _ => Ok(v),
+        });
+        match checked {
             Ok(v) => self.settings.put(s, v, source, line),
             Err(expected) => {
                 let message = format!(
@@ -799,7 +901,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 11, "eleven settings, no duplicates");
+        assert_eq!(keys.len(), 12, "twelve settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -826,7 +928,8 @@ mod settings_tests {
             assert_eq!(r.source, Source::Default, "{key}");
         }
         assert!(s.vars_remember());
-        assert_eq!(s.iter().count(), 11);
+        assert_eq!(s.iter().count(), 12);
+        assert_eq!(s.path_template(), PathTemplate::default());
     }
 
     #[test]
@@ -1388,5 +1491,41 @@ mod edit_tests {
         let file = d.path().join("plain");
         std::fs::write(&file, "x").unwrap();
         assert!(write_atomic(&file.join("sub/config.toml"), "x = 1\n").is_err());
+    }
+
+    #[test]
+    fn path_template_default_and_placeholders() {
+        use crate::entry::EntryType;
+        let tags = vec!["ecs".to_string(), "api".to_string()];
+        let default = PathTemplate::parse("").unwrap();
+        assert_eq!(default, PathTemplate::default());
+        assert_eq!(default.render(EntryType::Cw, "p99", &tags), "cw/p99");
+        let by_tag = PathTemplate::parse("{tag}/{slug}").unwrap();
+        assert_eq!(by_tag.render(EntryType::Cw, "p99", &tags), "ecs/p99");
+        assert_eq!(by_tag.render(EntryType::Cw, "p99", &[]), "cw/p99");
+        let both = PathTemplate::parse("team/{type}-{slug}").unwrap();
+        assert_eq!(both.render(EntryType::Sql, "x", &[]), "team/sql-x");
+    }
+
+    #[test]
+    fn path_template_refuses_what_cannot_work() {
+        for bad in ["{type}/x", "{slug", "slug}", "{nope}/{slug}", "{type}"] {
+            assert!(PathTemplate::parse(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn path_template_setting_loads_and_a_bad_value_warns() {
+        let l = load_text("path_template = \"{tag}/{slug}\"\n");
+        assert!(l.warnings.is_empty());
+        assert_eq!(
+            l.settings.path_template(),
+            PathTemplate::parse("{tag}/{slug}").unwrap()
+        );
+        let l = load_text("path_template = \"{type}/nope\"\n");
+        assert_eq!(l.warnings.len(), 1, "{:?}", l.warnings);
+        assert!(l.warnings[0].message.contains("{slug}"));
+        assert_eq!(l.settings.path_template(), PathTemplate::default());
+        assert!(setting("path_template").is_some());
     }
 }

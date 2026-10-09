@@ -1,0 +1,1 @@
+minutes|number|30|

@@ -1,0 +1,3 @@
+error
+| count by _sourceHost
+| sort by _count

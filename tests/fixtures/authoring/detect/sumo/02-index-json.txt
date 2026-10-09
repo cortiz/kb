@@ -1,0 +1,3 @@
+_index=main error
+| json "level"
+| count by level

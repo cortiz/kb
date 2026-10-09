@@ -77,6 +77,27 @@ impl Platform for MacOs {
         super::unix::run_copy_tool(tool, text, timeout)
     }
 
+    fn run_read_tool(&self, tool: &NativeTool, timeout: Duration) -> Result<Vec<u8>, ToolError> {
+        super::unix::run_read_tool(tool, timeout)
+    }
+
+    fn run_git(
+        &self,
+        root: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<super::GitOutput, ToolError> {
+        super::unix::run_git(root, args, timeout)
+    }
+
+    fn private_temp_file(
+        &self,
+        extension: &str,
+        contents: &[u8],
+    ) -> std::io::Result<super::TempFile> {
+        super::unix::private_temp_file(extension, contents)
+    }
+
     fn opener(&self, override_cmd: Option<&str>) -> OpenerCommand {
         OpenerCommand {
             command: override_cmd.unwrap_or("open").to_string(),

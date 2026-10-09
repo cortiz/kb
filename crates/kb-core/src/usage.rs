@@ -250,6 +250,29 @@ impl State {
         !moves.is_empty()
     }
 
+    /// Moves the usage record and the remembered values of `old` to `new`, whatever the content
+    /// (`kb mv`, FR-022). A stale record at `new` is overwritten. Returns whether anything moved.
+    pub fn move_entry(&mut self, old: &str, new: &str) -> bool {
+        let mut moved = false;
+        if let Some(rec) = self.usage.remove(old) {
+            self.usage.insert(new.to_string(), rec);
+            moved = true;
+        }
+        if let Some(mem) = self.vars.entries.remove(old) {
+            self.vars.entries.insert(new.to_string(), mem);
+            moved = true;
+        }
+        moved
+    }
+
+    /// Drops the usage record and remembered values of `id` (`kb rm`, FR-023). Returns whether
+    /// anything was removed.
+    pub fn forget(&mut self, id: &str) -> bool {
+        let usage = self.usage.remove(id).is_some();
+        let vars = self.vars.entries.remove(id).is_some();
+        usage || vars
+    }
+
     /// Drops records whose ID is not in `existing` (done at a full rebuild).
     pub fn prune(&mut self, existing: &BTreeSet<String>) -> bool {
         let before = self.usage.len();
@@ -519,5 +542,62 @@ mod tests {
         assert!(s.prune(&["new".to_string()].into()));
         assert!(!s.vars.entries.contains_key("gone"));
         assert!(s.vars.recent.contains_key("env"));
+    }
+
+    fn state_with(id: &str) -> State {
+        let mut s = State::default();
+        s.record(id, 7, at(100));
+        s.record(id, 7, at(200));
+        s.vars.remember(id, &pairs(&[("env", "prod")]));
+        s
+    }
+
+    #[test]
+    fn move_entry_carries_usage_and_values() {
+        let mut s = state_with("cw/a");
+        s.record("cw/b", 1, at(5));
+        s.vars.remember("cw/b", &pairs(&[("env", "stale")]));
+        assert!(s.move_entry("cw/a", "cw/b"));
+        assert!(!s.usage.contains_key("cw/a") && !s.vars.entries.contains_key("cw/a"));
+        assert_eq!(s.usage["cw/b"].count, 2);
+        assert_eq!(s.usage["cw/b"].last_used, 200);
+        assert_eq!(s.vars.entries["cw/b"]["env"], "prod");
+        // recent values are keyed by variable name and stay
+        assert_eq!(s.vars.recent["env"][0], "stale");
+    }
+
+    #[test]
+    fn move_entry_of_an_unknown_id_moves_nothing() {
+        let mut s = state_with("cw/a");
+        assert!(!s.move_entry("cw/zzz", "cw/b"));
+        assert!(s.usage.contains_key("cw/a"));
+    }
+
+    #[test]
+    fn forget_drops_both_records() {
+        let mut s = state_with("cw/a");
+        assert!(s.forget("cw/a"));
+        assert!(s.usage.is_empty() && s.vars.entries.is_empty());
+        assert!(!s.forget("cw/a"));
+    }
+
+    #[test]
+    fn moves_keep_unknown_keys_and_the_version() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join(".kb")).unwrap();
+        std::fs::write(
+            d.path().join(".kb/state.json"),
+            r#"{"state_version":1,"usage":{"a":{"count":1,"last_used":5,"hash":"0000000000000001"}},"future":{"x":1}}"#,
+        )
+        .unwrap();
+        let (mut s, _) = State::load(d.path());
+        assert!(s.move_entry("a", "b"));
+        s.save(d.path()).unwrap();
+        let text = std::fs::read_to_string(d.path().join(".kb/state.json")).unwrap();
+        let v: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["state_version"], STATE_VERSION);
+        assert_eq!(STATE_VERSION, 1);
+        assert_eq!(v["future"]["x"], 1);
+        assert!(v["usage"]["b"].is_object() && v["usage"]["a"].is_null());
     }
 }

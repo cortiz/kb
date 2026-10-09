@@ -57,6 +57,8 @@ pub enum ToolError {
     NotFound,
     Failed(Option<i32>),
     TimedOut,
+    /// The program printed more than [`MAX_READ_BYTES`].
+    TooLarge,
     Io(String),
 }
 
@@ -67,8 +69,58 @@ impl std::fmt::Display for ToolError {
             ToolError::Failed(Some(code)) => write!(f, "exited with status {code}"),
             ToolError::Failed(None) => f.write_str("was stopped by a signal"),
             ToolError::TimedOut => f.write_str("timed out after 2 s"),
+            ToolError::TooLarge => f.write_str("printed more than 2 MiB"),
             ToolError::Io(e) => f.write_str(e),
         }
+    }
+}
+
+/// The most a clipboard read tool may print before it is stopped (2 MiB).
+pub const MAX_READ_BYTES: usize = 2 * 1024 * 1024;
+
+/// What `git` printed and how it ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitOutput {
+    /// `None` when git was stopped by a signal.
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl GitOutput {
+    pub fn success(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+/// A file in the system temp directory, mode `0600`, deleted when this is dropped. Never inside
+/// the KB.
+#[derive(Debug)]
+pub struct TempFile {
+    path: PathBuf,
+}
+
+impl TempFile {
+    pub(crate) fn new(path: PathBuf) -> TempFile {
+        TempFile { path }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn read_bytes(&self) -> io::Result<Vec<u8>> {
+        std::fs::read(&self.path)
+    }
+
+    pub fn read_to_string(&self) -> io::Result<String> {
+        std::fs::read_to_string(&self.path)
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -175,6 +227,22 @@ pub trait Platform {
         text: &str,
         timeout: Duration,
     ) -> Result<(), ToolError>;
+
+    /// Runs a clipboard read program (no stdin) and returns what it printed, at most
+    /// [`MAX_READ_BYTES`] (`ToolError::TooLarge` beyond); kills it after `timeout`.
+    fn run_read_tool(&self, tool: &NativeTool, timeout: Duration) -> Result<Vec<u8>, ToolError>;
+
+    // ---- processes and files for authoring ----
+    /// `git -C <root> <args>` with output captured and no terminal; killed after `timeout`.
+    fn run_git(
+        &self,
+        root: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<GitOutput, ToolError>;
+    /// A new private file (`kb-<pid>-<random>.<extension>`, mode `0600`) in the system temp
+    /// directory holding `contents`.
+    fn private_temp_file(&self, extension: &str, contents: &[u8]) -> io::Result<TempFile>;
 
     // ---- opening ----
     fn opener(&self, override_cmd: Option<&str>) -> OpenerCommand;

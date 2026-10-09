@@ -1,0 +1,1 @@
+https://github.com/acme/web/blob/3f2504e0/app/models/user.rb#L88

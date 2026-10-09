@@ -1,0 +1,1 @@
+aws logs filter-log-events --start-time -30m

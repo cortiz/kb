@@ -1,0 +1,1 @@
+aws logs tail /aws/lambda/x --region us-east-1

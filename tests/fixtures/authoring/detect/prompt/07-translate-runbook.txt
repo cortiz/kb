@@ -1,0 +1,1 @@
+Translate the runbook below into Spanish. Keep the commands, file paths and code blocks exactly as they are. Only translate the prose around them.

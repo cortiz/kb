@@ -151,6 +151,12 @@ pub enum Command {
     /// Alt-C: copy the payload with its `{{variables}}` left in.
     CopyTemplate,
     Edit,
+    /// Ctrl-N: add an entry from the clipboard.
+    AddEntry,
+    /// Ctrl-R: rename the selected entry.
+    RenameEntry,
+    /// Ctrl-X: delete the selected entry.
+    DeleteEntry,
     Down,
     Up,
     PageDown,
@@ -289,11 +295,38 @@ pub const BINDINGS: &[Binding] = &[
         bar: bar(5, 5, "^E edit"),
     },
     Binding {
-        keys: &[k(Code::Down), ctrl('n'), ctrl('j')],
+        keys: &[ctrl('n')],
+        modes: SEARCH,
+        command: Command::AddEntry,
+        group: Group::Pick,
+        display: "Ctrl-N",
+        label: "add an entry from the clipboard",
+        bar: None,
+    },
+    Binding {
+        keys: &[ctrl('r')],
+        modes: SEARCH,
+        command: Command::RenameEntry,
+        group: Group::Pick,
+        display: "Ctrl-R",
+        label: "rename the entry",
+        bar: None,
+    },
+    Binding {
+        keys: &[ctrl('x')],
+        modes: SEARCH,
+        command: Command::DeleteEntry,
+        group: Group::Pick,
+        display: "Ctrl-X",
+        label: "delete the entry",
+        bar: None,
+    },
+    Binding {
+        keys: &[k(Code::Down), ctrl('j')],
         modes: SEARCH,
         command: Command::Down,
         group: Group::Move,
-        display: "↓  Ctrl-N  Ctrl-J",
+        display: "↓  Ctrl-J",
         label: "select the next result",
         bar: bar(1, 8, "↑↓ select"),
     },
@@ -678,6 +711,9 @@ pub fn short_label(c: Command) -> &'static str {
         Command::Copy => "copy payload",
         Command::CopyTemplate => "copy template",
         Command::Edit => "edit entry",
+        Command::AddEntry => "add entry",
+        Command::RenameEntry => "rename entry",
+        Command::DeleteEntry => "delete entry",
         Command::Down => "next result",
         Command::Up => "previous result",
         Command::PageDown => "page down",
@@ -817,8 +853,10 @@ mod tests {
             (Code::Char('y'), CTRL, Command::Copy),
             (Code::Char('e'), CTRL, Command::Edit),
             (Code::Down, 0, Command::Down),
-            (Code::Char('n'), CTRL, Command::Down),
             (Code::Char('j'), CTRL, Command::Down),
+            (Code::Char('n'), CTRL, Command::AddEntry),
+            (Code::Char('r'), CTRL, Command::RenameEntry),
+            (Code::Char('x'), CTRL, Command::DeleteEntry),
             (Code::Up, 0, Command::Up),
             (Code::Char('p'), CTRL, Command::Up),
             (Code::Char('k'), CTRL, Command::Up),
@@ -854,7 +892,44 @@ mod tests {
         assert_eq!(press(Code::Char('x'), 0, s), Some(Command::Insert('x')));
         assert_eq!(press(Code::Char('X'), 0, s), Some(Command::Insert('X')));
         assert_eq!(press(Code::Char('é'), 0, s), Some(Command::Insert('é')));
-        assert_eq!(press(Code::Char('x'), CTRL, s), None);
+        assert_eq!(press(Code::Char('z'), CTRL, s), None);
+    }
+
+    #[test]
+    fn ctrl_n_adds_and_no_longer_selects_the_next_result() {
+        for mode in [Mode::FullPreview, Mode::Help, Mode::TooSmall] {
+            assert_ne!(
+                press(Code::Char('n'), CTRL, mode),
+                Some(Command::AddEntry),
+                "{mode:?}"
+            );
+            assert_ne!(
+                press(Code::Char('r'), CTRL, mode),
+                Some(Command::RenameEntry),
+                "{mode:?}"
+            );
+            assert_ne!(
+                press(Code::Char('x'), CTRL, mode),
+                Some(Command::DeleteEntry),
+                "{mode:?}"
+            );
+        }
+        // ↓ and Ctrl-J still move down, ↑ Ctrl-P and Ctrl-K still move up
+        for (code, mods) in [(Code::Down, 0), (Code::Char('j'), CTRL)] {
+            assert_eq!(press(code, mods, Mode::Search), Some(Command::Down));
+        }
+        for (code, mods) in [
+            (Code::Up, 0),
+            (Code::Char('p'), CTRL),
+            (Code::Char('k'), CTRL),
+        ] {
+            assert_eq!(press(code, mods, Mode::Search), Some(Command::Up));
+        }
+        let down = BINDINGS
+            .iter()
+            .find(|b| b.command == Command::Down)
+            .unwrap();
+        assert!(!down.display.contains("Ctrl-N"), "{}", down.display);
     }
 
     #[test]

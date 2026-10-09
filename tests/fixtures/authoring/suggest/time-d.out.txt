@@ -1,0 +1,1 @@
+retention {{days}}d on the bucket
