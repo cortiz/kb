@@ -157,6 +157,16 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// Where an anchor (`&`) or tag (`!`) written before the node at `node_start` begins, so the
+    /// finding points at it rather than at the value.
+    fn property_offset(&self, node_start: usize, marker: char) -> usize {
+        let rel = node_start - self.base;
+        let line_start = self.text[..rel].rfind('\n').map_or(0, |i| i + 1);
+        self.text[line_start..rel]
+            .rfind(marker)
+            .map_or(node_start, |i| self.base + line_start + i)
+    }
+
     fn unsupported(&mut self, offset: usize, what: &str) {
         self.errors.push(YamlError {
             code: RuleCode::UnsupportedYaml,
@@ -205,10 +215,13 @@ impl<'a> Builder<'a> {
         match ev {
             Event::Scalar(value, style, anchor, tag) => {
                 if anchor != 0 {
-                    self.unsupported(sp.start, "anchors (`&name`)");
+                    self.unsupported(self.property_offset(sp.start, '&'), "anchors (`&name`)");
                 }
                 if tag.is_some() {
-                    self.unsupported(sp.start, "explicit tags (`!tag`)");
+                    self.unsupported(
+                        self.property_offset(sp.start, '!'),
+                        "explicit tags (`!tag`)",
+                    );
                 }
                 let style = match style {
                     saphyr_parser::ScalarStyle::Plain => ScalarStyle::Plain,
@@ -301,10 +314,10 @@ impl<'a> Builder<'a> {
 
     fn collection_props(&mut self, at: usize, anchor: usize, tagged: bool) {
         if anchor != 0 {
-            self.unsupported(at, "anchors (`&name`)");
+            self.unsupported(self.property_offset(at, '&'), "anchors (`&name`)");
         }
         if tagged {
-            self.unsupported(at, "explicit tags (`!tag`)");
+            self.unsupported(self.property_offset(at, '!'), "explicit tags (`!tag`)");
         }
     }
 
@@ -560,6 +573,14 @@ mod tests {
         assert!(r.get("c").unwrap().is_number());
         assert!(r.get("d").unwrap().is_null());
         assert_eq!(r.get("e").unwrap().kind_name(), "boolean");
+    }
+
+    #[test]
+    fn anchor_error_points_at_the_anchor() {
+        let p = parse("title: &t T\n", 0);
+        assert_eq!(p.errors[0].offset, 7);
+        let p = parse("a: !x 1\n", 0);
+        assert_eq!(p.errors[0].offset, 3);
     }
 
     #[test]

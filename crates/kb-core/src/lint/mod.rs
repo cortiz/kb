@@ -1,6 +1,7 @@
 //! Findings, rule codes and the lint report.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use serde::{Serialize, Serializer};
 
@@ -154,9 +155,348 @@ pub struct Suppression {
     pub code: RuleCode,
 }
 
+/// The result of linting a KB or part of it.
+#[derive(Debug, Clone, Default)]
+pub struct LintReport {
+    /// The canonical KB root.
+    pub root: PathBuf,
+    /// `.md` files examined, including ones with errors.
+    pub entries: usize,
+    /// Sorted by path, line, column, code.
+    pub findings: Vec<Finding>,
+    pub suppressions: Vec<Suppression>,
+}
+
+/// Why lint could not run (exit code 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LintError {
+    /// The KB root does not exist or is not a directory.
+    RootMissing(PathBuf),
+    /// A path argument does not exist.
+    PathNotFound(PathBuf),
+    /// A path argument is outside the KB root.
+    OutsideRoot(PathBuf),
+    /// Reading the KB failed.
+    Io { path: PathBuf, message: String },
+}
+
+impl fmt::Display for LintError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LintError::RootMissing(p) => {
+                write!(f, "KB root {} does not exist (run `kb init`?)", p.display())
+            }
+            LintError::PathNotFound(p) => write!(f, "{} does not exist", p.display()),
+            LintError::OutsideRoot(p) => write!(f, "{} is outside the KB root", p.display()),
+            LintError::Io { path, message } => {
+                write!(f, "cannot read {}: {message}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for LintError {}
+
+/// Resolves `kb lint` path arguments (research R10): absolute paths as given; relative paths
+/// against `cwd` when they exist there, otherwise against `root`.
+pub fn resolve_scope(
+    root: &Path,
+    cwd: &Path,
+    paths: &[PathBuf],
+) -> Result<Vec<PathBuf>, LintError> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|_| LintError::RootMissing(root.to_path_buf()))?;
+    let mut out = Vec::new();
+    for path in paths {
+        let candidate = if path.is_absolute() {
+            path.clone()
+        } else if cwd.join(path).exists() {
+            cwd.join(path)
+        } else {
+            root.join(path)
+        };
+        let Ok(canonical) = canonical_location(&candidate) else {
+            return Err(LintError::PathNotFound(path.clone()));
+        };
+        if !canonical.starts_with(&canonical_root) {
+            return Err(LintError::OutsideRoot(candidate));
+        }
+        out.push(candidate);
+    }
+    Ok(out)
+}
+
+/// The canonical location of `path` without resolving a final symlink: the canonical parent
+/// joined with the file name, so a symlinked entry keeps its own ID.
+fn canonical_location(path: &Path) -> std::io::Result<PathBuf> {
+    std::fs::symlink_metadata(path)?;
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+            Ok(parent.canonicalize()?.join(name))
+        }
+        _ => path.canonicalize(),
+    }
+}
+
+/// Lints the files under `scope` (absolute paths inside `root`); an empty scope means the whole KB.
+pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
+    let canonical_root = root
+        .canonicalize()
+        .ok()
+        .filter(|r| r.is_dir())
+        .ok_or_else(|| LintError::RootMissing(root.to_path_buf()))?;
+    let mut starts = Vec::new();
+    for path in scope {
+        let canonical =
+            canonical_location(path).map_err(|_| LintError::PathNotFound(path.clone()))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(LintError::OutsideRoot(path.clone()));
+        }
+        starts.push(canonical);
+    }
+    if starts.is_empty() {
+        starts.push(canonical_root.clone());
+    }
+    let walked = crate::walk::walk(&canonical_root, &starts).map_err(|e| LintError::Io {
+        path: e.path,
+        message: e.message,
+    })?;
+    let mut report = LintReport {
+        root: canonical_root,
+        entries: walked.files.len(),
+        findings: walked.findings,
+        ..Default::default()
+    };
+    for file in &walked.files {
+        let bytes = std::fs::read(&file.abs_path).map_err(|e| LintError::Io {
+            path: file.abs_path.clone(),
+            message: e.to_string(),
+        })?;
+        lint_file(file, bytes, &mut report);
+    }
+    report
+        .findings
+        .extend(crate::walk::case_collisions(&walked.files));
+    report
+        .findings
+        .sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+    report
+        .suppressions
+        .sort_by(|a, b| (&a.path, a.line, a.code).cmp(&(&b.path, b.line, b.code)));
+    Ok(report)
+}
+
+fn lint_file(file: &crate::walk::WalkEntry, bytes: Vec<u8>, report: &mut LintReport) {
+    let finding = |line, column, code: RuleCode, message: String, fix: Option<&str>| Finding {
+        path: file.rel_path.clone(),
+        id: Some(file.id.clone()),
+        line,
+        column,
+        severity: code.severity(),
+        code,
+        message,
+        fix: fix.map(str::to_string),
+    };
+    if bytes.len() > rules::MAX_FILE_BYTES {
+        report.findings.push(finding(
+            1,
+            1,
+            RuleCode::FileTooLarge,
+            format!(
+                "the file is {} bytes; entries are meant to be small (limit {})",
+                bytes.len(),
+                rules::MAX_FILE_BYTES
+            ),
+            None,
+        ));
+    }
+    let source = match crate::source::Source::from_bytes(bytes.clone()) {
+        Ok(source) => source,
+        Err(e) => {
+            report.findings.push(crate::entry::invalid_utf8(
+                &file.id,
+                &file.rel_path,
+                &bytes,
+                e.offset,
+            ));
+            return;
+        }
+    };
+    if let Some(offset) = rules::mixed_line_ending_at(&source) {
+        let (line, column) = source.position(offset);
+        report.findings.push(finding(
+            line,
+            column,
+            RuleCode::MixedLineEndings,
+            "the file mixes LF and CRLF line endings".into(),
+            Some("convert the file to one line-ending style"),
+        ));
+    }
+    let scan = secrets::scan_secrets(source.text());
+    for hit in scan.hits {
+        let (line, column) = source.position(hit.offset);
+        report
+            .findings
+            .push(finding(line, column, hit.code, hit.message, Some(&hit.fix)));
+    }
+    for (offset, code) in scan.suppressed {
+        let (line, _) = source.position(offset);
+        report.suppressions.push(Suppression {
+            path: file.rel_path.clone(),
+            line,
+            code,
+        });
+    }
+    let outcome = crate::entry::parse_source(&file.id, &file.rel_path, source);
+    report.findings.extend(outcome.findings);
+}
+
+impl LintReport {
+    pub fn count(&self, severity: Severity) -> usize {
+        self.findings
+            .iter()
+            .filter(|f| f.severity == severity)
+            .count()
+    }
+
+    /// `0`, or `1` when there is an error, or a warning under `strict`.
+    pub fn exit_code(&self, strict: bool) -> i32 {
+        let failed =
+            self.count(Severity::Error) > 0 || (strict && self.count(Severity::Warning) > 0);
+        i32::from(failed)
+    }
+
+    /// `284 entries, 0 errors, 0 warnings`, plus info and suppressed counts when non-zero.
+    pub fn summary_line(&self) -> String {
+        let plural =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let mut line = format!(
+            "{}, {}, {}",
+            plural(self.entries, "entry", "entries"),
+            plural(self.count(Severity::Error), "error", "errors"),
+            plural(self.count(Severity::Warning), "warning", "warnings"),
+        );
+        let info = self.count(Severity::Info);
+        if info > 0 {
+            line.push_str(&format!(", {info} info"));
+        }
+        if !self.suppressions.is_empty() {
+            line.push_str(&format!(", {} suppressed", self.suppressions.len()));
+        }
+        line
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn report(
+        errors: usize,
+        warnings: usize,
+        info: usize,
+        suppressed: usize,
+        entries: usize,
+    ) -> LintReport {
+        let f = |severity, code| Finding {
+            path: "a.md".into(),
+            id: None,
+            line: 1,
+            column: 1,
+            severity,
+            code,
+            message: String::new(),
+            fix: None,
+        };
+        let mut findings = Vec::new();
+        findings.extend((0..errors).map(|_| f(Severity::Error, RuleCode::UnknownType)));
+        findings.extend((0..warnings).map(|_| f(Severity::Warning, RuleCode::UnusedVar)));
+        findings.extend((0..info).map(|_| f(Severity::Info, RuleCode::UnknownKey)));
+        let suppressions = (0..suppressed)
+            .map(|_| Suppression {
+                path: "a.md".into(),
+                line: 1,
+                code: RuleCode::SecretJwt,
+            })
+            .collect();
+        LintReport {
+            root: PathBuf::new(),
+            entries,
+            findings,
+            suppressions,
+        }
+    }
+
+    #[test]
+    fn summary_lines() {
+        assert_eq!(
+            report(0, 0, 0, 0, 284).summary_line(),
+            "284 entries, 0 errors, 0 warnings"
+        );
+        assert_eq!(
+            report(1, 1, 0, 0, 1).summary_line(),
+            "1 entry, 1 error, 1 warning"
+        );
+        assert_eq!(
+            report(0, 2, 3, 1, 5).summary_line(),
+            "5 entries, 0 errors, 2 warnings, 3 info, 1 suppressed"
+        );
+        assert_eq!(
+            report(0, 0, 0, 2, 5).summary_line(),
+            "5 entries, 0 errors, 0 warnings, 2 suppressed"
+        );
+    }
+
+    #[test]
+    fn exit_codes() {
+        assert_eq!(report(0, 0, 3, 1, 1).exit_code(true), 0);
+        assert_eq!(report(1, 0, 0, 0, 1).exit_code(false), 1);
+        assert_eq!(report(0, 1, 0, 0, 1).exit_code(false), 0);
+        assert_eq!(report(0, 1, 0, 0, 1).exit_code(true), 1);
+    }
+
+    #[test]
+    fn scope_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("kb");
+        let cwd = dir.path().join("cwd");
+        for p in [
+            root.join("sumo/a.md"),
+            cwd.join("sumo/a.md"),
+            root.join("sql/b.md"),
+        ] {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "x").unwrap();
+        }
+        // Relative path found under cwd wins, but it is outside the root.
+        assert_eq!(
+            resolve_scope(&root, &cwd, &["sumo/a.md".into()]),
+            Err(LintError::OutsideRoot(cwd.join("sumo/a.md")))
+        );
+        // Only under the root.
+        assert_eq!(
+            resolve_scope(&root, &cwd, &["sql/b.md".into()]).unwrap(),
+            vec![root.join("sql/b.md")]
+        );
+        assert_eq!(
+            resolve_scope(&root, &cwd, &["sql".into()]).unwrap(),
+            vec![root.join("sql")]
+        );
+        // cwd inside the root.
+        assert_eq!(
+            resolve_scope(&root, &root.join("sql"), &["b.md".into()]).unwrap(),
+            vec![root.join("sql/b.md")]
+        );
+        assert_eq!(
+            resolve_scope(&root, &cwd, &["nope.md".into()]),
+            Err(LintError::PathNotFound("nope.md".into()))
+        );
+        assert_eq!(
+            resolve_scope(&root, &cwd, &[root.join("sql/b.md")]).unwrap(),
+            vec![root.join("sql/b.md")]
+        );
+    }
 
     #[test]
     fn display_form() {

@@ -82,7 +82,7 @@ A type-specific key on another type → KB017 (warning).
 
 | Field | Type | Validation (KB033) |
 |-------|------|--------------------|
-| `repo` | `String` | required; `owner/name`, or a URL starting with `https://`, `ssh://`, `git@` or `file://` |
+| `repo` | `String` | required; `owner/name`, or a git remote starting with `https://`, `http://`, `ssh://`, `git://`, `git@` or `file://` |
 | `path` | `String` | required; relative, no `..` component, `/` separators |
 | `line` | `u32` | required; ≥ 1 |
 | `ref` | `String` | required; non-empty |
@@ -110,7 +110,7 @@ Any other `{{…}}` on one line is KB049 (info) and stays literal.
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `text` | `String` | Block content with `\{{` turned into `{{` |
+| `text` | `String` | Block content with `\{{` turned into `{{`, always with LF line endings (the file keeps its own) |
 | `raw_span` | `Span` | Content bytes in the file |
 | `fence_span` | `Span` | Whole block including fences |
 | `info` | `Option<String>` | Info string, for example `sql` (kept, not validated) |

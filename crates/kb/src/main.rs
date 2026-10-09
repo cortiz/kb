@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+use kb_core::lint::{LintError, lint, resolve_scope};
 use kb_core::root::{RootInputs, resolve_root};
 
 mod output;
@@ -88,6 +89,25 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             "usage",
             format!("init is not implemented yet ({})", root.display()),
         )),
-        Command::Lint(_) => Err(CliError::new("usage", "lint is not implemented yet")),
+        Command::Lint(args) => run_lint(&root, &args),
     }
+}
+
+fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliError> {
+    let cwd = std::env::current_dir().map_err(|e| CliError::new("io", e.to_string()))?;
+    let scope = resolve_scope(root, &cwd, &args.paths).map_err(lint_error)?;
+    let report = lint(root, &scope).map_err(lint_error)?;
+    output::print_lint(&report, args.quiet);
+    Ok(ExitCode::from(
+        u8::try_from(report.exit_code(args.strict)).unwrap_or(1),
+    ))
+}
+
+fn lint_error(e: LintError) -> CliError {
+    let kind = if matches!(e, LintError::Io { .. }) {
+        "io"
+    } else {
+        "usage"
+    };
+    CliError::new(kind, e.to_string())
 }
