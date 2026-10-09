@@ -5,9 +5,12 @@ mod support;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use kb_core::entry_json::PrintMode;
 use kb_core::search::Kb;
 use serde_json::Value;
-use support::{kb_in, search_kb};
+use support::{kb_in, kb_without_terminal, search_kb};
+
+const ID: &str = "sumo/5xx-by-authorizer";
 
 fn stdout(out: &std::process::Output) -> String {
     String::from_utf8(out.stdout.clone()).unwrap()
@@ -17,103 +20,233 @@ fn stderr(out: &std::process::Output) -> String {
     String::from_utf8(out.stderr.clone()).unwrap()
 }
 
+fn show(root: &std::path::Path, args: &[&str]) -> std::process::Output {
+    kb_in(root).arg("show").args(args).output().unwrap()
+}
+
 #[test]
-fn show_prints_exactly_what_a_pick_prints() {
+fn raw_prints_exactly_the_payload_a_pick_prints() {
     let (_d, root) = search_kb();
     let kb = Kb::open(&root).unwrap();
     for (id, text) in [
-        ("sumo/5xx-by-authorizer", None),
+        (ID, None),
         (
             "link/payments-runbook",
             Some("https://wiki.example.com/runbooks/payments"),
         ),
         ("code/request-handler", Some("src/handler.rs:10")),
     ] {
-        let out = kb_in(&root).args(["show", id]).output().unwrap();
+        let out = show(&root, &[id, "--raw"]);
         assert_eq!(out.status.code(), Some(0), "{id}: {}", stderr(&out));
-        let want = text.map_or_else(
-            || {
-                kb.pick(id, kb_core::entry_json::PrintMode::Payload)
-                    .unwrap()
-            },
-            str::to_string,
-        );
+        let want = text.map_or_else(|| kb.pick(id, PrintMode::Payload).unwrap(), str::to_string);
         assert_eq!(stdout(&out), want, "{id}");
     }
-    let out = kb_in(&root)
-        .args(["show", "sumo/5xx-by-authorizer"])
-        .output()
-        .unwrap();
+    let out = show(&root, &[ID, "--raw"]);
     assert!(!stdout(&out).ends_with("\n\n") && stdout(&out).contains("_sourceCategory"));
 }
 
 #[test]
-fn show_modes() {
+fn the_default_is_the_preview_as_plain_text_when_piped() {
     let (_d, root) = search_kb();
-    let id = "sumo/5xx-by-authorizer";
-    let run = |args: &[&str]| {
-        kb_in(&root)
-            .arg("show")
-            .arg(id)
-            .args(args)
-            .output()
-            .unwrap()
-    };
-    assert_eq!(stdout(&run(&["--print", "id"])), id);
-    let path = stdout(&run(&["--print", "path"]));
+    let out = show(&root, &[ID]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
     assert!(
-        std::path::Path::new(&path).is_absolute() && std::path::Path::new(&path).exists(),
-        "{path}"
+        !text.contains('\x1b'),
+        "no color codes when piped: {text:?}"
     );
-    assert!(path.ends_with("sumo/5xx-by-authorizer.md"));
-    let json = run(&["--print", "json"]);
+    assert!(text.ends_with('\n'));
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0].trim(), "5xx by authorizer", "the title first");
+    assert!(
+        lines[1].starts_with("sumo") && lines[1].contains("#auth"),
+        "the metadata line: {}",
+        lines[1]
+    );
+    assert_eq!(
+        lines[2].trim(),
+        "sumo/5xx-by-authorizer.md",
+        "the path in the KB"
+    );
+    assert!(text.contains("── payload"), "{text}");
+    assert!(text.contains("_sourceCategory"), "{text}");
+    let first_payload_line = lines
+        .iter()
+        .skip_while(|l| !l.contains("── payload"))
+        .nth(1)
+        .unwrap();
+    assert!(
+        first_payload_line.trim_start().starts_with("1 "),
+        "line numbers: {first_payload_line}"
+    );
+    for l in text.lines() {
+        assert_eq!(l, l.trim_end(), "no trailing spaces: {l:?}");
+    }
+}
+
+#[test]
+fn the_preview_has_variables_fields_and_notes_when_the_entry_has_them() {
+    let (_d, root) = support::search_kb();
+    // an entry with variables
+    let out = show(&root, &["sumo/login-failures"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        text.contains("── variables") || text.contains("── notes"),
+        "{text}"
+    );
+    let out = show(&root, &["link/payments-runbook"]);
+    let text = stdout(&out);
+    assert!(
+        text.contains("https://wiki.example.com/runbooks/payments"),
+        "{text}"
+    );
+    let out = show(&root, &["code/request-handler"]);
+    let text = stdout(&out);
+    assert!(
+        text.contains("repo") && text.contains("src/handler.rs"),
+        "{text}"
+    );
+}
+
+#[test]
+fn colors_only_on_a_terminal_and_never_with_no_color() {
+    use support::pty::{Session, Spec};
+    let (_t, home, root) = support::pty::kb_home("search");
+    let run = |extra: &[&str], no_color: bool| {
+        let mut args = vec!["show", ID];
+        args.extend_from_slice(extra);
+        let mut spec = Spec::new(&args, &home, &root);
+        if no_color {
+            spec = spec.env("NO_COLOR", "1");
+        }
+        let mut s = Session::spawn(&spec);
+        assert_eq!(s.wait_exit(), 0);
+        s.raw_output()
+    };
+    assert!(run(&[], false).contains("\x1b["), "a terminal gets colors");
+    assert!(!run(&["--no-color"], false).contains("\x1b["), "--no-color");
+    assert!(!run(&[], true).contains("\x1b["), "NO_COLOR");
+}
+
+#[test]
+fn json_is_the_entry_document() {
+    let (_d, root) = search_kb();
+    let json = show(&root, &[ID, "--json"]);
+    assert_eq!(json.status.code(), Some(0), "{}", stderr(&json));
     let doc: Value = serde_json::from_slice(&json.stdout).unwrap();
     for k in [
         "id", "path", "file", "type", "title", "tags", "vars", "payload", "notes", "fields",
     ] {
         assert!(doc.get(k).is_some(), "{k}");
     }
-    assert_eq!(doc["payload"], stdout(&run(&[])));
+    assert_eq!(doc["payload"], stdout(&show(&root, &[ID, "--raw"])));
     assert!(stdout(&json).ends_with("}\n"));
-    assert_eq!(stdout(&run(&["--json"])), stdout(&json));
-    assert_eq!(run(&["--print", "bogus"]).status.code(), Some(2));
+    let kb = Kb::open(&root).unwrap();
+    assert_eq!(stdout(&json), kb.pick(ID, PrintMode::Json).unwrap());
 }
 
 #[test]
-fn show_errors_are_exit_2() {
+fn file_prints_the_absolute_path() {
     let (_d, root) = search_kb();
-    let out = kb_in(&root).args(["show", "nope/x"]).output().unwrap();
-    assert_eq!(out.status.code(), Some(2));
+    let out = show(&root, &[ID, "--file"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let path = stdout(&out);
     assert!(
-        stderr(&out).contains("no entry with ID \"nope/x\""),
+        std::path::Path::new(&path).is_absolute() && std::path::Path::new(&path).exists(),
+        "{path}"
+    );
+    assert!(path.ends_with("sumo/5xx-by-authorizer.md"));
+}
+
+#[test]
+fn the_modes_exclude_each_other_and_print_is_gone() {
+    let (_d, root) = search_kb();
+    for args in [
+        vec![ID, "--raw", "--json"],
+        vec![ID, "--file", "--raw"],
+        vec![ID, "--json", "--file"],
+    ] {
+        assert_eq!(show(&root, &args).status.code(), Some(2), "{args:?}");
+    }
+    // clarification 3: --print is a usage error on show (and the old modes live on as flags)
+    for args in [vec![ID, "--print", "id"], vec![ID, "--print", "payload"]] {
+        assert_eq!(show(&root, &args).status.code(), Some(2), "{args:?}");
+    }
+}
+
+#[test]
+fn a_query_resolves_like_copy() {
+    let (_d, root) = search_kb();
+    let out = show(&root, &["5xx", "auth", "--raw"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        Kb::open(&root)
+            .unwrap()
+            .pick(ID, PrintMode::Payload)
+            .unwrap()
+    );
+    // an ID with .md works too
+    assert_eq!(
+        show(&root, &["sumo/5xx-by-authorizer.md", "--raw"])
+            .status
+            .code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn close_matches_without_a_terminal_are_listed_with_exit_1() {
+    let (_d, root) = search_kb();
+    let out = kb_without_terminal(&["--root", root.to_str().unwrap(), "show", "latency"], &[]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let err = stderr(&out);
+    let candidates = err.lines().filter(|l| l.contains('\t')).count();
+    assert!((2..=5).contains(&candidates), "{err}");
+    assert_eq!(stdout(&out), "");
+    // and as JSON
+    let out = kb_without_terminal(
+        &[
+            "--root",
+            root.to_str().unwrap(),
+            "show",
+            "latency",
+            "--json",
+        ],
+        &[],
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(doc["error"]["kind"], "ambiguous");
+    assert!(doc["error"]["candidates"].as_array().unwrap().len() >= 2);
+}
+
+#[test]
+fn nothing_found_is_exit_1_not_2() {
+    let (_d, root) = search_kb();
+    let out = show(&root, &["nope/x"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("no entry matches \"nope/x\""),
         "{}",
         stderr(&out)
     );
     assert_eq!(stdout(&out), "");
-    let out = kb_in(&root)
-        .args(["show", "nope/x", "--json"])
-        .output()
-        .unwrap();
+    let out = show(&root, &["nope/x", "--json"]);
+    assert_eq!(out.status.code(), Some(1));
     let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(doc["error"]["kind"], "io");
-    assert_eq!(
-        kb_in(&root)
-            .args(["show", "../x"])
-            .output()
-            .unwrap()
-            .status
-            .code(),
-        Some(2)
-    );
+    assert_eq!(doc["error"]["kind"], "not_found");
+    // text that is not an ID falls through to a search, so it can never read outside the root
+    let outside = show(&root, &["../../etc/passwd", "--file"]);
+    assert!(!stdout(&outside).contains("passwd"), "{}", stdout(&outside));
 }
 
 #[test]
 fn show_records_no_use() {
     let (_d, root) = search_kb();
-    kb_in(&root)
-        .args(["show", "sumo/5xx-by-authorizer"])
-        .output()
-        .unwrap();
+    show(&root, &[ID]);
+    show(&root, &[ID, "--raw"]);
     assert!(!root.join(".kb/state.json").exists());
 }
 

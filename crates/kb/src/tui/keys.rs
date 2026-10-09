@@ -252,7 +252,7 @@ pub const BINDINGS: &[Binding] = &[
         command: Command::Pick,
         group: Group::Pick,
         display: "Enter",
-        label: "pick: print the entry and exit",
+        label: "pick: copy the entry and exit",
         bar: bar(2, 10, "Enter pick"),
     },
     Binding {
@@ -261,7 +261,7 @@ pub const BINDINGS: &[Binding] = &[
         command: Command::Copy,
         group: Group::Pick,
         display: "Ctrl-Y",
-        label: "copy the payload (terminal clipboard)",
+        label: "copy the payload and stay open",
         bar: bar(4, 4, "^Y copy"),
     },
     Binding {

@@ -1,0 +1,7 @@
+# one unknown key (line 3) and one bad value (line 6): exactly two warnings
+theme = "light"
+clipbaord.method = "native"
+
+[clipboard]
+method = "xclipp"
+osc52_max_bytes = 74000

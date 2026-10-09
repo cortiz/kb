@@ -1,29 +1,679 @@
 //! Commands that do what a TUI action does, so every TUI action is scriptable.
 
+use std::io::{IsTerminal, Write};
+use std::path::Path;
 use std::process::ExitCode;
+use std::time::SystemTime;
 
+use kb_core::config::{
+    self, ConfigEditError, EnterAction, Kind, Loaded, Resolved, SETTINGS, Settings, Source,
+};
 use kb_core::entry_json::PrintMode;
+use kb_core::resolve::{Candidate, Resolution};
 use kb_core::search::Kb;
+use serde_json::{Value, json};
 
+use crate::doctor::{self, Check, Status};
 use crate::output::CliError;
 use crate::platform::Platform;
+use crate::platform::clipboard::{self, ClipboardSettings, CopyOutcome, Method, Place};
+use crate::show;
+use crate::tui::app::Options;
+use crate::tui::theme::{Theme, ThemeEnv};
+use crate::tui::{self, Outcome};
 
 fn io_error(e: impl std::fmt::Display) -> CliError {
     CliError::new("io", e.to_string())
 }
 
-/// `kb show`: what picking `id` in the TUI prints, without the UI and without recording a use.
-pub fn run_show(root: &std::path::Path, id: &str, mode: PrintMode) -> Result<String, CliError> {
-    Kb::open(root)
-        .map_err(io_error)?
-        .pick(id, mode)
-        .map_err(io_error)
+/// How `kb show` prints an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShowMode {
+    /// The preview as text (colored on a terminal).
+    #[default]
+    Preview,
+    /// Only the payload.
+    Raw,
+    /// The entry as JSON.
+    Json,
+    /// The absolute path of the entry's file.
+    File,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ShowOptions {
+    pub mode: ShowMode,
+    pub no_color: bool,
+}
+
+/// What happens to the entry the UI returns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PostPick {
+    /// Put the payload on the clipboard (the default for Enter, and what `kb copy` does).
+    Copy,
+    /// Print this view of the entry on stdout (`--print`, or `tui.enter = "print"`).
+    Print(PrintMode),
+    /// Print the entry the way `kb show` does (when the UI was opened by `kb show`).
+    Show(ShowOptions),
+}
+
+/// A copy that did not fail, reported: warnings and the confirmation on stderr, the text on stdout
+/// for the stdout method, and the exit code (0 delivered, 2 refused).
+fn report_copy(outcome: &CopyOutcome, id: &str, json: bool) -> ExitCode {
+    for warning in outcome.warnings() {
+        eprintln!("{warning}");
+    }
+    if json {
+        println!("{}", copy_json(outcome, id));
+    } else if outcome.used == Some(Method::Stdout) {
+        let mut stdout = std::io::stdout();
+        let _ = stdout.write_all(outcome.text.as_bytes());
+        let _ = stdout.flush();
+    }
+    if outcome.sent() {
+        eprintln!("{}", outcome.message(id));
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("kb: {}", outcome.message(id));
+        ExitCode::from(2)
+    }
+}
+
+/// The machine-readable form of a copy (`kb copy --json`).
+fn copy_json(o: &CopyOutcome, id: &str) -> Value {
+    let method = o.used.as_ref().map(|m| match m {
+        Method::Native(t) => t.name.to_string(),
+        Method::Custom(_) => "custom".to_string(),
+        Method::Osc52 => "osc52".to_string(),
+        Method::Stdout => "stdout".to_string(),
+    });
+    let mut doc = json!({
+        "id": id,
+        "sent": o.sent(),
+        "method": method,
+        "confirmed": o.confirmed,
+        "bytes": o.bytes,
+        "lines": o.lines,
+        "attempts": o.attempts.iter().map(|a| json!({
+            "method": a.method.label(),
+            "reason": a.reason,
+            "hint": a.hint,
+        })).collect::<Vec<_>>(),
+        "notes": o.notes,
+    });
+    if o.used == Some(Method::Stdout) {
+        doc["text"] = json!(o.text);
+    }
+    if let Some(t) = o.refused {
+        doc["refused"] = json!({ "bytes": t.bytes, "limit": t.limit });
+    }
+    doc
+}
+
+/// Puts the payload of `id` on the clipboard and records the use when it was sent.
+fn copy_entry(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+) -> Result<CopyOutcome, CliError> {
+    let text = kb.pick(id, PrintMode::Payload).map_err(io_error)?;
+    let outcome = clipboard::copy(
+        platform,
+        &ClipboardSettings::from_settings(settings),
+        &text,
+        Place::Cli,
+    );
+    if outcome.sent() {
+        record_use(kb, id);
+    }
+    Ok(outcome)
+}
+
+/// A use that cannot be recorded is a warning, not a failure: the text was already delivered.
+fn record_use(kb: &Kb, id: &str) {
+    if let Err(e) = kb.record_use(id, SystemTime::now()) {
+        eprintln!("kb: warning: could not record the use of {id}: {e}");
+    }
+}
+
+/// Copies, prints or shows the entry the UI returned, and returns the exit code.
+pub fn run_pick(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    id: &str,
+    post: &PostPick,
+) -> Result<ExitCode, CliError> {
+    let kb = Kb::open(root).map_err(io_error)?;
+    match post {
+        PostPick::Copy => {
+            let outcome = copy_entry(platform, &kb, &loaded.settings, id)?;
+            Ok(report_copy(&outcome, id, false))
+        }
+        PostPick::Print(mode) => {
+            let out = kb.pick(id, *mode).map_err(io_error)?;
+            write_stdout(&out);
+            record_use(&kb, id);
+            Ok(ExitCode::SUCCESS)
+        }
+        PostPick::Show(options) => {
+            write_stdout(&show_entry(platform, &kb, &loaded.settings, id, *options)?);
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+fn write_stdout(text: &str) {
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(text.as_bytes());
+    let _ = stdout.flush();
+}
+
+/// What `kb show` prints for `id`. A use is not recorded.
+fn show_entry(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    options: ShowOptions,
+) -> Result<String, CliError> {
+    match options.mode {
+        ShowMode::Raw => kb.pick(id, PrintMode::Payload).map_err(io_error),
+        ShowMode::Json => kb.pick(id, PrintMode::Json).map_err(io_error),
+        ShowMode::File => kb.pick(id, PrintMode::Path).map_err(io_error),
+        ShowMode::Preview => {
+            let terminal = std::io::stdout().is_terminal();
+            let env = ThemeEnv::detect(&platform.env());
+            let color = terminal && !options.no_color && !env.no_color;
+            let theme = Theme::resolve(
+                settings.theme(),
+                &ThemeEnv {
+                    no_color: !color,
+                    ..env
+                },
+            );
+            let width = if terminal {
+                ratatui::crossterm::terminal::size().map_or(show::DEFAULT_WIDTH, |(w, _)| w)
+            } else {
+                show::DEFAULT_WIDTH
+            };
+            show::preview_text(kb, id, &theme, color, width).map_err(io_error)
+        }
+    }
+}
+
+// ---- resolving what the user typed ----
+
+/// What `kb copy` and `kb show` do next with the argument.
+enum Next {
+    Entry(String),
+    /// Several close matches and a terminal: let the user choose in the UI.
+    Choose,
+    /// Already reported; this is the exit code.
+    Done(ExitCode),
+}
+
+fn candidates_json(c: &[Candidate]) -> Value {
+    Value::Array(
+        c.iter()
+            .map(|c| json!({ "id": c.id, "title": c.title }))
+            .collect(),
+    )
+}
+
+fn resolve_or_report(
+    platform: &impl Platform,
+    kb: &mut Kb,
+    text: &str,
+    json: bool,
+) -> Result<Next, CliError> {
+    Ok(match kb.resolve(text).map_err(io_error)? {
+        Resolution::Resolved(id) => Next::Entry(id),
+        Resolution::NotFound => {
+            let message = format!("no entry matches {text:?}");
+            eprintln!("kb: {message}");
+            if json {
+                println!(
+                    "{}",
+                    json!({ "error": { "kind": "not_found", "message": message } })
+                );
+            }
+            Next::Done(ExitCode::from(1))
+        }
+        Resolution::Ambiguous(c) => {
+            if !json && platform.has_terminal() {
+                return Ok(Next::Choose);
+            }
+            let message = format!("{} close matches for {text:?}; use an exact ID", c.len());
+            eprintln!("kb: {message}");
+            for cand in &c {
+                eprintln!("{}\t{}", cand.id, cand.title);
+            }
+            if json {
+                println!(
+                    "{}",
+                    json!({ "error": {
+                        "kind": "ambiguous",
+                        "message": message,
+                        "candidates": candidates_json(&c),
+                    } })
+                );
+            }
+            Next::Done(ExitCode::from(1))
+        }
+    })
+}
+
+/// `kb copy <id|query>`.
+pub fn run_copy(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, json)? {
+        Next::Entry(id) => {
+            let outcome = copy_entry(platform, &kb, &loaded.settings, &id)?;
+            Ok(report_copy(&outcome, &id, json))
+        }
+        Next::Choose => run_ui(platform, root, loaded, text, &PostPick::Copy, false),
+        Next::Done(code) => Ok(code),
+    }
+}
+
+/// `kb show <id|query>`.
+pub fn run_show(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    options: ShowOptions,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    let json = options.mode == ShowMode::Json;
+    match resolve_or_report(platform, &mut kb, text, json)? {
+        Next::Entry(id) => {
+            write_stdout(&show_entry(platform, &kb, &loaded.settings, &id, options)?);
+            Ok(ExitCode::SUCCESS)
+        }
+        Next::Choose => run_ui(
+            platform,
+            root,
+            loaded,
+            text,
+            &PostPick::Show(options),
+            false,
+        ),
+        Next::Done(code) => Ok(code),
+    }
+}
+
+/// What Enter does in a UI opened by plain `kb`: `--print` wins, then `tui.enter`.
+pub fn post_pick_for(print: Option<PrintMode>, settings: &Settings) -> PostPick {
+    match (print, settings.tui_enter()) {
+        (Some(mode), _) => PostPick::Print(mode),
+        (None, EnterAction::Print) => PostPick::Print(PrintMode::Payload),
+        (None, EnterAction::Copy) => PostPick::Copy,
+    }
+}
+
+/// Opens the UI with `query` in the search line, then does `post` with the entry picked in it.
+/// `report_config` prints the config warnings after the UI has left the screen (the commands that
+/// open the UI themselves printed them before).
+pub fn run_ui(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    query: &str,
+    post: &PostPick,
+    report_config: bool,
+) -> Result<ExitCode, CliError> {
+    let options = Options {
+        mouse: loaded.settings.tui_mouse(),
+        theme: loaded.settings.theme(),
+        clipboard: ClipboardSettings::from_settings(&loaded.settings),
+        editor: loaded.settings.editor().map(str::to_string),
+        config_problems: loaded.warnings.len(),
+        // Timing tests set this so the background refresh does not add noise.
+        refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
+    };
+    let outcome = tui::run(platform, root, query, options).map_err(|e| CliError::new("io", e));
+    if report_config {
+        for warning in &loaded.warnings {
+            eprintln!("kb: {warning}");
+        }
+    }
+    match outcome? {
+        Outcome::Picked { id } => run_pick(platform, root, loaded, &id, post),
+        Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+    }
+}
+
+// ---- kb config ----
+
+fn describe_source(source: &Source) -> String {
+    match source {
+        Source::Default => "default".to_string(),
+        Source::File(_) => "file".to_string(),
+        Source::Env(name) => format!("env {name}"),
+        Source::Flag(flag) => format!("flag {flag}"),
+    }
+}
+
+/// A setting's value as JSON: booleans and integers keep their type.
+fn typed_value(kind: Kind, value: &str) -> Value {
+    match kind {
+        Kind::Bool => json!(value == "true"),
+        Kind::Int => value
+            .parse::<u64>()
+            .map_or_else(|_| json!(value), |n| json!(n)),
+        _ => json!(value),
+    }
+}
+
+fn setting_json(key: &str, kind: Kind, r: &Resolved<String>) -> Value {
+    let file = match &r.source {
+        Source::File(p) => Some(p.display().to_string()),
+        _ => None,
+    };
+    json!({
+        "key": key,
+        "value": typed_value(kind, &r.value),
+        "source": r.source_name(),
+        "file": file,
+        "line": r.line,
+    })
+}
+
+fn config_write_path(platform: &impl Platform) -> Result<std::path::PathBuf, CliError> {
+    platform.config_write_path().ok_or_else(|| {
+        CliError::new(
+            "config",
+            "cannot find a home directory to keep the config file in",
+        )
+    })
+}
+
+/// `kb config init`: write the commented template. Never overwrites.
+pub fn config_init(platform: &impl Platform, json: bool) -> Result<ExitCode, CliError> {
+    let path = config_write_path(platform)?;
+    if path.exists() {
+        eprintln!("kb: config file already exists: {}", path.display());
+        return Ok(ExitCode::from(1));
+    }
+    config::write_atomic(&path, &config::render_template())
+        .map_err(|e| CliError::new("io", format!("cannot write {}: {e}", path.display())))?;
+    if json {
+        println!(
+            "{}",
+            json!({ "path": path.display().to_string(), "created": true })
+        );
+    } else {
+        println!("{}", path.display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `kb config path [--read]`: where the file is written, or every place that is read.
+pub fn config_path(
+    platform: &impl Platform,
+    loaded: &Loaded,
+    read: bool,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let write = config_write_path(platform)?;
+    let candidates = platform.config_files();
+    let in_use = |p: &std::path::PathBuf| loaded.file.as_ref() == Some(p);
+    if json {
+        let rows: Vec<Value> = candidates
+            .iter()
+            .map(|p| json!({ "path": p.display().to_string(), "exists": p.is_file(), "in_use": in_use(p) }))
+            .collect();
+        println!(
+            "{}",
+            json!({ "path": write.display().to_string(), "candidates": rows })
+        );
+    } else if read {
+        for p in &candidates {
+            let mark = if in_use(p) {
+                "  (in use)"
+            } else if p.is_file() {
+                "  (exists, not used)"
+            } else {
+                ""
+            };
+            println!("{}{mark}", p.display());
+        }
+    } else {
+        println!("{}", write.display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `kb config get <key>`.
+pub fn config_get(loaded: &Loaded, key: &str, json: bool) -> Result<ExitCode, CliError> {
+    let (Some(r), Some(s)) = (
+        loaded.settings.get(key),
+        SETTINGS.iter().find(|s| s.key == key),
+    ) else {
+        return Err(CliError::new(
+            "usage",
+            ConfigEditError::UnknownKey(key.to_string()).to_string(),
+        ));
+    };
+    if json {
+        println!("{}", setting_json(key, s.kind, r));
+    } else {
+        println!("{}", r.value);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `kb config list`.
+pub fn config_list(loaded: &Loaded, json: bool) -> Result<ExitCode, CliError> {
+    if json {
+        let rows: Vec<Value> = SETTINGS
+            .iter()
+            .filter_map(|s| {
+                loaded
+                    .settings
+                    .get(s.key)
+                    .map(|r| setting_json(s.key, s.kind, r))
+            })
+            .collect();
+        println!("{}", Value::Array(rows));
+    } else {
+        for (key, r) in loaded.settings.iter() {
+            let shown = if r.value.is_empty() {
+                "\"\"".to_string()
+            } else {
+                r.value.clone()
+            };
+            println!("{key} = {shown}  ({})", describe_source(&r.source));
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The settings that came from the legacy `config.yml`, as the text of a `config.toml`.
+fn legacy_as_toml(loaded: &Loaded) -> String {
+    let mut text = String::new();
+    for (key, r) in loaded.settings.iter() {
+        if matches!(r.source, Source::File(_))
+            && let Ok(next) = config::set_value(&text, key, &r.value)
+        {
+            text = next;
+        }
+    }
+    text
+}
+
+/// `kb config set <key> <value>`: edits the file in place, keeping comments and order.
+pub fn config_set(
+    platform: &impl Platform,
+    loaded: &Loaded,
+    key: &str,
+    value: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let path = config_write_path(platform)?;
+    let read = |p: &std::path::Path| match std::fs::read_to_string(p) {
+        Ok(t) => Ok(Some(t)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(CliError::new(
+            "io",
+            format!("cannot read {}: {e}", p.display()),
+        )),
+    };
+    // Writing a new file where another one was in use would hide that file's settings, so the
+    // new file starts as a copy of it.
+    let (base, moved_from) = match read(&path)? {
+        Some(t) => (t, None),
+        // the pre-M4 YAML file: its settings move into the new file, because once config.toml
+        // exists kb stops reading config.yml
+        None if loaded.legacy => (legacy_as_toml(loaded), loaded.file.clone()),
+        None => match loaded.file.as_ref().filter(|f| **f != path) {
+            Some(other) => (read(other)?.unwrap_or_default(), Some(other.clone())),
+            None => (String::new(), None),
+        },
+    };
+    let edited = config::set_value(&base, key, value).map_err(|e| match e {
+        ConfigEditError::NotToml(_) => CliError::new("config", format!("{}: {e}", path.display())),
+        _ => CliError::new("usage", e.to_string()),
+    })?;
+    config::write_atomic(&path, &edited)
+        .map_err(|e| CliError::new("io", format!("cannot write {}: {e}", path.display())))?;
+    if let Some(other) = moved_from {
+        eprintln!(
+            "kb: copied the settings of {} to {}, which kb reads first",
+            other.display(),
+            path.display()
+        );
+    }
+    match loaded.settings.get(key).map(|r| &r.source) {
+        Some(Source::Env(name)) => eprintln!("kb: {name} is set and overrides this value"),
+        Some(Source::Flag(flag)) => eprintln!("kb: {flag} is given and overrides this value"),
+        _ => {}
+    }
+    if json {
+        println!(
+            "{}",
+            json!({ "key": key, "value": value, "path": path.display().to_string() })
+        );
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+// ---- kb doctor ----
+
+/// A string that is unlikely to be on the clipboard already.
+fn test_token() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "kb doctor test {:08x}",
+        (nanos ^ u128::from(std::process::id()) << 32) as u32
+    )
+}
+
+/// Copies a test string with the method kb would use and asks the user to paste it back.
+fn copy_test(platform: &impl Platform, loaded: &Loaded) -> Result<Check, CliError> {
+    use std::io::BufRead;
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::new(
+            "usage",
+            "--copy-test needs a terminal on stdin: you paste the test text back there",
+        ));
+    }
+    let token = test_token();
+    let outcome = clipboard::copy(
+        platform,
+        &ClipboardSettings::from_settings(&loaded.settings),
+        &token,
+        Place::Ui,
+    );
+    for warning in outcome.warnings() {
+        eprintln!("{warning}");
+    }
+    if !outcome.sent() {
+        let mut check = Check {
+            id: "copy-test",
+            status: Status::Fail,
+            summary: format!(
+                "nothing could carry the test text: {}",
+                outcome.message_short()
+            ),
+            hint: Some("see the clipboard check above".into()),
+            details: Vec::new(),
+        };
+        check.details.extend(
+            outcome
+                .attempts
+                .iter()
+                .map(|a| format!("{} skipped: {}", a.method.label(), a.reason)),
+        );
+        return Ok(check);
+    }
+    eprintln!("{}", outcome.message_short());
+    eprintln!("Paste it here and press Enter:");
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    let pasted = line.trim();
+    Ok(if pasted == token {
+        Check {
+            id: "copy-test",
+            status: Status::Pass,
+            summary: "the pasted text arrived".into(),
+            hint: None,
+            details: Vec::new(),
+        }
+    } else {
+        Check {
+            id: "copy-test",
+            status: Status::Fail,
+            summary: format!("the pasted text did not match what was copied (got {pasted:?})"),
+            hint: Some(
+                "the clipboard may belong to another session; see the clipboard check above".into(),
+            ),
+            details: Vec::new(),
+        }
+    })
+}
+
+/// `kb doctor`.
+pub fn run_doctor(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    with_copy_test: bool,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let mut report = doctor::run(platform, root, loaded);
+    if with_copy_test {
+        report.checks.push(copy_test(platform, loaded)?);
+    }
+    if json {
+        println!("{}", report.to_json());
+    } else {
+        let fancy = crate::color::enabled();
+        print!("{}", report.render(fancy));
+    }
+    Ok(if report.ok() {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
 }
 
 /// `kb edit`: Ctrl-E without the UI.
 pub fn run_edit(
     platform: &impl Platform,
-    root: &std::path::Path,
+    root: &Path,
+    loaded: &Loaded,
     id: &str,
 ) -> Result<ExitCode, CliError> {
     let kb = Kb::open(root).map_err(io_error)?;
@@ -31,8 +681,9 @@ pub fn run_edit(
     let tty = platform
         .open_tty()
         .map_err(|e| CliError::new("io", format!("no terminal to run the editor on: {e}")))?;
+    let editor = platform.resolve_editor(loaded.settings.editor());
     let status = platform
-        .run_editor(&path, &tty, &|| false)
+        .run_editor(&editor, &path, &tty, &|| false)
         .map_err(|e| CliError::new("io", format!("could not start the editor: {e}")))?
         .ok_or_else(|| CliError::new("io", "the editor was interrupted"))?;
     if let Ok(findings) = kb.lint_entry(id)
@@ -45,4 +696,62 @@ pub fn run_edit(
     } else {
         ExitCode::from(1)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::platform::fake::{FakePlatform, FakeTool, mac_env};
+
+    #[test]
+    fn copy_json_has_the_documented_shape() {
+        let p = FakePlatform::new(mac_env(&[])).with_tool("pbcopy", FakeTool::Ok);
+        let o = clipboard::copy(&p, &ClipboardSettings::default(), "a\nb\n", Place::Cli);
+        let doc = copy_json(&o, "x/y");
+        assert_eq!(doc["id"], "x/y");
+        assert_eq!(doc["method"], "pbcopy");
+        assert_eq!(doc["confirmed"], true);
+        assert_eq!(
+            (doc["bytes"].as_u64(), doc["lines"].as_u64()),
+            (Some(3), Some(2))
+        );
+        assert_eq!(doc["sent"], true);
+        assert!(doc.get("text").is_none() && doc.get("refused").is_none());
+        let s = ClipboardSettings {
+            choice: kb_core::config::ClipboardChoice::Stdout,
+            ..ClipboardSettings::default()
+        };
+        let o = clipboard::copy(&p, &s, "text", Place::Cli);
+        let doc = copy_json(&o, "x/y");
+        assert_eq!(
+            (doc["method"].as_str(), doc["text"].as_str()),
+            (Some("stdout"), Some("text"))
+        );
+    }
+
+    #[test]
+    fn copy_json_names_a_refusal() {
+        let p = FakePlatform::new(mac_env(&[("SSH_TTY", "t")]));
+        let s = ClipboardSettings {
+            osc52_max_bytes: 2,
+            ..ClipboardSettings::default()
+        };
+        let o = clipboard::copy(&p, &s, "abcdef", Place::Cli);
+        let doc = copy_json(&o, "x/y");
+        assert_eq!(doc["sent"], false);
+        assert!(doc["method"].is_null());
+        assert_eq!(doc["refused"]["limit"], 2);
+        assert_eq!(doc["attempts"][0]["method"], "terminal (OSC 52)");
+    }
+
+    #[test]
+    fn enter_follows_the_flag_then_the_setting() {
+        let default =
+            kb_core::config::load(&[], &|_| None, &kb_core::config::Flags::default()).settings;
+        assert_eq!(post_pick_for(None, &default), PostPick::Copy);
+        assert_eq!(
+            post_pick_for(Some(PrintMode::Id), &default),
+            PostPick::Print(PrintMode::Id)
+        );
+    }
 }

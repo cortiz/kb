@@ -17,6 +17,15 @@ fn kb_bin() -> std::path::PathBuf {
     std::path::PathBuf::from(assert_cmd::Command::cargo_bin("kb").unwrap().get_program())
 }
 
+/// Editors and kb save through a temporary file and a rename, so a reader never sees half a file.
+/// (A plain `fs::write` can be read mid-write, which kb correctly reports as an entry with errors.)
+fn write_atomically(path: &std::path::Path, text: &str) {
+    let tmp = path.with_extension("tmp-write");
+    if fs::write(&tmp, text).is_ok() {
+        let _ = fs::rename(&tmp, path);
+    }
+}
+
 fn spawn_search(root: &std::path::Path, args: &[&str]) -> std::process::Child {
     Process::new(kb_bin())
         .env_remove("KB_ROOT")
@@ -76,13 +85,13 @@ fn fifty_searches_while_files_change() {
                 match n % 4 {
                     0 => {
                         if let Ok(t) = fs::read_to_string(&p) {
-                            let _ = fs::write(&p, format!("{t}\nedit {n} zebrafish\n"));
+                            write_atomically(&p, &format!("{t}\nedit {n} zebrafish\n"));
                         }
                     }
                     1 => {
-                        let _ = fs::write(
-                            root.join(format!("group-00/new-{n}.md")),
-                            support::entry_text(&format!("New {n}"), "t", "x", "zebrafish"),
+                        write_atomically(
+                            &root.join(format!("group-00/new-{n}.md")),
+                            &support::entry_text(&format!("New {n}"), "t", "x", "zebrafish"),
                         );
                     }
                     2 => {

@@ -1,18 +1,95 @@
 //! macOS: app data under `~/Library`.
 
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 
-use super::Platform;
+use std::time::Duration;
+
+use super::{
+    CopyTool, Editor, Environment, NativeTool, Opened, OpenerCommand, Os, Platform, ToolError,
+    clipboard,
+};
 
 pub struct MacOs;
+
+impl MacOs {
+    fn config_paths(&self) -> super::ConfigPaths {
+        super::config_paths(Os::MacOs, None, self.home_dir().as_deref())
+    }
+}
 
 impl Platform for MacOs {
     fn home_dir(&self) -> Option<PathBuf> {
         std::env::home_dir()
     }
 
-    fn config_file(&self) -> Option<PathBuf> {
-        self.home_dir().map(|h| config_file(&h))
+    fn config_files(&self) -> Vec<PathBuf> {
+        self.config_paths().read
+    }
+
+    fn config_write_path(&self) -> Option<PathBuf> {
+        self.config_paths().write
+    }
+
+    fn data_dir(&self) -> Option<PathBuf> {
+        super::data_dir(
+            Os::MacOs,
+            std::env::var("XDG_DATA_HOME").ok().as_deref(),
+            self.home_dir().as_deref(),
+        )
+    }
+
+    fn cache_dir(&self) -> Option<PathBuf> {
+        super::cache_dir(
+            Os::MacOs,
+            std::env::var("XDG_CACHE_HOME").ok().as_deref(),
+            self.home_dir().as_deref(),
+        )
+    }
+
+    fn env(&self) -> Environment {
+        Environment::current()
+    }
+
+    fn find_tool(&self, name: &str) -> Option<PathBuf> {
+        super::unix::find_tool(name)
+    }
+
+    fn tmux_allows_passthrough(&self) -> Option<bool> {
+        super::unix::tmux_allows_passthrough(&self.env())
+    }
+
+    fn write_tty(&self, bytes: &[u8]) -> std::io::Result<()> {
+        super::unix::write_tty(bytes)
+    }
+
+    fn native_tools(&self, _env: &Environment) -> Vec<NativeTool> {
+        clipboard::mac_tools()
+    }
+
+    fn run_copy_tool(
+        &self,
+        tool: &CopyTool,
+        text: &str,
+        timeout: Duration,
+    ) -> Result<(), ToolError> {
+        super::unix::run_copy_tool(tool, text, timeout)
+    }
+
+    fn opener(&self, override_cmd: Option<&str>) -> OpenerCommand {
+        OpenerCommand {
+            command: override_cmd.unwrap_or("open").to_string(),
+        }
+    }
+
+    fn open(
+        &self,
+        target: &str,
+        opener: &OpenerCommand,
+        env: &Environment,
+    ) -> std::io::Result<Opened> {
+        super::unix::open(target, opener, env)
     }
 
     fn has_terminal(&self) -> bool {
@@ -23,33 +100,17 @@ impl Platform for MacOs {
         super::unix::open_tty()
     }
 
+    fn resolve_editor(&self, configured: Option<&str>) -> Editor {
+        super::unix::resolve_editor(configured)
+    }
+
     fn run_editor(
         &self,
+        editor: &Editor,
         path: &Path,
         tty: &std::fs::File,
         interrupt: &dyn Fn() -> bool,
     ) -> std::io::Result<Option<std::process::ExitStatus>> {
-        super::unix::run_editor(path, tty, interrupt)
-    }
-}
-
-/// `~/Library/Application Support/kb/config.yml`.
-fn config_file(home: &Path) -> PathBuf {
-    home.join("Library")
-        .join("Application Support")
-        .join("kb")
-        .join("config.yml")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn application_support() {
-        assert_eq!(
-            config_file(Path::new("/Users/u")),
-            PathBuf::from("/Users/u/Library/Application Support/kb/config.yml")
-        );
+        super::unix::run_editor(editor, path, tty, interrupt)
     }
 }

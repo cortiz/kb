@@ -1,22 +1,99 @@
 //! Linux: XDG base directories.
 
-use std::ffi::OsString;
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 
-use super::Platform;
+use std::time::Duration;
+
+use super::{
+    CopyTool, Editor, Environment, NativeTool, Opened, OpenerCommand, Os, Platform, ToolError,
+    clipboard,
+};
 
 pub struct Linux;
+
+impl Linux {
+    fn config_paths(&self) -> super::ConfigPaths {
+        super::config_paths(
+            Os::Linux,
+            std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+            self.home_dir().as_deref(),
+        )
+    }
+}
 
 impl Platform for Linux {
     fn home_dir(&self) -> Option<PathBuf> {
         std::env::home_dir()
     }
 
-    fn config_file(&self) -> Option<PathBuf> {
-        config_file(
-            std::env::var_os("XDG_CONFIG_HOME"),
+    fn config_files(&self) -> Vec<PathBuf> {
+        self.config_paths().read
+    }
+
+    fn config_write_path(&self) -> Option<PathBuf> {
+        self.config_paths().write
+    }
+
+    fn data_dir(&self) -> Option<PathBuf> {
+        super::data_dir(
+            Os::Linux,
+            std::env::var("XDG_DATA_HOME").ok().as_deref(),
             self.home_dir().as_deref(),
         )
+    }
+
+    fn cache_dir(&self) -> Option<PathBuf> {
+        super::cache_dir(
+            Os::Linux,
+            std::env::var("XDG_CACHE_HOME").ok().as_deref(),
+            self.home_dir().as_deref(),
+        )
+    }
+
+    fn env(&self) -> Environment {
+        Environment::current()
+    }
+
+    fn find_tool(&self, name: &str) -> Option<PathBuf> {
+        super::unix::find_tool(name)
+    }
+
+    fn tmux_allows_passthrough(&self) -> Option<bool> {
+        super::unix::tmux_allows_passthrough(&self.env())
+    }
+
+    fn write_tty(&self, bytes: &[u8]) -> std::io::Result<()> {
+        super::unix::write_tty(bytes)
+    }
+
+    fn native_tools(&self, env: &Environment) -> Vec<NativeTool> {
+        clipboard::linux_tools(env)
+    }
+
+    fn run_copy_tool(
+        &self,
+        tool: &CopyTool,
+        text: &str,
+        timeout: Duration,
+    ) -> Result<(), ToolError> {
+        super::unix::run_copy_tool(tool, text, timeout)
+    }
+
+    fn opener(&self, override_cmd: Option<&str>) -> OpenerCommand {
+        OpenerCommand {
+            command: override_cmd.unwrap_or("xdg-open").to_string(),
+        }
+    }
+
+    fn open(
+        &self,
+        target: &str,
+        opener: &OpenerCommand,
+        env: &Environment,
+    ) -> std::io::Result<Opened> {
+        super::unix::open(target, opener, env)
     }
 
     fn has_terminal(&self) -> bool {
@@ -27,47 +104,17 @@ impl Platform for Linux {
         super::unix::open_tty()
     }
 
+    fn resolve_editor(&self, configured: Option<&str>) -> Editor {
+        super::unix::resolve_editor(configured)
+    }
+
     fn run_editor(
         &self,
+        editor: &Editor,
         path: &Path,
         tty: &std::fs::File,
         interrupt: &dyn Fn() -> bool,
     ) -> std::io::Result<Option<std::process::ExitStatus>> {
-        super::unix::run_editor(path, tty, interrupt)
-    }
-}
-
-/// `$XDG_CONFIG_HOME/kb/config.yml`, else `~/.config/kb/config.yml`. A relative or empty
-/// `XDG_CONFIG_HOME` is ignored, as the XDG spec requires.
-fn config_file(xdg_config_home: Option<OsString>, home: Option<&Path>) -> Option<PathBuf> {
-    let base = match xdg_config_home.map(PathBuf::from) {
-        Some(dir) if dir.is_absolute() => dir,
-        _ => home?.join(".config"),
-    };
-    Some(base.join("kb").join("config.yml"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn uses_xdg_config_home() {
-        let got = config_file(Some("/xdg".into()), Some(Path::new("/home/u")));
-        assert_eq!(got, Some(PathBuf::from("/xdg/kb/config.yml")));
-    }
-
-    #[test]
-    fn falls_back_to_dot_config() {
-        let home = Some(Path::new("/home/u"));
-        let want = Some(PathBuf::from("/home/u/.config/kb/config.yml"));
-        assert_eq!(config_file(None, home), want);
-        assert_eq!(config_file(Some("".into()), home), want);
-        assert_eq!(config_file(Some("relative".into()), home), want);
-    }
-
-    #[test]
-    fn no_home_no_xdg() {
-        assert_eq!(config_file(None, None), None);
+        super::unix::run_editor(editor, path, tty, interrupt)
     }
 }

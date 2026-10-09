@@ -3,6 +3,8 @@
 
 pub mod color;
 pub mod commands;
+pub mod doctor;
 pub mod output;
 pub mod platform;
+pub mod show;
 pub mod tui;

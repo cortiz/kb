@@ -12,7 +12,6 @@ pub mod theme;
 pub mod view;
 pub mod worker;
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -24,19 +23,17 @@ use ratatui::crossterm::event::{self, Event};
 use ratatui::crossterm::terminal::size;
 
 use crate::platform::Platform;
-use app::{Action, AppState, CopyOutcome, Effect, Options, RefreshInfo};
-use terminal::{Signals, TerminalGuard, copy_sequence, exit_code_for_signal};
+use crate::platform::clipboard::{self, ClipboardSettings, Place};
+use app::{Action, AppState, CopyReport, Effect, Options, RefreshInfo};
+use terminal::{Signals, TerminalGuard, exit_code_for_signal};
 use theme::{Theme, ThemeEnv};
 use worker::{Reply, Request, Worker};
 
 /// How the TUI ended.
 #[derive(Debug)]
 pub enum Outcome {
-    /// An entry was picked; print `output` to stdout.
-    Picked {
-        output: String,
-        warnings: Vec<String>,
-    },
+    /// An entry was picked; the caller copies or prints it (and records the use).
+    Picked { id: String },
     /// Cancelled or signalled; nothing to print.
     Exit(i32),
 }
@@ -69,9 +66,11 @@ pub fn run(
         .open_tty()
         .map_err(|e| format!("cannot open the terminal: {e}"))?;
     let (w, h) = size().map_err(|e| format!("cannot read the terminal size: {e}"))?;
-    let theme = Theme::resolve(options.theme, &ThemeEnv::from_env());
+    let theme = Theme::resolve(options.theme, &ThemeEnv::detect(&platform.env()));
     let ui_kb = Kb::open(root).map_err(|e| e.to_string())?;
     let mouse = options.mouse;
+    let editor = options.editor.clone();
+    let clipboard_settings = options.clipboard.clone();
     let mut guard = TerminalGuard::enter(tty, mouse).map_err(|e| e.to_string())?;
     let signals = Signals::register();
     let backend = CrosstermBackend::new(guard.writer().map_err(|e| e.to_string())?);
@@ -85,8 +84,7 @@ pub fn run(
     );
     let mut worker = Worker::spawn(root.to_path_buf(), theme.is_color());
     let mut pending: Vec<Effect> = state.start();
-    let mut warnings = Vec::new();
-    let mut picked: Option<(String, PrintMode)> = None;
+    let mut picked: Option<String> = None;
     let mut exit: Option<i32> = None;
     let mut dirty = true;
     let mut first = true;
@@ -121,29 +119,23 @@ pub fn run(
                         use_count,
                     });
                 }
-                Effect::RecordUse(id) => {
-                    if let Err(e) = ui_kb.record_use(&id, SystemTime::now()) {
-                        warnings.push(format!("could not record the use of {id}: {e}"));
-                    }
-                }
-                Effect::Pick(mode) => {
-                    if let Some(id) = state.selected_id.clone() {
-                        picked = Some((id, mode));
-                    }
-                }
+                Effect::Pick => picked = state.selected_id.clone(),
                 Effect::Quit(code) => exit = Some(code),
                 Effect::CopyPayload => {
-                    let outcome = copy_selected(&state, &ui_kb, &guard);
-                    if outcome == CopyOutcome::Copied
-                        && let Some(id) = &state.selected_id
-                    {
-                        let _ = ui_kb.record_use(id, SystemTime::now());
-                    }
-                    pending.extend(state.update(Action::CopyDone(outcome), Instant::now()));
+                    let report = copy_selected(platform, &clipboard_settings, &state, &ui_kb);
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
                     dirty = true;
                 }
                 Effect::EditEntry(id) => {
-                    match edit_entry(platform, &ui_kb, &mut guard, &mut terminal, &id, &signals) {
+                    match edit_entry(
+                        platform,
+                        editor.as_deref(),
+                        &ui_kb,
+                        &mut guard,
+                        &mut terminal,
+                        &id,
+                        &signals,
+                    ) {
                         Edited::Returned(result) => {
                             pending.extend(
                                 state.update(Action::EditorReturned(result), Instant::now()),
@@ -217,32 +209,45 @@ pub fn run(
     if let Some(code) = exit {
         return Ok(Outcome::Exit(code));
     }
-    let Some((id, mode)) = picked else {
-        return Ok(Outcome::Exit(130));
-    };
-    let output = ui_kb.pick(&id, mode).map_err(|e| e.to_string())?;
-    Ok(Outcome::Picked { output, warnings })
+    match picked {
+        Some(id) => Ok(Outcome::Picked { id }),
+        None => Ok(Outcome::Exit(130)),
+    }
 }
 
-fn copy_selected(state: &AppState, kb: &Kb, guard: &TerminalGuard) -> CopyOutcome {
+/// Ctrl-Y: copies the selected entry's payload through the platform's clipboard chain. Printing
+/// is not an option here (the screen belongs to the UI), so a copy that has nowhere to go is
+/// reported in the key bar. A use is recorded when the text was sent.
+fn copy_selected(
+    platform: &impl Platform,
+    settings: &ClipboardSettings,
+    state: &AppState,
+    kb: &Kb,
+) -> CopyReport {
+    // ponytail: the copy runs on this thread; a hung clipboard tool freezes the UI for up to its
+    // 2 s timeout. Move it to the worker if that ever bites.
     let Some(id) = &state.selected_id else {
-        return CopyOutcome::Failed("nothing selected".into());
+        return CopyReport {
+            message: "Copy failed: nothing selected".into(),
+            sent: false,
+        };
     };
     let payload = match kb.pick(id, PrintMode::Payload) {
         Ok(p) => p,
-        Err(e) => return CopyOutcome::Failed(e.to_string()),
+        Err(e) => {
+            return CopyReport {
+                message: format!("Copy failed: {e}"),
+                sent: false,
+            };
+        }
     };
-    let tmux = std::env::var_os("TMUX").is_some_and(|v| !v.is_empty());
-    let seq = match copy_sequence(&payload, tmux) {
-        Ok(s) => s,
-        Err(_) => return CopyOutcome::TooLarge,
-    };
-    match guard
-        .writer()
-        .and_then(|mut w| w.write_all(seq.as_bytes()).and_then(|()| w.flush()))
-    {
-        Ok(()) => CopyOutcome::Copied,
-        Err(e) => CopyOutcome::Failed(e.to_string()),
+    let outcome = clipboard::copy(platform, settings, &payload, Place::Ui);
+    if outcome.sent() {
+        let _ = kb.record_use(id, SystemTime::now());
+    }
+    CopyReport {
+        message: outcome.message_short(),
+        sent: outcome.sent(),
     }
 }
 
@@ -256,6 +261,7 @@ enum Edited {
 
 fn edit_entry(
     platform: &impl Platform,
+    editor: Option<&str>,
     kb: &Kb,
     guard: &mut TerminalGuard,
     terminal: &mut Terminal<CrosstermBackend<std::fs::File>>,
@@ -266,10 +272,11 @@ fn edit_entry(
         Ok(p) => p,
         Err(e) => return Edited::Returned(Some(e.to_string())),
     };
+    let editor = platform.resolve_editor(editor);
     guard.suspend();
-    let result = guard
-        .writer()
-        .and_then(|tty| platform.run_editor(&path, &tty, &|| signals.received().is_some()));
+    let result = guard.writer().and_then(|tty| {
+        platform.run_editor(&editor, &path, &tty, &|| signals.received().is_some())
+    });
     if matches!(result, Ok(None)) {
         // leave the terminal as the shell expects it
         return Edited::Signalled(signals.received().unwrap_or(15));

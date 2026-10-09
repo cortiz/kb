@@ -64,6 +64,20 @@ fn the_headline_search_screen() {
 }
 
 #[test]
+fn the_header_with_config_problems() {
+    let (_tmp, root) = fixture_copy("search");
+    let theme = theme_of("dark");
+    let mut state = state_for(&root, "", None, (120, 40), &theme);
+    state.options.config_problems = 2;
+    let shot = render(&state, &theme);
+    assert!(
+        shot.contains("⚠ config: 2 problems (run kb doctor)"),
+        "{shot}"
+    );
+    assert_snapshot("config-warning.120x40.dark", &shot);
+}
+
+#[test]
 fn a_long_payload_scrolled_to_the_middle() {
     let (_tmp, root) = fixture_copy("tui");
     let theme = theme_of("dark");

@@ -1,0 +1,22 @@
+# kb configuration (fixture: comments, blank lines and odd spacing must survive `kb config set`)
+
+# Where your entries live.
+root   =   "~/work/kb"     # trailing comment on root
+editor = "nvim"
+theme = "light"
+
+
+[tui]
+# Enter copies or prints.
+enter = "copy"
+mouse = false
+
+[clipboard]
+method = "auto"    # auto | native | osc52 | stdout
+command = ""
+osc52_max_bytes = 74000
+trim_trailing_newline = true
+
+[opener]
+command = ""
+# end of file comment

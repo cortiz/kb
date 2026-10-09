@@ -174,31 +174,501 @@ fn the_terminal_is_restored_after_the_exit() {
     assert!(!s.alternate_screen() && !s.cursor_hidden());
 }
 
-/// Writes a config file where both platforms look for it.
+/// Writes `~/.config/kb/config.toml`, where both platforms look first.
 fn write_config(home: &std::path::Path, text: &str) {
-    for dir in [
-        home.join(".config/kb"),
-        home.join("Library/Application Support/kb"),
-    ] {
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("config.yml"), text).unwrap();
-    }
+    let dir = home.join(".config/kb");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("config.toml"), text).unwrap();
 }
 
 #[test]
-fn a_bad_theme_is_exit_2_before_the_terminal_is_touched() {
+fn a_bad_theme_does_not_stop_the_ui_from_starting() {
+    // FR-016: config problems never stop kb; the default theme is used
     let (_t, home, root) = kb_home("search");
-    write_config(&home, "theme: blue\n");
+    write_config(&home, "theme = \"blue\"\n");
     let mut s = Session::spawn(&Spec::new(&[], &home, &root));
-    assert_eq!(s.wait_exit(), 2);
+    s.wait_for("32 entries");
+    s.send(ESC);
+    assert_eq!(s.wait_exit(), 130);
+}
+
+// ---- M4 User Story 1: Enter copies ----
+
+/// The clipboard program kb tries first on this host, and the environment that selects it: `pbcopy`
+/// on macOS, `wl-copy` under Wayland on Linux.
+fn native_clipboard() -> (&'static str, Vec<(&'static str, &'static str)>) {
+    if cfg!(target_os = "macos") {
+        ("pbcopy", vec![])
+    } else {
+        ("wl-copy", vec![("WAYLAND_DISPLAY", "wayland-test")])
+    }
+}
+
+/// What Enter should have put on the clipboard for `id`, and how many lines it has.
+fn clipboard_text(root: &std::path::Path, id: &str) -> (String, usize) {
+    let text = expected(root, id, PrintMode::Payload);
+    let text = text.trim_end_matches(['\n', '\r']).to_string();
+    let lines = text.lines().count();
+    (text, lines)
+}
+
+fn lines_label(n: usize) -> String {
+    format!("{n} line{}", if n == 1 { "" } else { "s" })
+}
+
+/// Searches for `5xx auth` and presses Enter; returns the exit code.
+fn pick_the_headline_entry(s: &mut Session) -> u32 {
+    s.wait_for("32 entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+    s.send(ENTER);
+    s.wait_exit()
+}
+
+#[test]
+fn enter_copies_with_the_native_tool_and_confirms_on_stderr() {
+    let (t, home, root) = kb_home("search");
+    let (tool, extra_env) = native_clipboard();
+    let copied = t.path().join("copied");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&[], &home, &root)
+        .copy_mode("auto")
+        .env("KB_TEST_COPIED", copied.to_str().unwrap())
+        .with_fake_tool(tool, "cat > \"$KB_TEST_COPIED\"");
+    for (k, v) in extra_env {
+        spec = spec.env(k, v);
+    }
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    let (text, lines) = clipboard_text(&root, "sumo/5xx-by-authorizer");
+    assert_eq!(fs::read_to_string(&copied).unwrap(), text);
+    assert_eq!(fs::read_to_string(&out).unwrap(), "", "nothing on stdout");
     let screen = s.screen();
     assert!(
-        screen.contains("theme must be auto, dark or light"),
+        screen.contains(&format!(
+            "Copied sumo/5xx-by-authorizer ({}) via {tool}",
+            lines_label(lines)
+        )),
         "{screen}"
     );
     assert!(
-        !s.raw_output().contains("\x1b[?1049h"),
-        "the alternate screen was entered"
+        !s.alternate_screen() && !s.cursor_hidden(),
+        "terminal restored"
+    );
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".kb/state.json")).unwrap()).unwrap();
+    assert_eq!(state["usage"]["sumo/5xx-by-authorizer"]["count"], 1);
+}
+
+#[test]
+fn over_ssh_enter_sends_the_text_through_the_terminal() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&[], &home, &root)
+        .copy_mode("auto")
+        .env("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    let (text, lines) = clipboard_text(&root, "sumo/5xx-by-authorizer");
+    let osc = format!(
+        "\x1b]52;c;{}\x07",
+        kb_cli::platform::osc52::base64(text.as_bytes())
+    );
+    assert!(s.raw_output().contains(&osc), "no OSC 52 in the output");
+    assert!(
+        s.guarded_calls().is_empty(),
+        "no local tool is used over SSH"
+    );
+    let screen = s.screen();
+    assert!(
+        screen.contains(&format!(
+            "Sent sumo/5xx-by-authorizer ({}) via terminal (OSC 52)",
+            lines_label(lines)
+        )),
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("Copied"),
+        "kb cannot confirm a terminal copy: {screen}"
+    );
+    assert_eq!(fs::read_to_string(&out).unwrap(), "");
+}
+
+#[test]
+fn inside_tmux_the_sequence_is_wrapped_for_passthrough() {
+    let (_t, home, root) = kb_home("search");
+    let spec = Spec::new(&[], &home, &root)
+        .copy_mode("osc52")
+        .env("TMUX", "/tmp/tmux-1/default,1,0");
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    assert!(
+        s.raw_output().contains("\x1bPtmux;\x1b\x1b]52;c;"),
+        "not wrapped for tmux"
+    );
+}
+
+#[test]
+fn the_stdout_method_prints_the_trimmed_payload_and_says_so() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&[], &home, &root).copy_mode("stdout");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    let (text, lines) = clipboard_text(&root, "sumo/5xx-by-authorizer");
+    assert_eq!(fs::read_to_string(&out).unwrap(), text, "no newline added");
+    let screen = s.screen();
+    assert!(
+        screen.contains(&format!(
+            "Printed sumo/5xx-by-authorizer ({}) to stdout",
+            lines_label(lines)
+        )),
+        "{screen}"
+    );
+}
+
+#[test]
+fn a_payload_over_the_limit_is_refused_not_dumped() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&[], &home, &root)
+        .copy_mode("auto")
+        .env("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22")
+        .env("KB_CLIPBOARD_OSC52_MAX_BYTES", "10");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 2);
+    assert_eq!(
+        fs::read_to_string(&out).unwrap(),
+        "",
+        "the payload is not printed"
+    );
+    let screen = s.screen();
+    assert!(
+        screen.contains("over clipboard.osc52_max_bytes (10)"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("kb show --raw sumo/5xx-by-authorizer"),
+        "{screen}"
+    );
+    assert!(!s.raw_output().contains("\x1b]52;"), "nothing was sent");
+    let state = fs::read_to_string(root.join(".kb/state.json")).unwrap_or_default();
+    assert!(
+        !state.contains("sumo/5xx-by-authorizer"),
+        "no use recorded: {state}"
+    );
+}
+
+#[test]
+fn tui_enter_print_in_the_config_file_prints_like_m3() {
+    let (t, home, root) = kb_home("search");
+    write_config(&home, "[tui]\nenter = \"print\"\n");
+    let out = t.path().join("stdout");
+    // the harness default is print too; remove it so the file is what decides
+    let mut spec = Spec::new(&[], &home, &root).unset("KB_TUI_ENTER");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    assert_eq!(
+        fs::read_to_string(&out).unwrap(),
+        expected(&root, "sumo/5xx-by-authorizer", PrintMode::Payload)
+    );
+}
+
+#[test]
+fn the_print_flag_beats_the_enter_setting_in_both_directions() {
+    let (t, home, root) = kb_home("search");
+    // tui.enter = copy (the default) and --print id: the id is printed, nothing is copied
+    let out = t.path().join("id");
+    let mut spec = Spec::new(&["--print", "id"], &home, &root).unset("KB_TUI_ENTER");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    assert_eq!(fs::read_to_string(&out).unwrap(), "sumo/5xx-by-authorizer");
+    assert!(s.guarded_calls().is_empty());
+    // tui.enter = print in the file and --print payload: still prints
+    write_config(&home, "[tui]\nenter = \"copy\"\n");
+    let out = t.path().join("payload");
+    let mut spec = Spec::new(&["--print", "payload"], &home, &root).unset("KB_TUI_ENTER");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    assert_eq!(pick_the_headline_entry(&mut s), 0);
+    assert_eq!(
+        fs::read_to_string(&out).unwrap(),
+        expected(&root, "sumo/5xx-by-authorizer", PrintMode::Payload)
+    );
+}
+
+#[test]
+fn config_problems_do_not_stop_the_ui_and_are_reported_after_it_exits() {
+    let (_t, home, root) = kb_home("search");
+    write_config(&home, "theme = \"blue\"\nbogus = 1\n");
+    let mut s = Session::spawn(&Spec::new(&[], &home, &root));
+    s.wait_for("32 entries");
+    s.wait_for("⚠ config: 2 problems (run kb doctor)");
+    s.send(ESC);
+    assert_eq!(s.wait_exit(), 130);
+    let screen = s.screen();
+    assert!(
+        screen.contains(
+            "theme: \"blue\" is not valid (expected one of auto, dark, light); using \"auto\""
+        ),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("unknown key \"bogus\" (ignored)"),
+        "{screen}"
+    );
+}
+
+// ---- M4 User Story 2: an ambiguous `kb copy` / `kb show` opens the UI ----
+
+/// The id of the first result for `query`, as the UI will show it.
+fn first_result(root: &std::path::Path, query: &str) -> String {
+    let mut kb = Kb::open(root).unwrap();
+    let q = kb_core::query::Query::parse(query);
+    kb.search(&q, std::time::SystemTime::now()).unwrap().results[0]
+        .id
+        .clone()
+}
+
+#[test]
+fn an_ambiguous_copy_opens_the_ui_and_enter_copies_even_when_tui_enter_is_print() {
+    let (t, home, root) = kb_home("search");
+    let (tool, extra_env) = native_clipboard();
+    let copied = t.path().join("copied");
+    // the harness default is KB_TUI_ENTER=print: kb copy must ignore it
+    let mut spec = Spec::new(&["copy", "latency"], &home, &root)
+        .env("KB_CLIPBOARD_METHOD", "native")
+        .env("KB_TEST_COPIED", copied.to_str().unwrap())
+        .with_fake_tool(tool, "cat > \"$KB_TEST_COPIED\"");
+    for (k, v) in extra_env {
+        spec = spec.env(k, v);
+    }
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Latency p99 production"); // the results, not just the first frame
+    assert!(s.rows()[1].contains("latency"), "{}", s.rows()[1]);
+    let id = first_result(&root, "latency");
+    s.send(ENTER);
+    assert_eq!(s.wait_exit(), 0);
+    let (text, _) = clipboard_text(&root, &id);
+    assert_eq!(fs::read_to_string(&copied).unwrap(), text);
+    assert!(
+        s.screen().contains(&format!("Copied {id}")),
+        "{}",
+        s.screen()
+    );
+}
+
+#[test]
+fn cancelling_an_ambiguous_copy_copies_nothing() {
+    let (t, home, root) = kb_home("search");
+    let (tool, extra_env) = native_clipboard();
+    let copied = t.path().join("copied");
+    let mut spec = Spec::new(&["copy", "latency"], &home, &root)
+        .env("KB_CLIPBOARD_METHOD", "native")
+        .env("KB_TEST_COPIED", copied.to_str().unwrap())
+        .with_fake_tool(tool, "cat > \"$KB_TEST_COPIED\"");
+    for (k, v) in extra_env {
+        spec = spec.env(k, v);
+    }
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Latency p99 production");
+    s.send(ESC); // clears the query
+    s.wait_until("query cleared", |t| !t.contains("› latency"));
+    s.send(ESC);
+    assert_eq!(s.wait_exit(), 130);
+    assert!(!copied.exists());
+}
+
+#[test]
+fn an_ambiguous_show_opens_the_ui_and_enter_prints_the_formatted_entry() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&["show", "latency"], &home, &root);
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Latency p99 production");
+    let id = first_result(&root, "latency");
+    s.send(ENTER);
+    assert_eq!(s.wait_exit(), 0);
+    let printed = fs::read_to_string(&out).unwrap();
+    assert!(
+        printed.contains("── payload"),
+        "the preview as text: {printed}"
+    );
+    assert!(printed.contains(&format!("{id}.md")), "{printed}");
+    assert!(!printed.contains('\x1b'), "stdout is a file, so no colors");
+}
+
+// ---- M4 User Story 5: the editor comes from the platform layer ----
+
+#[test]
+fn ctrl_e_runs_the_editor_named_in_the_config_not_the_environment() {
+    let (t, home, root) = kb_home("search");
+    let marker = t.path().join("which");
+    let configured = script(
+        t.path(),
+        "configured",
+        &format!("echo configured > {}", marker.display()),
+    );
+    let from_env = script(
+        t.path(),
+        "from-env",
+        &format!("echo env > {}", marker.display()),
+    );
+    write_config(&home, &format!("editor = \"{}\"\n", configured.display()));
+    let spec = Spec::new(&[], &home, &root)
+        .env("VISUAL", from_env.to_str().unwrap())
+        .env("EDITOR", from_env.to_str().unwrap());
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Enter pick");
+    s.send(CTRL_E);
+    s.wait_until("the editor ran", |_| {
+        fs::read_to_string(&marker).is_ok_and(|t| !t.is_empty())
+    });
+    assert_eq!(fs::read_to_string(&marker).unwrap().trim(), "configured");
+    s.wait_for("32 entries");
+    s.send(CTRL_C);
+    assert_eq!(s.wait_exit(), 130);
+}
+
+#[test]
+fn kb_editor_in_the_environment_beats_the_file() {
+    let (t, home, root) = kb_home("search");
+    let marker = t.path().join("which");
+    let from_file = script(
+        t.path(),
+        "file",
+        &format!("echo file > {}", marker.display()),
+    );
+    let from_kb_editor = script(t.path(), "kbe", &format!("echo kbe > {}", marker.display()));
+    write_config(&home, &format!("editor = \"{}\"\n", from_file.display()));
+    let spec = Spec::new(&[], &home, &root).env("KB_EDITOR", from_kb_editor.to_str().unwrap());
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Enter pick");
+    s.send(CTRL_E);
+    s.wait_until("the editor ran", |_| {
+        fs::read_to_string(&marker).is_ok_and(|t| !t.is_empty())
+    });
+    assert_eq!(fs::read_to_string(&marker).unwrap().trim(), "kbe");
+    s.send(CTRL_C);
+    s.wait_exit();
+}
+
+#[test]
+fn ctrl_y_copies_with_the_platform_tool_and_stays_open() {
+    let (t, home, root) = kb_home("search");
+    let (tool, extra_env) = native_clipboard();
+    let copied = t.path().join("copied");
+    let mut spec = Spec::new(&[], &home, &root)
+        .env("KB_CLIPBOARD_METHOD", "native")
+        .env("KB_TEST_COPIED", copied.to_str().unwrap())
+        .with_fake_tool(tool, "cat > \"$KB_TEST_COPIED\"");
+    for (k, v) in extra_env {
+        spec = spec.env(k, v);
+    }
+    let mut s = Session::spawn(&spec);
+    s.wait_for("32 entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+    s.send(CTRL_Y);
+    let (text, _) = clipboard_text(&root, "sumo/5xx-by-authorizer");
+    s.wait_until("the key bar says how it was copied", |t| {
+        t.contains(&format!("Copied via {tool}"))
+    });
+    assert_eq!(fs::read_to_string(&copied).unwrap(), text);
+    assert!(s.alternate_screen() && s.is_running(), "the UI stays open");
+    // the message goes away by itself after two seconds
+    s.wait_until("the key bar is back", |t| {
+        !t.contains("Copied via") && t.contains("Enter pick")
+    });
+    s.send(CTRL_C);
+    assert_eq!(s.wait_exit(), 130);
+    let state: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(".kb/state.json")).unwrap()).unwrap();
+    assert_eq!(state["usage"]["sumo/5xx-by-authorizer"]["count"], 1);
+}
+
+#[test]
+fn ctrl_y_over_ssh_sends_through_the_terminal_without_disturbing_the_screen() {
+    let (_t, home, root) = kb_home("search");
+    let spec = Spec::new(&[], &home, &root).env("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22");
+    let mut s = Session::spawn(&spec);
+    s.wait_for("32 entries");
+    s.type_text("5xx auth");
+    s.wait_for("sumo/5xx-by-authorizer.md"); // the preview has loaded
+    let before: Vec<String> = s.rows()[..4].to_vec();
+    s.send(CTRL_Y);
+    s.wait_for("Sent via terminal (OSC 52)");
+    let (text, _) = clipboard_text(&root, "sumo/5xx-by-authorizer");
+    let osc = format!(
+        "\x1b]52;c;{}\x07",
+        kb_cli::platform::osc52::base64(text.as_bytes())
+    );
+    assert!(s.raw_output().contains(&osc));
+    // the header, search line, chips and box tops are untouched, and no escape text leaked in
+    assert_eq!(s.rows()[..4], before[..]);
+    assert!(
+        !s.screen().contains("52;c") && !s.screen().contains("]52"),
+        "{}",
+        s.screen()
+    );
+    assert!(
+        !s.screen().contains("Copied"),
+        "kb cannot confirm a terminal copy"
+    );
+    assert!(s.guarded_calls().is_empty());
+    s.send(CTRL_C);
+    assert_eq!(s.wait_exit(), 130);
+}
+
+#[test]
+fn ctrl_y_with_a_payload_over_the_limit_says_so_and_records_nothing() {
+    let (_t, home, root) = kb_home("search");
+    // auto over ssh is the terminal, then (in the UI) nothing; a forced osc52 would fall back to a tool
+    let spec = Spec::new(&[], &home, &root)
+        .env("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22")
+        .env("KB_CLIPBOARD_METHOD", "auto")
+        .env("KB_CLIPBOARD_OSC52_MAX_BYTES", "10");
+    let mut s = Session::spawn(&spec);
+    s.wait_for("32 entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+    s.send(CTRL_Y);
+    s.wait_for("Too large for the terminal");
+    assert!(!s.raw_output().contains("\x1b]52;"));
+    s.send(CTRL_C);
+    s.wait_exit();
+    assert!(!root.join(".kb/state.json").exists());
+}
+
+#[test]
+fn ctrl_y_never_prints_into_the_screen_even_with_the_stdout_method() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("stdout");
+    let mut spec = Spec::new(&[], &home, &root).env("KB_CLIPBOARD_METHOD", "stdout");
+    spec.out = Some(out.clone());
+    let mut s = Session::spawn(&spec);
+    s.wait_for("32 entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+    s.send(CTRL_Y);
+    s.wait_for("Copy failed");
+    assert_eq!(
+        fs::read_to_string(&out).unwrap_or_default(),
+        "",
+        "nothing on stdout"
+    );
+    s.send(CTRL_C);
+    assert_eq!(s.wait_exit(), 130);
+    assert!(
+        !root.join(".kb/state.json").exists(),
+        "no use for a copy that did not happen"
     );
 }
 
@@ -361,7 +831,10 @@ fn visual_wins_over_editor_and_a_missing_editor_does_not_close_the_ui() {
     let mut s = Session::spawn(&spec);
     s.wait_for("Enter pick");
     s.send(CTRL_E);
-    s.wait_until("the editor ran", |_| marker.exists());
+    // the shell creates the file before `echo` fills it: wait for the content
+    s.wait_until("the editor ran", |_| {
+        fs::read_to_string(&marker).is_ok_and(|t| !t.is_empty())
+    });
     assert_eq!(fs::read_to_string(&marker).unwrap().trim(), "visual");
     s.wait_for("32 entries");
     s.send(CTRL_C);
@@ -482,7 +955,7 @@ fn the_wheel_is_ignored_by_default_and_works_with_mouse_true() {
     s.send(CTRL_C);
     s.wait_exit();
 
-    write_config(&home, "mouse: true\n");
+    write_config(&home, "[tui]\nmouse = true\n");
     let mut s = Session::spawn(&Spec::new(&[], &home, &root));
     s.wait_for("Enter pick");
     assert!(s.raw_output().contains("\x1b[?1000h"));
@@ -521,7 +994,7 @@ fn the_theme_in_the_config_picks_the_selection_background() {
     use vt100::Color::Idx;
     let (_t, home, root) = kb_home("search");
     for (theme, bg) in [("dark", 237u8), ("light", 254)] {
-        write_config(&home, &format!("theme: {theme}\n"));
+        write_config(&home, &format!("theme = \"{theme}\"\n"));
         let mut s = Session::spawn(&Spec::new(&[], &home, &root));
         s.wait_for("Enter pick");
         assert_eq!(s.bg_at(4, 3), Idx(bg), "{theme}");
@@ -529,7 +1002,7 @@ fn the_theme_in_the_config_picks_the_selection_background() {
         s.wait_exit();
     }
     // auto follows COLORFGBG
-    write_config(&home, "theme: auto\n");
+    write_config(&home, "theme = \"auto\"\n");
     let spec = Spec::new(&[], &home, &root).env("COLORFGBG", "0;15");
     let mut s = Session::spawn(&spec);
     s.wait_for("Enter pick");

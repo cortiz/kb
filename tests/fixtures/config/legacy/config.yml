@@ -1,0 +1,4 @@
+# legacy kb config (M1/M3)
+root: ~/legacy-kb
+theme: dark
+mouse: true

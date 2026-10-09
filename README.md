@@ -5,8 +5,8 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
-> Status: milestone M3 (entry format, `kb lint`, `kb search`, the terminal UI). Variables at use
-> time, native clipboard and actions arrive in later milestones.
+> Status: milestone M4 (entry format, `kb lint`, `kb search`, the terminal UI, clipboard, config and
+> `kb doctor`). Variables at use time and actions arrive in later milestones.
 
 ## Building
 
@@ -46,14 +46,56 @@ Entries live under one directory, the **KB root**. kb looks for it in this order
 
 1. `--root <path>`
 2. the `KB_ROOT` environment variable
-3. `root:` in the config file: `~/.config/kb/config.yml` on Linux (or under `$XDG_CONFIG_HOME`),
-   `~/Library/Application Support/kb/config.yml` on macOS
+3. `root` in the [config file](#configuration)
 4. `~/kb`
 
-```yaml
-# config.yml
-root: ~/notes/kb
+```toml
+# ~/.config/kb/config.toml
+root = "~/notes/kb"
 ```
+
+## Configuration
+
+kb works with no config file. `kb config init` writes a commented one with every setting and its
+default (never overwriting an existing file); `kb config set clipboard.method osc52` changes one
+value and keeps your comments and order.
+
+| Platform | Config file |
+|----------|-------------|
+| Linux | `$XDG_CONFIG_HOME/kb/config.toml`, else `~/.config/kb/config.toml` |
+| macOS | `~/.config/kb/config.toml`, else `~/Library/Application Support/kb/config.toml` |
+
+On macOS the first file that exists wins (they are never merged), and `kb config init` and
+`kb config set` always write `~/.config/kb/config.toml`. `kb config path --read` shows which file
+is in use.
+
+```sh
+kb config init                      # write the commented default file; prints its path
+kb config path [--read]             # where it is written (and everything that is read)
+kb config get theme                 # one value
+kb config set tui.enter print       # change one value, keeping comments and order
+kb config list                      # every setting, its value and where the value comes from
+```
+
+| Setting | Values | Default |
+|---------|--------|---------|
+| `root` | a path | `~/kb` |
+| `editor` | a command, arguments allowed | `$VISUAL`, then `$EDITOR`, then `vi` |
+| `theme` | `auto`, `dark`, `light` | `auto` |
+| `tui.enter` | `copy`, `print` | `copy` |
+| `tui.mouse` | `true`, `false` | `false` |
+| `clipboard.method` | `auto`, `native`, `osc52`, `stdout` | `auto` |
+| `clipboard.command` | a command that reads the text on stdin | none |
+| `clipboard.osc52_max_bytes` | a whole number, at least 1 | `74000` |
+| `clipboard.trim_trailing_newline` | `true`, `false` | `true` |
+| `opener.command` | a command that gets the URL or file | `open` (macOS), `xdg-open` (Linux) |
+
+A command-line flag beats an environment variable (`KB_<SECTION>_<KEY>`, for example
+`KB_CLIPBOARD_METHOD` or `KB_ROOT`), which beats the file, which beats the default. An unknown key
+or a bad value never stops kb: it warns once with the file and line and uses the default. The
+older `config.yml` (keys `root`, `theme`, `mouse`) is still read when there is no `config.toml`,
+with a warning; `mouse` is now `tui.mouse`. The full contract is in
+[`specs/004-platform-clipboard/contracts/config.md`](specs/004-platform-clipboard/contracts/config.md).
 
 ## Entry format
 
@@ -200,11 +242,11 @@ which kb creates whenever it creates `.kb/`.
 ## Using the TUI
 
 ```sh
-kb                      # open the UI; type to search, Enter to pick
+kb                      # open the UI; type to search, Enter copies the payload
 kb 5xx auth             # open it with the search line already filled in
-kb | pbcopy             # the pick goes to stdout, so it pipes (macOS; use xclip or wl-copy on Linux)
-x=$(kb --print id)      # --print: payload (default), id, path or json
-kb show sumo/5xx-by-authorizer     # what Enter prints for that entry, without the UI
+x=$(kb --print id)      # --print: print the pick instead of copying (payload, id, path or json)
+kb copy 5xx auth        # what Enter does, without the UI
+kb show 5xx auth        # what the preview shows, without the UI
 kb edit sumo/5xx-by-authorizer     # what Ctrl-E does, without the UI
 ```
 
@@ -214,17 +256,20 @@ Backspace on an empty line removes the last one). Tab and Shift-Tab cycle the ty
 side previews the selected entry: syntax-highlighted payload with line numbers, `{variables}`
 marked and listed, type-specific fields, notes rendered from Markdown.
 
-Enter prints the entry and exits (it also counts as a use, which ranks the entry higher next time).
-Until the native clipboard arrives, Enter does not copy; pipe it, or press Ctrl-Y to ask the terminal
-to copy the payload (OSC 52: works in most modern terminals, over SSH, and in tmux with
-`set -g set-clipboard on`). Esc clears the search line, and on an empty one exits with code 130
-without printing anything. The UI is drawn on the terminal, never on stdout, so redirecting stdout
-is safe; with no terminal at all, `kb` prints the help and exits 2.
+Enter copies the payload to the clipboard and exits, with one line on stderr saying how
+(see [Copying](#copying)). It counts as a use, which ranks the entry higher next time. Set
+`tui.enter = "print"`, or pass `--print payload|id|path|json`, to print the pick on stdout instead,
+like `fzf`: `kb --print payload | pbcopy`, `$(kb --print id)`. Ctrl-Y copies and stays open, and
+the key bar says how it went for two seconds. Esc clears the search line, and on an empty one
+exits with code 130 without printing anything. The UI is drawn on the terminal, never on stdout,
+so redirecting stdout is safe; with no terminal at all, `kb` prints the help and exits 2. If the
+config has problems, the header shows `⚠ config: N problems (run kb doctor)` and the details are
+printed on stderr after the UI closes.
 
 | Key | Action |
 |-----|--------|
-| `Enter` | pick: print the entry and exit |
-| `Ctrl-Y` | copy the payload (terminal clipboard) |
+| `Enter` | pick: copy the entry and exit |
+| `Ctrl-Y` | copy the payload and stay open |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
 | `↓  Ctrl-N  Ctrl-J` | select the next result |
 | `↑  Ctrl-P  Ctrl-K` | select the previous result |
@@ -263,9 +308,55 @@ Terminals that keep Shift-PgUp/PgDn or Ctrl-Home/End for themselves never send t
 PgUp/PgDn, Shift-↑/↓ and Alt-P instead. Below 100 columns only the list shows and Alt-P zooms the
 preview; below 60×15 kb shows "Terminal too small" until you resize.
 
-Settings in the config file (`theme: auto|dark|light`, `mouse: true|false`) and `NO_COLOR` are
-described in [`specs/003-tui-core/contracts/config.md`](specs/003-tui-core/contracts/config.md).
-`theme: auto` reads `COLORFGBG` and otherwise assumes a dark background.
+`theme = "auto"` reads `COLORFGBG` and otherwise assumes a dark background; `NO_COLOR` turns colors
+off. See [Configuration](#configuration) for the settings.
+
+## Copying
+
+`kb copy <id|words>`, Enter and Ctrl-Y all copy the same way. kb tries these in order and tells you
+which one worked:
+
+1. **Local tool**: `pbcopy` on macOS; on Linux `wl-copy` under Wayland (`WAYLAND_DISPLAY`), then
+   `xclip` or `xsel` under X11 (`DISPLAY`). Install `wl-clipboard`, `xclip` or `xsel` if needed.
+2. **Your terminal (OSC 52)**: used first over SSH or with no display, so the text lands on the
+   clipboard of the machine you are sitting at. Works in iTerm2, kitty, Alacritty, WezTerm,
+   Windows Terminal and recent GNOME Terminal. **Terminal.app ignores it.** Inside tmux, add
+   `set -g allow-passthrough on` to `~/.tmux.conf`; GNU screen is wrapped too. kb cannot know
+   whether the terminal accepted it, so it says `Sent … via terminal (OSC 52)`, not "Copied".
+   Payloads over `clipboard.osc52_max_bytes` (74 KB) are refused; use
+   `kb show --raw <id> | <clipboard tool>` for those.
+3. **stdout**: when nothing else works the text is printed (and stderr says why), so
+   `kb copy x | pbcopy` still gets it. Inside the UI nothing is printed; the key bar says the copy
+   failed.
+
+`clipboard.method` forces the first choice (`native`, `osc52` or `stdout`) and
+`clipboard.command` names your own copy command; a choice that fails still falls back to the
+others. Each program gets 2 seconds before the next is tried. `kb copy --method osc52 …` overrides
+the setting for one run.
+
+`kb copy <id|words>` copies the payload (the URL for a `link`, `path:line` for `code`) and records a
+use. An exact ID, an ID with `.md` or a path inside the KB, or words: a search whose best match is
+clearly ahead (1.5 times the score of the next) is copied; otherwise the UI opens with those words
+so you can choose, or, with no terminal, the top matches are listed on stderr and the exit code is 1.
+Exit codes: `0` copied, `1` not found or ambiguous, `2` error (including a payload that is too large
+for the terminal and has nowhere else to go).
+
+`kb show <id|words>` prints the entry as the preview shows it (colors only on a terminal);
+`--raw` prints only the payload, `--json` the entry as JSON, `--file` the path of its file, and
+`--no-color` turns colors off. It records no use.
+
+## Checking your setup
+
+```sh
+kb doctor               # a checklist with a fix for every warning or failure
+kb doctor --copy-test   # copies a test string and asks you to paste it back
+kb doctor --json
+```
+
+`kb doctor` looks at the KB root and index, the config file (and any problems in it), the display
+server, SSH, tmux and screen, which clipboard method kb will use and which others work, true
+color, the editor Ctrl-E will launch, and the URL opener. It exits 1 if a check fails; warnings
+alone exit 0.
 
 ## JSON output
 

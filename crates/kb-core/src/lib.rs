@@ -12,6 +12,7 @@ pub mod init;
 pub mod lint;
 pub mod payload;
 pub mod query;
+pub mod resolve;
 pub mod root;
 pub mod search;
 pub mod source;

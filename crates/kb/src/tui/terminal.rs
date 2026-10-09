@@ -1,4 +1,4 @@
-//! Terminal setup and restore, signals, and the OSC 52 clipboard sequence.
+//! Terminal setup and restore, and signals.
 
 use std::fs::File;
 use std::io::{self, Write};
@@ -13,51 +13,6 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-
-/// Terminals commonly cap an OSC 52 payload at 100,000 encoded bytes.
-pub const MAX_COPY_BYTES: usize = 74_000;
-
-const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// RFC 4648 base64 with padding.
-pub fn base64(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let n = (u32::from(chunk[0]) << 16)
-            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
-            | u32::from(*chunk.get(2).unwrap_or(&0));
-        out.push(BASE64[(n >> 18) as usize & 63] as char);
-        out.push(BASE64[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            BASE64[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            BASE64[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct TooLarge;
-
-/// The escape sequence that asks the terminal to put `payload` on the clipboard. Inside tmux it
-/// is wrapped in the passthrough form, with every ESC doubled.
-pub fn copy_sequence(payload: &str, tmux: bool) -> Result<String, TooLarge> {
-    if payload.len() > MAX_COPY_BYTES {
-        return Err(TooLarge);
-    }
-    let seq = format!("\x1b]52;c;{}\x07", base64(payload.as_bytes()));
-    Ok(if tmux {
-        format!("\x1bPtmux;{}\x1b\\", seq.replace('\x1b', "\x1b\x1b"))
-    } else {
-        seq
-    })
-}
 
 /// The shell convention: 128 plus the signal number.
 pub fn exit_code_for_signal(signal: i32) -> i32 {
@@ -191,40 +146,6 @@ impl Signals {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn base64_matches_rfc_4648() {
-        for (plain, enc) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(base64(plain.as_bytes()), enc);
-        }
-        assert_eq!(base64(&[0xff, 0xfe, 0xfd]), "//79");
-    }
-
-    #[test]
-    fn osc52_plain_and_in_tmux() {
-        assert_eq!(
-            copy_sequence("hello", false).unwrap(),
-            "\x1b]52;c;aGVsbG8=\x07"
-        );
-        assert_eq!(
-            copy_sequence("hello", true).unwrap(),
-            "\x1bPtmux;\x1b\x1b]52;c;aGVsbG8=\x07\x1b\\"
-        );
-        assert!(copy_sequence(&"x".repeat(MAX_COPY_BYTES), false).is_ok());
-        assert_eq!(
-            copy_sequence(&"x".repeat(MAX_COPY_BYTES + 1), false),
-            Err(TooLarge)
-        );
-        assert!(copy_sequence("日本語 🚀", false).is_ok());
-    }
 
     #[test]
     fn restore_leaves_the_alternate_screen_and_shows_the_cursor_and_is_repeatable() {

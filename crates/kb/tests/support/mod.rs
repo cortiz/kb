@@ -35,11 +35,131 @@ pub fn search_kb() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
-/// A `kb` command that ignores the caller's environment root.
+/// A home that does not exist: tests that do not care about config get no config.
+pub const NOWHERE: &str = "/nonexistent-kb-test-home";
+
+/// Programs that would touch the real clipboard or open real applications, and the scripts that
+/// stand in for them.
+const GUARDED: &[&str] = &[
+    "pbcopy", "pbpaste", "wl-copy", "xclip", "xsel", "xdg-open", "open",
+];
+
+/// Writes stand-ins for the guarded programs into `dir`. Each records its call in `log` and
+/// swallows its input, so a test that reaches for the clipboard by accident neither changes the
+/// developer's clipboard nor goes unnoticed.
+pub fn write_guards(dir: &Path, log: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    for name in GUARDED {
+        let path = dir.join(name);
+        fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\necho \"{name} $*\" >> '{}'\ncat >/dev/null 2>&1\nexit 0\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// `dir` in front of the real `PATH`.
+pub fn path_with(dir: &Path) -> std::ffi::OsString {
+    let mut paths = vec![dir.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths).unwrap()
+}
+
+/// The guards every plain CLI test runs with (one directory per test process).
+fn process_guards() -> &'static Path {
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap().keep();
+        write_guards(&dir, &dir.join("calls.log"));
+        dir
+    })
+}
+
+/// A `kb` command that ignores the caller's environment: no `KB_*` settings, no real config (HOME
+/// and XDG_CONFIG_HOME point nowhere), no `NO_COLOR`, and clipboard programs replaced by guards.
+/// Tests that exercise config or the clipboard override what they need.
 pub fn kb() -> Command {
     let mut cmd = Command::cargo_bin("kb").unwrap();
-    cmd.env_remove("KB_ROOT").env_remove("NO_COLOR");
+    cmd.env_remove("NO_COLOR");
+    for setting in kb_core::config::SETTINGS {
+        cmd.env_remove(setting.env);
+    }
+    cmd.env("HOME", NOWHERE)
+        .env("XDG_CONFIG_HOME", format!("{NOWHERE}/config"))
+        .env("PATH", path_with(process_guards()));
     cmd
+}
+
+/// Runs `kb` with no controlling terminal and no stdin (a new session, so `/dev/tty` cannot be
+/// opened). `kb copy` and `kb show` list the candidates instead of opening the UI there.
+pub fn kb_without_terminal(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = std::process::Command::new("perl");
+    cmd.args([
+        "-MPOSIX",
+        "-e",
+        "POSIX::setsid(); exec @ARGV",
+        "--",
+        pty::KB,
+    ])
+    .args(args)
+    .env_remove("NO_COLOR")
+    .env("HOME", NOWHERE)
+    .env("XDG_CONFIG_HOME", format!("{NOWHERE}/config"))
+    .env("PATH", path_with(process_guards()))
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::piped());
+    for setting in kb_core::config::SETTINGS {
+        cmd.env_remove(setting.env);
+    }
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let child = cmd.spawn().expect("perl is available");
+    let started = std::time::Instant::now();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "kb waited for a terminal that does not exist"
+    );
+    out
+}
+
+/// A directory with a fake clipboard program for this host: `pbcopy` on macOS, `wl-copy` (and
+/// `WAYLAND_DISPLAY`) on Linux. The program writes what it receives to `copied` in the same
+/// directory. Returns `(program name, directory, file it writes, extra environment)`.
+pub fn fake_clipboard(
+    base: &Path,
+) -> (
+    &'static str,
+    PathBuf,
+    PathBuf,
+    Vec<(&'static str, &'static str)>,
+) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = base.join("fake-bin");
+    fs::create_dir_all(&dir).unwrap();
+    let copied = base.join("copied");
+    let (name, env) = if cfg!(target_os = "macos") {
+        ("pbcopy", vec![])
+    } else {
+        ("wl-copy", vec![("WAYLAND_DISPLAY", "wayland-test")])
+    };
+    let script = dir.join(name);
+    fs::write(
+        &script,
+        format!("#!/bin/sh\ncat > '{}'\n", copied.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    (name, dir, copied, env)
 }
 
 pub fn kb_in(root: &Path) -> Command {

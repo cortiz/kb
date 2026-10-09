@@ -54,3 +54,14 @@ Markdown notes, a command with `enum`, `text` and `secret` variables and an esca
 a prompt whose title mixes CJK and emoji, a link with a very long URL, a code entry with a symbol and
 an end line, a SQL entry with comments, strings and numbers, and a CloudWatch entry with log groups.
 Every entry has an `updated:` date so the preview's "edited" value does not depend on file times.
+
+## `config/`: M4 config files
+
+Not KBs: single config files for the `kb-core` config tests and the `kb config` CLI tests.
+
+- `good.toml`: every setting, with comments, blank lines, odd spacing and a trailing comment, so
+  `kb config set` can be checked for preserving everything except the edited value.
+- `bad.toml`: an unknown key on line 3 (`clipbaord.method`) and a bad value on line 6
+  (`clipboard.method = "xclipp"`): loading must give exactly two warnings with those lines.
+- `syntax-error.toml`: not valid TOML; loading gives one warning and all defaults.
+- `legacy/config.yml`: the pre-M4 YAML config (`root`, `theme`, `mouse`), read only as a fallback.

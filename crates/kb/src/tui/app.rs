@@ -3,8 +3,8 @@
 
 use std::time::{Duration, Instant};
 
+use crate::platform::clipboard::ClipboardSettings;
 use kb_core::config::ThemeChoice;
-use kb_core::entry_json::PrintMode;
 use kb_core::search::{Notice, SearchResult};
 use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 
@@ -22,19 +22,26 @@ const SLOW_REFRESH: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone)]
 pub struct Options {
-    pub print: PrintMode,
     pub mouse: bool,
     pub theme: ThemeChoice,
+    /// How Ctrl-Y copies (the clipboard settings).
+    pub clipboard: ClipboardSettings,
+    /// The `editor` setting; `None` falls back to `$VISUAL`, `$EDITOR`, `vi`.
+    pub editor: Option<String>,
     /// Turned off in timing tests so the refresh timer does not add noise.
     pub refresh_timer: bool,
+    /// Problems found in the config file or environment, shown as a warning in the header.
+    pub config_problems: usize,
 }
 
 impl Default for Options {
     fn default() -> Options {
         Options {
-            print: PrintMode::Payload,
             mouse: false,
+            config_problems: 0,
             theme: ThemeChoice::Auto,
+            clipboard: ClipboardSettings::default(),
+            editor: None,
             refresh_timer: true,
         }
     }
@@ -92,11 +99,12 @@ pub struct RefreshInfo {
     pub duration: Duration,
 }
 
+/// How a Ctrl-Y copy went, as the key bar says it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CopyOutcome {
-    Copied,
-    TooLarge,
-    Failed(String),
+pub struct CopyReport {
+    pub message: String,
+    /// The text was sent somewhere (otherwise the message is a warning).
+    pub sent: bool,
 }
 
 pub enum Action {
@@ -109,7 +117,7 @@ pub enum Action {
     PreviewReady(u64, Box<PreviewModel>),
     Refreshed(RefreshInfo),
     WorkerFailed(String),
-    CopyDone(CopyOutcome),
+    CopyDone(CopyReport),
     /// The editor returned; `Some` carries the first lint error of the file.
     EditorReturned(Option<String>),
 }
@@ -128,10 +136,10 @@ pub enum Effect {
         use_count: u64,
     },
     Refresh,
-    Pick(PrintMode),
+    /// Enter on the selected entry: leave the UI and let the caller copy or print it.
+    Pick,
     CopyPayload,
     EditEntry(String),
-    RecordUse(String),
     Quit(i32),
 }
 
@@ -399,26 +407,13 @@ impl AppState {
                 );
                 Vec::new()
             }
-            Action::CopyDone(outcome) => {
-                match outcome {
-                    CopyOutcome::Copied => {
-                        self.say("Copied (terminal clipboard)", MessageKind::Info, now, true);
-                    }
-                    CopyOutcome::TooLarge => self.say(
-                        "Too large for the terminal clipboard",
-                        MessageKind::Warning,
-                        now,
-                        true,
-                    ),
-                    CopyOutcome::Failed(m) => {
-                        self.say(
-                            &format!("Copy failed: {m}"),
-                            MessageKind::Warning,
-                            now,
-                            true,
-                        );
-                    }
-                }
+            Action::CopyDone(report) => {
+                let kind = if report.sent {
+                    MessageKind::Info
+                } else {
+                    MessageKind::Warning
+                };
+                self.say(&report.message, kind, now, true);
                 Vec::new()
             }
             Action::EditorReturned(error) => {
@@ -525,10 +520,7 @@ impl AppState {
                 }
             }
             Command::Pick => match self.selected_result() {
-                Some(r) => vec![
-                    Effect::RecordUse(r.id.clone()),
-                    Effect::Pick(self.options.print),
-                ],
+                Some(_) => vec![Effect::Pick],
                 None => {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()
@@ -924,14 +916,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn enter_records_the_use_then_picks() {
+    fn enter_only_picks_and_the_caller_records_the_use() {
+        // the use is recorded after the copy or print succeeds (FR-008), not when Enter is pressed
         let mut s = loaded(&["a", "b"]);
-        s.options.print = PrintMode::Id;
         let e = s.update(key(KeyCode::Enter, KeyModifiers::NONE), Instant::now());
-        assert_eq!(
-            e,
-            vec![Effect::RecordUse("a".into()), Effect::Pick(PrintMode::Id)]
-        );
+        assert_eq!(e, vec![Effect::Pick]);
     }
 
     #[test]
@@ -1084,7 +1073,7 @@ pub(crate) mod tests {
         let mut s = loaded(&["a"]);
         let e = s.update(Action::Paste("some-id\n".into()), Instant::now());
         assert_eq!(s.input.editor.text(), "some-id");
-        assert!(search_of(&e).is_some() && !e.iter().any(|x| matches!(x, Effect::Pick(_))));
+        assert!(search_of(&e).is_some() && !e.iter().any(|x| matches!(x, Effect::Pick)));
     }
 
     #[test]
@@ -1092,15 +1081,27 @@ pub(crate) mod tests {
         let mut s = loaded(&["a"]);
         let t0 = Instant::now();
         assert_eq!(s.update(ctrl('y'), t0), vec![Effect::CopyPayload]);
-        s.update(Action::CopyDone(CopyOutcome::Copied), t0);
+        let report = |message: &str, sent| CopyReport {
+            message: message.to_string(),
+            sent,
+        };
+        s.update(Action::CopyDone(report("Copied via pbcopy", true)), t0);
+        let m = s.message.as_ref().unwrap();
         assert_eq!(
-            s.message.as_ref().unwrap().text,
-            "Copied (terminal clipboard)"
+            (m.text.as_str(), m.kind),
+            ("Copied via pbcopy", MessageKind::Info)
         );
         s.update(Action::Tick, t0 + Duration::from_millis(2100));
         assert!(s.message.is_none());
-        s.update(Action::CopyDone(CopyOutcome::TooLarge), t0);
-        assert!(s.message.as_ref().unwrap().text.contains("Too large"));
+        s.update(
+            Action::CopyDone(report(
+                "Too large for the terminal: 99 B, limit 10 B",
+                false,
+            )),
+            t0,
+        );
+        let m = s.message.as_ref().unwrap();
+        assert!(m.text.contains("Too large") && m.kind == MessageKind::Warning);
     }
 
     #[test]
@@ -1542,7 +1543,7 @@ pub(crate) mod tests {
         assert!(matches!(
             s.update(key(KeyCode::Enter, KeyModifiers::NONE), now)
                 .as_slice(),
-            [Effect::RecordUse(_), Effect::Pick(_)]
+            [Effect::Pick]
         ));
         assert_eq!(
             s.update(ctrl('e'), now),

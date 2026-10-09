@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use kb_core::config::read_config;
+use kb_core::config::{self, Flags, Loaded};
 use kb_core::entry_json::PrintMode;
 use kb_core::init::{apply_init, plan_init};
 use kb_core::lint::{LintError, lint, resolve_scope};
@@ -12,11 +12,10 @@ use kb_core::query::Query;
 use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
+use kb_cli::commands::{self, ShowMode, ShowOptions};
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
-use kb_cli::tui::app::Options;
-use kb_cli::tui::{self, Outcome};
-use kb_cli::{color, commands, output};
+use kb_cli::{color, output};
 
 /// A terminal knowledge base for operational snippets.
 #[derive(Parser)]
@@ -34,9 +33,10 @@ struct Cli {
 struct TuiArgs {
     /// Initial text for the search line.
     query: Vec<String>,
-    /// What Enter prints: payload, id, path or json.
-    #[arg(long, value_name = "MODE", default_value = "payload", value_parser = parse_print)]
-    print: PrintMode,
+    /// Print the pick instead of copying it: payload, id, path or json. Without this, Enter
+    /// follows `tui.enter` (copy by default).
+    #[arg(long, value_name = "MODE", value_parser = parse_print)]
+    print: Option<PrintMode>,
     /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
     #[arg(long = "not-tag", hide = true, value_name = "TAG")]
     not_tags: Vec<String>,
@@ -45,9 +45,7 @@ struct TuiArgs {
 impl TuiArgs {
     /// The text for the search line: the words, then each excluded tag as `-tag:x`.
     fn initial_query(&self) -> String {
-        let mut parts: Vec<String> = self.query.clone();
-        parts.extend(self.not_tags.iter().map(|t| format!("-tag:{t}")));
-        parts.join(" ")
+        join_query(&self.query, &self.not_tags)
     }
 }
 
@@ -56,13 +54,117 @@ fn parse_print(s: &str) -> Result<PrintMode, String> {
 }
 
 #[derive(Args)]
+struct CopyArgs {
+    /// An entry ID, or words to search for. A clear best match is copied; close matches open the
+    /// UI (or are listed when there is no terminal).
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// How to copy, for this run: auto, native, osc52 or stdout.
+    #[arg(long, value_name = "METHOD", value_parser = ["auto", "native", "osc52", "stdout"])]
+    method: Option<String>,
+    /// Print what happened as JSON.
+    #[arg(long)]
+    json: bool,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
 struct ShowArgs {
-    /// The entry ID, for example `sumo/5xx-by-authorizer`.
-    id: String,
-    /// What to print: payload, id, path or json.
-    #[arg(long, value_name = "MODE", default_value = "payload", value_parser = parse_print)]
-    print: PrintMode,
-    /// Same as `--print json`.
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Print only the payload (or the URL, or `path:line`).
+    #[arg(long, conflicts_with_all = ["json", "file"])]
+    raw: bool,
+    /// Print the entry as JSON.
+    #[arg(long, conflicts_with_all = ["raw", "file"])]
+    json: bool,
+    /// Print the absolute path of the entry's file.
+    #[arg(long, conflicts_with_all = ["raw", "json"])]
+    file: bool,
+    /// No colors, even on a terminal.
+    #[arg(long)]
+    no_color: bool,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+impl ShowArgs {
+    fn options(&self) -> ShowOptions {
+        let mode = match (self.raw, self.json, self.file) {
+            (true, _, _) => ShowMode::Raw,
+            (_, true, _) => ShowMode::Json,
+            (_, _, true) => ShowMode::File,
+            _ => ShowMode::Preview,
+        };
+        ShowOptions {
+            mode,
+            no_color: self.no_color,
+        }
+    }
+}
+
+/// The words of a query, then each excluded tag as `-tag:x`.
+fn join_query(words: &[String], not_tags: &[String]) -> String {
+    let mut parts: Vec<String> = words.to_vec();
+    parts.extend(not_tags.iter().map(|t| format!("-tag:{t}")));
+    parts.join(" ")
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Write a commented config file with every setting at its default. Never overwrites.
+    Init(JsonArgs),
+    /// Show where the config file is written.
+    Path(ConfigPathArgs),
+    /// Print the current value of one setting.
+    Get(ConfigGetArgs),
+    /// Change one setting in the file, keeping its comments and order.
+    Set(ConfigSetArgs),
+    /// Show every setting, its value and where the value comes from.
+    List(JsonArgs),
+}
+
+#[derive(Args)]
+struct ConfigPathArgs {
+    /// List every place that is read and which one is in use.
+    #[arg(long)]
+    read: bool,
+    /// Print JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ConfigGetArgs {
+    /// The setting, for example `clipboard.method`.
+    key: String,
+    /// Print JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct ConfigSetArgs {
+    /// The setting, for example `clipboard.method`.
+    key: String,
+    /// The new value.
+    #[arg(allow_hyphen_values = true)]
+    value: String,
+    /// Print JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct DoctorArgs {
+    /// Copy a test string and ask you to paste it back, to prove the copy arrives.
+    #[arg(long)]
+    copy_test: bool,
+    /// Print the checks as JSON.
     #[arg(long)]
     json: bool,
 }
@@ -91,10 +193,17 @@ enum Command {
     Index(IndexCommand),
     /// Open the terminal UI (the same as running `kb` with no subcommand).
     Tui(TuiArgs),
-    /// Print an entry the way picking it in the UI does.
+    /// Copy an entry's payload to the clipboard.
+    Copy(CopyArgs),
+    /// Print an entry: the preview as text, or only the payload, JSON or file path.
     Show(ShowArgs),
     /// Open an entry's file in $VISUAL / $EDITOR.
     Edit(EditArgs),
+    /// Create, inspect and change the config file.
+    #[command(subcommand)]
+    Config(ConfigCommand),
+    /// Check the machine: root, index, config, clipboard, editor and opener, with fixes.
+    Doctor(DoctorArgs),
 }
 
 #[derive(Subcommand)]
@@ -230,8 +339,16 @@ fn main() -> ExitCode {
         Command::Search(a) => a.json,
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
+        Command::Copy(a) => a.json,
         Command::Show(a) => a.json,
         Command::Edit(a) => a.json,
+        Command::Doctor(a) => a.json,
+        Command::Config(c) => match c {
+            ConfigCommand::Init(a) | ConfigCommand::List(a) => a.json,
+            ConfigCommand::Path(a) => a.json,
+            ConfigCommand::Get(a) => a.json,
+            ConfigCommand::Set(a) => a.json,
+        },
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -248,23 +365,94 @@ fn main() -> ExitCode {
 
 fn run(cli: Cli) -> Result<ExitCode, CliError> {
     let platform = platform::current();
+    let flags = Flags {
+        root: cli.root.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        clipboard_method: match &cli.command {
+            Command::Copy(a) => a.method.clone(),
+            _ => None,
+        },
+    };
+    let loaded = config::load(
+        &platform.config_files(),
+        &|name| std::env::var(name).ok(),
+        &flags,
+    );
+    // `--root`, `KB_ROOT` and the file's `root` are already merged in the settings
     let inputs = RootInputs {
-        flag: cli.root,
-        env: std::env::var_os("KB_ROOT"),
-        config_file: platform.config_file(),
+        config_root: loaded.settings.root().map(str::to_string),
         home: platform.home_dir(),
+        ..RootInputs::default()
     };
     let root = resolve_root(&inputs).map_err(|e| CliError::new("config", e.to_string()))?;
+    if !matches!(cli.command, Command::Tui(_)) {
+        print_config_warnings(&loaded);
+    }
     match cli.command {
-        Command::Init(args) => run_init(&root, inputs.config_file.as_deref(), &args),
+        Command::Init(args) => run_init(&root, platform.config_write_path().as_deref(), &args),
         Command::Lint(args) => run_lint(&root, &args),
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
-        Command::Show(args) => run_show(&root, &args),
-        Command::Edit(args) => commands::run_edit(&platform, &root, &args.id),
-        Command::Tui(args) => run_tui(&platform, &root, &args),
+        Command::Copy(args) => commands::run_copy(
+            &platform,
+            &root,
+            &loaded,
+            &join_query(&args.query, &args.not_tags),
+            args.json,
+        ),
+        Command::Show(args) => commands::run_show(
+            &platform,
+            &root,
+            &loaded,
+            &join_query(&args.query, &args.not_tags),
+            args.options(),
+        ),
+        Command::Edit(args) => commands::run_edit(&platform, &root, &loaded, &args.id),
+        Command::Doctor(a) => commands::run_doctor(&platform, &root, &loaded, a.copy_test, a.json),
+        Command::Config(c) => match c {
+            ConfigCommand::Init(a) => commands::config_init(&platform, a.json),
+            ConfigCommand::Path(a) => commands::config_path(&platform, &loaded, a.read, a.json),
+            ConfigCommand::Get(a) => commands::config_get(&loaded, &a.key, a.json),
+            ConfigCommand::Set(a) => {
+                commands::config_set(&platform, &loaded, &a.key, &a.value, a.json)
+            }
+            ConfigCommand::List(a) => commands::config_list(&loaded, a.json),
+        },
+        Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
+}
+
+/// Each config problem is reported once, on stderr. The UI defers this until it has left the
+/// screen.
+fn print_config_warnings(loaded: &Loaded) {
+    for warning in &loaded.warnings {
+        eprintln!("kb: {warning}");
+    }
+}
+
+/// What to tell the user when `kb init` made a KB somewhere other than where the root resolves:
+/// how to point kb at it. `None` when the new KB is where kb already looks.
+fn init_hint(
+    resolved_root: &std::path::Path,
+    created: &std::path::Path,
+    config_file: Option<&std::path::Path>,
+) -> Option<String> {
+    if resolved_root == created {
+        return None;
+    }
+    let shown = created.display();
+    let config = config_file
+        .map(|c| {
+            format!(
+                " or run `kb config set root {shown}` (writes {})",
+                c.display()
+            )
+        })
+        .unwrap_or_default();
+    Some(format!(
+        "kb uses {} by default; to use this KB, set KB_ROOT={shown}{config}",
+        resolved_root.display()
+    ))
 }
 
 fn run_init(
@@ -282,17 +470,8 @@ fn run_init(
     let default_root = resolved_root
         .canonicalize()
         .or_else(|_| std::path::absolute(resolved_root))
-        .ok();
-    let hint = (default_root.as_deref() != Some(report.root.as_path())).then(|| {
-        let shown = report.root.display();
-        let config = config_file
-            .map(|c| format!(" or add `root: {shown}` to {}", c.display()))
-            .unwrap_or_default();
-        format!(
-            "kb uses {} by default; to use this KB, set KB_ROOT={shown}{config}",
-            resolved_root.display()
-        )
-    });
+        .unwrap_or_else(|_| resolved_root.to_path_buf());
+    let hint = init_hint(&default_root, &report.root, config_file);
     if args.json {
         output::print_init_json(&report, hint.as_deref());
     } else {
@@ -324,55 +503,20 @@ fn lint_error(e: LintError) -> CliError {
     CliError::new(kind, e.to_string())
 }
 
-fn run_show(root: &std::path::Path, args: &ShowArgs) -> Result<ExitCode, CliError> {
-    use std::io::Write;
-    let mode = if args.json {
-        PrintMode::Json
-    } else {
-        args.print
-    };
-    let out = commands::run_show(root, &args.id, mode)?;
-    let mut stdout = std::io::stdout();
-    let _ = stdout.write_all(out.as_bytes());
-    let _ = stdout.flush();
-    Ok(ExitCode::SUCCESS)
-}
-
 fn run_tui(
     platform: &impl Platform,
     root: &std::path::Path,
     args: &TuiArgs,
+    loaded: &Loaded,
 ) -> Result<ExitCode, CliError> {
-    use std::io::Write;
     if !platform.has_terminal() {
         let mut help = Cli::command();
         let _ = help.write_long_help(&mut std::io::stderr());
         eprintln!("\nkb: the terminal UI needs a terminal; use `kb search` in scripts");
         return Ok(ExitCode::from(2));
     }
-    let config = read_config(platform.config_file().as_deref())
-        .map_err(|e| CliError::new("config", e.to_string()))?;
-    let options = Options {
-        print: args.print,
-        mouse: config.mouse,
-        theme: config.theme,
-        // Timing tests set this so the background refresh does not add noise.
-        refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
-    };
-    match tui::run(platform, root, &args.initial_query(), options)
-        .map_err(|e| CliError::new("io", e))?
-    {
-        Outcome::Picked { output, warnings } => {
-            for w in warnings {
-                eprintln!("kb: warning: {w}");
-            }
-            let mut stdout = std::io::stdout();
-            let _ = stdout.write_all(output.as_bytes());
-            let _ = stdout.flush();
-            Ok(ExitCode::SUCCESS)
-        }
-        Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
-    }
+    let post = commands::post_pick_for(args.print, &loaded.settings);
+    commands::run_ui(platform, root, loaded, &args.initial_query(), &post, true)
 }
 
 fn kb_error(e: kb_core::search::KbError) -> CliError {
@@ -440,6 +584,37 @@ mod tests {
             .into_iter()
             .map(|a| a.into_string().unwrap())
             .collect()
+    }
+
+    #[test]
+    fn the_init_hint_tells_toml_users_how_to_set_the_root() {
+        use std::path::Path;
+        // the new KB is where the root resolves to: nothing to say
+        let same = Path::new("/home/u/kb");
+        assert_eq!(
+            super::init_hint(same, same, Some(Path::new("/c/config.toml"))),
+            None
+        );
+        let hint = super::init_hint(
+            Path::new("/home/u/kb"),
+            Path::new("/data/notes"),
+            Some(Path::new("/home/u/.config/kb/config.toml")),
+        )
+        .unwrap();
+        assert!(hint.contains("KB_ROOT=/data/notes"), "{hint}");
+        assert!(
+            hint.contains("kb config set root /data/notes")
+                && hint.contains("/home/u/.config/kb/config.toml"),
+            "{hint}"
+        );
+        assert!(!hint.contains("root:"), "no YAML: {hint}");
+        // without a config location only the variable is offered
+        let hint =
+            super::init_hint(Path::new("/home/u/kb"), Path::new("/data/notes"), None).unwrap();
+        assert!(
+            hint.contains("KB_ROOT=/data/notes") && !hint.contains("config"),
+            "{hint}"
+        );
     }
 
     #[test]

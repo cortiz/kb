@@ -72,6 +72,16 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             theme.warning(),
         ));
     }
+    if state.options.config_problems > 0 {
+        let n = state.options.config_problems;
+        tail.push(Span::styled(
+            format!(
+                " · ⚠ config: {n} problem{} (run kb doctor)",
+                if n == 1 { "" } else { "s" }
+            ),
+            theme.warning(),
+        ));
+    }
     if state.status.refreshing {
         tail.push(Span::styled(" · refreshing…", theme.muted()));
     }
@@ -582,8 +592,41 @@ fn draw_preview(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     let height = usize::from(inner.height);
     let total = lay.rows.len();
     let scroll = state.preview_scroll.min(total.saturating_sub(height));
-    let gutter = m.payload.len().to_string().len();
     let stale = state.selected_id.as_deref().is_some_and(|id| id != m.id);
+    draw_preview_rows(m, &lay, stale, theme, inner, scroll, buf);
+    if scroll > 0 {
+        let t = "↑ more";
+        buf.set_string(
+            inner.x + inner.width - width(t) as u16 - 1,
+            inner.y,
+            t,
+            theme.muted(),
+        );
+    }
+    if scroll + height < total {
+        let t = "↓ more";
+        buf.set_string(
+            inner.x + inner.width - width(t) as u16 - 1,
+            inner.y + inner.height - 1,
+            t,
+            theme.muted(),
+        );
+    }
+}
+
+/// Draws rows `scroll..` of the preview into `inner` (one column of padding on each side).
+fn draw_preview_rows(
+    m: &PreviewModel,
+    lay: &PreviewLayout,
+    stale: bool,
+    theme: &Theme,
+    inner: Rect,
+    scroll: usize,
+    buf: &mut Buffer,
+) {
+    let cols = usize::from(inner.width).saturating_sub(2);
+    let height = usize::from(inner.height);
+    let gutter = m.payload.len().to_string().len();
     for (n, row) in lay.rows.iter().enumerate().skip(scroll).take(height) {
         let y = inner.y + (n - scroll) as u16;
         let x = inner.x + 1;
@@ -639,24 +682,18 @@ fn draw_preview(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         };
         buf.set_line(x, y, &Line::from(spans), inner.width.saturating_sub(1));
     }
-    if scroll > 0 {
-        let t = "↑ more";
-        buf.set_string(
-            inner.x + inner.width - width(t) as u16 - 1,
-            inner.y,
-            t,
-            theme.muted(),
-        );
-    }
-    if scroll + height < total {
-        let t = "↓ more";
-        buf.set_string(
-            inner.x + inner.width - width(t) as u16 - 1,
-            inner.y + inner.height - 1,
-            t,
-            theme.muted(),
-        );
-    }
+}
+
+/// The whole preview of one entry as a buffer `width` columns wide and exactly tall enough, for
+/// `kb show`. It is the same drawing code as the UI's preview pane.
+pub fn render_preview(m: &PreviewModel, theme: &Theme, width: u16) -> Buffer {
+    let cols = usize::from(width).saturating_sub(2).max(4);
+    let lay = preview_layout(m, cols);
+    let height = u16::try_from(lay.rows.len()).unwrap_or(u16::MAX);
+    let area = Rect::new(0, 0, width, height);
+    let mut buf = Buffer::empty(area);
+    draw_preview_rows(m, &lay, false, theme, area, 0, &mut buf);
+    buf
 }
 
 fn meta_spans(m: &PreviewModel, theme: &Theme, cols: usize) -> Vec<Span<'static>> {
@@ -865,6 +902,38 @@ pub(crate) mod tests {
                     .to_string()
             })
             .collect()
+    }
+
+    #[test]
+    fn the_header_warns_about_config_problems() {
+        let mut s = state();
+        s.loaded = true;
+        s.status.refreshing = false;
+        s.status.indexed = 284;
+        let quiet = render(&s, &Theme::dark(), 120, 40);
+        assert!(!quiet[0].contains("config"), "{}", quiet[0]);
+        s.options.config_problems = 2;
+        let lines = render(&s, &Theme::dark(), 120, 40);
+        assert!(
+            lines[0].contains("284 entries")
+                && lines[0].contains("⚠ config: 2 problems (run kb doctor)"),
+            "{}",
+            lines[0]
+        );
+        s.options.config_problems = 1;
+        let lines = render(&s, &Theme::dark(), 120, 40);
+        assert!(
+            lines[0].contains("⚠ config: 1 problem (run kb doctor)"),
+            "{}",
+            lines[0]
+        );
+        // narrow: the root path gives way, the warning and the count stay
+        let lines = render(&s, &Theme::dark(), 64, 24);
+        assert!(
+            lines[0].contains("284 entries") && lines[0].contains("⚠ config: 1 problem"),
+            "{}",
+            lines[0]
+        );
     }
 
     #[test]

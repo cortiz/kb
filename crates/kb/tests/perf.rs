@@ -341,3 +341,87 @@ fn finding_and_picking_a_named_entry_under_5s() {
     assert!(took < Duration::from_secs(5), "{took:?}");
     assert!(fs::read_to_string(&out).unwrap().len() > 10);
 }
+
+// ---- M4: kb copy, kb config list, kb doctor ----
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn copy_by_id_under_150ms() {
+    // SC-002: `kb copy <id>` end to end, with a local clipboard program (a fake one that just
+    // stores its input, so the clipboard itself is not what is timed)
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    generate(&root);
+    backdate(&root);
+    assert!(
+        kb_in(&root)
+            .arg("reindex")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let (_tool, bin, copied, env) = support::fake_clipboard(dir.path());
+    let id = "group-34/entry-01234";
+    let run = || {
+        let mut cmd = kb_in(&root);
+        cmd.args(["copy", id]).env("PATH", support::path_with(&bin));
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
+        let start = Instant::now();
+        let out = cmd.output().unwrap();
+        let took = start.elapsed();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        took
+    };
+    run(); // warm the file cache, as after any earlier use
+    let runs: Vec<Duration> = (0..7).map(|_| run()).collect();
+    let m = median(runs.clone());
+    println!("kb copy <id> on {ENTRIES} entries: median {m:?} (runs {runs:?})");
+    assert!(copied.exists());
+    assert!(m < Duration::from_millis(150), "median {m:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn config_list_under_100ms_and_doctor_measured() {
+    // constitution VII: CLI cold start of 100 ms. `kb doctor` opens the index and probes tools, so
+    // it has no budget; its time is printed so a regression is visible.
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    generate(&root);
+    backdate(&root);
+    assert!(
+        kb_in(&root)
+            .arg("reindex")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    let time = |args: &[&str]| {
+        let start = Instant::now();
+        let out = kb_in(&root).args(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        start.elapsed()
+    };
+    time(&["config", "list"]);
+    let list = median((0..7).map(|_| time(&["config", "list"])).collect());
+    let doctor = median((0..5).map(|_| time(&["doctor"])).collect());
+    println!("kb config list: median {list:?}; kb doctor: median {doctor:?} (no budget)");
+    assert!(
+        list < Duration::from_millis(100),
+        "config list median {list:?}"
+    );
+}

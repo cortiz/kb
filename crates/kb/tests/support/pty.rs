@@ -29,6 +29,8 @@ pub const CTRL_L: &[u8] = b"\x0c";
 pub const CTRL_U: &[u8] = b"\x15";
 
 pub struct Session {
+    guards: tempfile::TempDir,
+    allow_clipboard: bool,
     child: Box<dyn Child + Send + Sync>,
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
@@ -50,6 +52,12 @@ pub struct Spec {
     pub size: (u16, u16),
     /// kb's stdin is a pipe carrying this text instead of the terminal.
     pub stdin_text: Option<String>,
+    /// Scripts that stand in for clipboard programs: `(name, script body)`. A test that sets any
+    /// of them (or `allow_clipboard`) may reach the clipboard; every other test must not.
+    pub fake_tools: Vec<(String, String)>,
+    pub allow_clipboard: bool,
+    /// Variables to remove after the harness defaults are set (to test the config file).
+    pub unset: Vec<String>,
 }
 
 impl Spec {
@@ -64,7 +72,32 @@ impl Spec {
             env: Vec::new(),
             size: (120, 40),
             stdin_text: None,
+            fake_tools: Vec::new(),
+            allow_clipboard: false,
+            unset: Vec::new(),
         }
+    }
+
+    /// Removes a variable the harness sets by default, so the config file decides.
+    pub fn unset(mut self, name: &str) -> Spec {
+        self.unset.push(name.to_string());
+        self
+    }
+
+    /// Installs a script named `name` ahead of the guards on `PATH`. The script gets the text on
+    /// stdin and should write it somewhere the test can read.
+    pub fn with_fake_tool(mut self, name: &str, script: &str) -> Spec {
+        self.fake_tools.push((name.to_string(), script.to_string()));
+        self.allow_clipboard = true;
+        self
+    }
+
+    /// Enter copies with `method` (instead of the harness default of printing) and the clipboard
+    /// may be reached; the test is responsible for providing fake tools or using OSC 52.
+    pub fn copy_mode(mut self, method: &str) -> Spec {
+        self.allow_clipboard = true;
+        self.env("KB_TUI_ENTER", "copy")
+            .env("KB_CLIPBOARD_METHOD", method)
     }
 
     pub fn env(mut self, key: &str, value: &str) -> Spec {
@@ -112,6 +145,14 @@ impl Session {
         } else {
             script
         };
+        let guards = tempfile::tempdir().expect("guard dir");
+        super::write_guards(guards.path(), &guards.path().join("calls.log"));
+        for (name, script) in &spec.fake_tools {
+            use std::os::unix::fs::PermissionsExt;
+            let path = guards.path().join(name);
+            std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let mut cmd = CommandBuilder::new("sh");
         cmd.arg("-c");
         cmd.arg(script);
@@ -120,13 +161,20 @@ impl Session {
             cmd.arg(a);
         }
         cmd.env_clear();
-        cmd.env("PATH", std::env::var("PATH").unwrap_or_default());
+        cmd.env("PATH", super::path_with(guards.path()));
+        // M4: Enter copies by default and Ctrl-Y goes through the clipboard chain. Tests default
+        // to printing and to the terminal method, which stay inside the pty; copy tests override.
+        cmd.env("KB_TUI_ENTER", "print");
+        cmd.env("KB_CLIPBOARD_METHOD", "osc52");
         cmd.env("HOME", &spec.home);
         cmd.env("KB_ROOT", &spec.root);
         cmd.env("TERM", "xterm-256color");
         cmd.env("KB", KB);
         cmd.env("OUT", out);
         cmd.env("STDIN_TEXT", spec.stdin_text.clone().unwrap_or_default());
+        for name in &spec.unset {
+            cmd.env_remove(name);
+        }
         for (k, v) in &spec.env {
             cmd.env(k, v);
         }
@@ -150,6 +198,8 @@ impl Session {
             });
         }
         Session {
+            guards,
+            allow_clipboard: spec.allow_clipboard,
             child,
             writer,
             master: pair.master,
@@ -275,11 +325,27 @@ impl Session {
         matches!(self.child.try_wait(), Ok(None))
     }
 
+    /// Calls that reached a guard instead of a real clipboard program.
+    pub fn guarded_calls(&self) -> Vec<String> {
+        std::fs::read_to_string(self.guards.path().join("calls.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
     pub fn wait_exit(&mut self) -> u32 {
         let start = Instant::now();
         loop {
             if let Ok(Some(status)) = self.child.try_wait() {
                 std::thread::sleep(Duration::from_millis(50)); // let the reader drain
+                if !self.allow_clipboard {
+                    let calls = self.guarded_calls();
+                    assert!(
+                        calls.is_empty(),
+                        "this test reached for the clipboard without asking to: {calls:?}"
+                    );
+                }
                 return status.exit_code();
             }
             assert!(

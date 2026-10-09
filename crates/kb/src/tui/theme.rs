@@ -39,15 +39,18 @@ pub enum ThemeName {
 pub struct ThemeEnv {
     pub no_color: bool,
     pub colorfgbg: Option<String>,
-    pub colorterm: Option<String>,
+    /// The terminal advertises 24-bit color (`Environment::true_color`).
+    pub true_color: bool,
 }
 
 impl ThemeEnv {
-    pub fn from_env() -> ThemeEnv {
+    /// `NO_COLOR` and `COLORFGBG` from the process environment; what the terminal can do comes
+    /// from the platform layer's `Environment`.
+    pub fn detect(env: &crate::platform::Environment) -> ThemeEnv {
         ThemeEnv {
             no_color: std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
             colorfgbg: std::env::var("COLORFGBG").ok(),
-            colorterm: std::env::var("COLORTERM").ok(),
+            true_color: env.true_color,
         }
     }
 }
@@ -107,10 +110,7 @@ impl Theme {
     /// Picks the theme: `NO_COLOR` wins, then the configured choice; `auto` reads `COLORFGBG`
     /// (a light background is 7 or 15) and otherwise assumes dark.
     pub fn resolve(choice: ThemeChoice, env: &ThemeEnv) -> Theme {
-        let truecolor = env
-            .colorterm
-            .as_deref()
-            .is_some_and(|c| matches!(c, "truecolor" | "24bit"));
+        let truecolor = env.true_color;
         let name = if env.no_color {
             ThemeName::NoColor
         } else {
@@ -308,7 +308,7 @@ mod tests {
         ThemeEnv {
             no_color,
             colorfgbg: fgbg.map(str::to_string),
-            colorterm: term.map(str::to_string),
+            true_color: matches!(term, Some("truecolor" | "24bit")),
         }
     }
 
