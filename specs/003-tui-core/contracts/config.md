@@ -1,3 +1,5 @@
+> **Superseded by [`specs/004-platform-clipboard/contracts/config.md`](../../004-platform-clipboard/contracts/config.md)** (M4): the config is now TOML (`config.toml`) and `mouse` is `tui.mouse`. This file describes the M3 YAML format.
+
 # Contract: configuration (M3)
 
 The config file is the one M1 already reads for `root` (`~/.config/kb/config.yml` on Linux or under
