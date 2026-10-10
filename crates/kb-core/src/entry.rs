@@ -153,6 +153,7 @@ pub struct CodeRef {
     pub git_ref: String,
     pub symbol: Option<String>,
     pub end_line: Option<u32>,
+    pub branch: Option<String>,
 }
 
 /// Fields that depend on the entry type.
@@ -1049,6 +1050,11 @@ fn code_ref(tree: &Node, sink: &mut Sink<'_>) -> Option<CodeRef> {
             }
         }
     }
+    let branch = node
+        .get("branch")
+        .filter(|n| !n.is_null())
+        .and_then(Node::scalar)
+        .map(str::to_string);
     match (repo, path, line, git_ref) {
         (Some(repo), Some(path), Some(line), Some(git_ref)) if ok => Some(CodeRef {
             repo,
@@ -1057,6 +1063,7 @@ fn code_ref(tree: &Node, sink: &mut Sink<'_>) -> Option<CodeRef> {
             git_ref,
             symbol,
             end_line,
+            branch,
         }),
         _ => None,
     }
@@ -1501,7 +1508,8 @@ mod tests {
                     line: 10,
                     git_ref: "1234567".into(),
                     symbol: Some("f".into()),
-                    end_line: Some(12)
+                    end_line: Some(12),
+                    branch: None,
                 })
             }
         );

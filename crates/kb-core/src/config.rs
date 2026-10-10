@@ -481,8 +481,16 @@ impl Settings {
         &self.code_search_paths
     }
 
+    pub fn code_search_paths_mut(&mut self) -> &mut Vec<String> {
+        &mut self.code_search_paths
+    }
+
     pub fn code_repos(&self) -> &BTreeMap<String, String> {
         &self.code_repos
+    }
+
+    pub fn code_repos_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.code_repos
     }
 
     pub fn run_destructive_patterns(&self) -> &[String] {

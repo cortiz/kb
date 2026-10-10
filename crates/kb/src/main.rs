@@ -12,7 +12,7 @@ use kb_core::query::Query;
 use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
-use kb_cli::commands::{self, ShowMode, ShowOptions};
+use kb_cli::commands::{self, CodeCommand, ShowMode, ShowOptions};
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
 use kb_cli::varcli::VarArgs;
@@ -371,6 +371,9 @@ enum Command {
     Config(ConfigCommand),
     /// Check the machine: root, index, config, clipboard, editor and opener, with fixes.
     Doctor(DoctorArgs),
+    /// Check, re-pin or inspect code links.
+    #[command(subcommand)]
+    Code(CodeCommand),
 }
 
 #[derive(Subcommand)]
@@ -523,6 +526,11 @@ fn main() -> ExitCode {
             ConfigCommand::Get(a) => a.json,
             ConfigCommand::Set(a) => a.json,
         },
+        Command::Code(c) => match c {
+            CodeCommand::Check(a) => a.json,
+            CodeCommand::Repin(_) => false,
+            CodeCommand::Show(a) => a.json,
+        },
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -639,6 +647,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             }
             ConfigCommand::List(a) => commands::config_list(&loaded, a.json),
         },
+        Command::Code(args) => commands::run_code(&platform, &root, &loaded, &args),
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }

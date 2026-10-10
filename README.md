@@ -343,6 +343,7 @@ printed on stderr after the UI closes.
 | `Enter` | pick: copy the entry and exit |
 | `Ctrl-Y` | copy the payload and stay open |
 | `Ctrl-O` | open the link, console or code view |
+| `Ctrl-G` | run the command safely |
 | `Alt-C` | copy the payload with its `{{variables}}` left in |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
 | `Ctrl-N` | add an entry from the clipboard |

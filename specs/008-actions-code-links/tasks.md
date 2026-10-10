@@ -116,17 +116,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 4
 
-- [ ] T029 [P] [US4] Write failing tests for local clone discovery and caching in `crates/kb-core/src/code/clone.rs`: verify lookup in `code.repos`, 1-level search in `code.search_paths`, SSH/HTTPS URL normalization (`git@github.com:...` == `https://github.com/...`), caching in `.kb/clones.json`, and cache invalidation on missing path.
-- [ ] T030 [P] [US4] Write failing tests for git diff line mapping in `crates/kb-core/src/code/drift.rs`: using `scripted_repo.sh`, test mapping pinned lines through `git diff -M -U0` hunks for `current`, `moved`, `changed`, `renamed`, and `gone`, tracking branch resolution priority (`code.branch` -> config -> `origin/HEAD` -> `origin/main` -> `origin/master`), and symbol search fallback.
-- [ ] T031 [P] [US4] Write failing tests for format-preserving re-pinning in `crates/kb-core/src/code/repin.rs`: verify byte-for-byte preservation of entry frontmatter comments and body, updating only `ref`, `path`, `line`, `end_line`, and `updated`, and rejecting write on concurrent file modifications.
-- [ ] T032 [P] [US4] Write failing integration tests for `kb code` CLI in `tests/cli_code.rs`: verify `kb code check [--json] [--fetch]`, exit 1 on drift, `kb code repin <id>... | --all [-y]`, and skipping `gone`/`unknown` entries.
+- [X] T029 [P] [US4] Write failing tests for local clone discovery and caching in `crates/kb-core/src/code/clone.rs`: verify lookup in `code.repos`, 1-level search in `code.search_paths`, SSH/HTTPS URL normalization (`git@github.com:...` == `https://github.com/...`), caching in `.kb/clones.json`, and cache invalidation on missing path.
+- [X] T030 [P] [US4] Write failing tests for git diff line mapping in `crates/kb-core/src/code/drift.rs`: using `scripted_repo.sh`, test mapping pinned lines through `git diff -M -U0` hunks for `current`, `moved`, `changed`, `renamed`, and `gone`, tracking branch resolution priority (`code.branch` -> config -> `origin/HEAD` -> `origin/main` -> `origin/master`), and symbol search fallback.
+- [X] T031 [P] [US4] Write failing tests for format-preserving re-pinning in `crates/kb-core/src/code/repin.rs`: verify byte-for-byte preservation of entry frontmatter comments and body, updating only `ref`, `path`, `line`, `end_line`, and `updated`, and rejecting write on concurrent file modifications.
+- [X] T032 [P] [US4] Write failing integration tests for `kb code` CLI in `tests/cli_code.rs`: verify `kb code check [--json] [--fetch]`, exit 1 on drift, `kb code repin <id>... | --all [-y]`, and skipping `gone`/`unknown` entries.
 
 ### Implementation for User Story 4
 
-- [ ] T033 [US4] Implement `CodeService::find_clone`, remote URL normalizer, and `.kb/clones.json` caching in `crates/kb-core/src/code/clone.rs`. Makes T029 pass.
-- [ ] T034 [US4] Implement `CodeService::check_drift`, `git diff -M -U0` hunk parser, tracking branch resolver, and symbol fallback search in `crates/kb-core/src/code/drift.rs`. Makes T030 pass.
-- [ ] T035 [US4] Implement `CodeService::repin_entry` using format-preserving frontmatter updates and mtime check in `crates/kb-core/src/code/repin.rs`. Makes T031 pass.
-- [ ] T036 [US4] Implement `kb code check` and `kb code repin` CLI subcommands in `crates/kb/src/commands.rs`. Makes T032 pass.
+- [X] T033 [US4] Implement `CodeService::find_clone`, remote URL normalizer, and `.kb/clones.json` caching in `crates/kb-core/src/code/clone.rs`. Makes T029 pass.
+- [X] T034 [US4] Implement `CodeService::check_drift`, `git diff -M -U0` hunk parser, tracking branch resolver, and symbol fallback search in `crates/kb-core/src/code/drift.rs`. Makes T030 pass.
+- [X] T035 [US4] Implement `CodeService::repin_entry` using format-preserving frontmatter updates and mtime check in `crates/kb-core/src/code/repin.rs`. Makes T031 pass.
+- [X] T036 [US4] Implement `kb code check` and `kb code repin` CLI subcommands in `crates/kb/src/commands.rs`. Makes T032 pass.
 
 **Checkpoint**: `kb code check` accurately detects drift on fixture repository; `kb code repin` updates only target fields byte-for-byte.
 
