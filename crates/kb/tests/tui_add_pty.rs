@@ -104,7 +104,9 @@ fn escape_asks_only_when_something_changed() {
     s.send(ESC);
     s.wait_for("Discard this entry? (y/N)");
     s.type_text("n");
-    s.wait_for("New entry");
+    s.wait_until("the prompt to go away", |screen| {
+        !screen.contains("Discard this entry")
+    });
     s.send(ESC);
     s.wait_for("Discard this entry? (y/N)");
     s.type_text("y");
@@ -242,5 +244,107 @@ fn tab_walks_the_fields_and_tag_completion_uses_the_kb() {
     s.send(TAB); // accepts the completion
     s.wait_for("lambda, ");
     s.send(ENTER);
+    s.send(CTRL_C);
+}
+
+const CTRL_R: &[u8] = b"\x12";
+const CTRL_X: &[u8] = b"\x18";
+const BACKSPACE: &[u8] = b"\x7f";
+const A: &str = "sumo/5xx-by-authorizer";
+
+fn select_sumo(s: &mut Session) {
+    s.wait_for("entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+}
+
+#[test]
+fn ctrl_r_renames_with_a_prefilled_prompt() {
+    let (t, home, root) = kb_home("search");
+    let mut s = Session::spawn(&spec(&t, &home, &root, &[], ""));
+    select_sumo(&mut s);
+    s.send(CTRL_R);
+    s.wait_for(&format!("Rename to: {A}▌"));
+    // an existing target keeps the prompt open and says why
+    for _ in 0..A.len() {
+        s.send(BACKSPACE);
+    }
+    s.type_text("cw/latency-prod");
+    s.send(ENTER);
+    s.wait_for("already exists");
+    assert!(
+        s.screen().contains("Rename to: cw/latency-prod"),
+        "{}",
+        s.screen()
+    );
+    s.send(ESC);
+    s.wait_for("entries");
+    assert!(root.join(format!("{A}.md")).is_file());
+    // a free name is applied and selected
+    select_after_clear(&mut s);
+    s.send(CTRL_R);
+    s.wait_for("Rename to:");
+    s.type_text("-v2");
+    s.send(ENTER);
+    s.wait_for("Renamed to sumo/5xx-by-authorizer-v2");
+    assert!(root.join("sumo/5xx-by-authorizer-v2.md").is_file());
+    assert!(!root.join(format!("{A}.md")).exists());
+    s.send(CTRL_C);
+}
+
+fn select_after_clear(s: &mut Session) {
+    s.send(ESC); // clears the query
+    s.wait_for("entries");
+    s.type_text("5xx auth");
+    s.wait_for("5xx by authorizer");
+}
+
+#[test]
+fn ctrl_x_deletes_only_on_y() {
+    let (t, home, root) = kb_home("search");
+    let mut s = Session::spawn(&spec(&t, &home, &root, &[], ""));
+    select_sumo(&mut s);
+    s.send(CTRL_X);
+    s.wait_for(&format!("Delete {A}? (y/N)"));
+    s.type_text("n");
+    assert!(root.join(format!("{A}.md")).is_file());
+    s.send(CTRL_X);
+    s.wait_for("(y/N)");
+    s.type_text("y");
+    s.wait_for(&format!("Deleted {A}"));
+    assert!(!root.join(format!("{A}.md")).exists());
+    s.send(CTRL_C);
+}
+
+#[test]
+fn rename_and_delete_do_nothing_on_an_empty_list() {
+    let (t, home, root) = kb_home("search");
+    let mut s = Session::spawn(&spec(&t, &home, &root, &[], ""));
+    s.wait_for("entries");
+    s.type_text("zzzzqqqq-nothing");
+    s.wait_for("No matches");
+    s.send(CTRL_R);
+    s.send(CTRL_X);
+    assert!(
+        !s.screen().contains("Rename to") && !s.screen().contains("Delete "),
+        "{}",
+        s.screen()
+    );
+    s.send(CTRL_C);
+}
+
+#[test]
+fn list_ctrl_e_is_unchanged_it_does_not_bump_updated() {
+    let (t, home, root) = kb_home("search");
+    let before = fs::read_to_string(root.join(format!("{A}.md"))).unwrap();
+    let editor = script(t.path(), "ed.sh", "echo 'note' >> \"$1\"");
+    let spec = spec(&t, &home, &root, &[], "").env("KB_EDITOR", editor.to_str().unwrap());
+    let mut s = Session::spawn(&spec);
+    select_sumo(&mut s);
+    s.send(CTRL_E);
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    s.wait_for("entries");
+    let after = fs::read_to_string(root.join(format!("{A}.md"))).unwrap();
+    assert_eq!(after, format!("{before}note\n"));
     s.send(CTRL_C);
 }

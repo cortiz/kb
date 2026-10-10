@@ -166,7 +166,7 @@ impl TextArea {
 }
 
 /// The result of a key on a one-line input.
-fn line_key(editor: &mut LineEditor, key: Key) -> Option<bool> {
+pub(crate) fn line_key(editor: &mut LineEditor, key: Key) -> Option<bool> {
     let plain = key.mods & (CTRL | ALT) == 0;
     match (key.code, key.mods) {
         (Code::Char(c), _) if plain && !c.is_control() => {

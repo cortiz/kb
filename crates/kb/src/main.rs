@@ -208,9 +208,36 @@ struct DoctorArgs {
 
 #[derive(Args)]
 struct EditArgs {
-    /// The entry ID.
+    /// An entry ID, or words that find exactly one entry.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Print the result as JSON (no prompts).
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct MvArgs {
+    /// The entry to rename.
     id: String,
-    /// Print errors as JSON.
+    /// Its new ID, for example `cw/new-name` (folders are created).
+    new_id: String,
+    /// Accepted for symmetry with `rm`; renaming never asks.
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Print what happened as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+struct RmArgs {
+    /// The entry to delete.
+    id: String,
+    /// Do not ask for confirmation.
+    #[arg(short = 'y', long)]
+    yes: bool,
+    /// Print what happened as JSON.
     #[arg(long)]
     json: bool,
 }
@@ -298,6 +325,10 @@ enum Command {
     Edit(EditArgs),
     /// Add an entry from the clipboard, stdin or an editor template.
     Add(AddArgs),
+    /// Rename an entry, keeping its usage and remembered values.
+    Mv(MvArgs),
+    /// Delete an entry (asks first).
+    Rm(RmArgs),
     /// Create, inspect and change the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
@@ -444,6 +475,8 @@ fn main() -> ExitCode {
         Command::Show(a) => a.json,
         Command::Edit(a) => a.json,
         Command::Add(a) => a.json,
+        Command::Mv(a) => a.json,
+        Command::Rm(a) => a.json,
         Command::Doctor(a) => a.json,
         Command::Config(c) => match c {
             ConfigCommand::Init(a) | ConfigCommand::List(a) => a.json,
@@ -523,7 +556,19 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             &join_query(&args.query, &args.not_tags),
             args.options(),
         ),
-        Command::Edit(args) => commands::run_edit(&platform, &root, &loaded, &args.id),
+        Command::Edit(args) => kb_cli::editfile::edit_entry(
+            &platform,
+            &root,
+            &loaded,
+            &args.query.join(" "),
+            args.json,
+        ),
+        Command::Mv(args) => {
+            kb_cli::author::run_mv(&platform, &root, &args.id, &args.new_id, args.json)
+        }
+        Command::Rm(args) => {
+            kb_cli::author::run_rm(&platform, &root, &args.id, args.yes, args.json)
+        }
         Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
         Command::Doctor(a) => commands::run_doctor(&platform, &root, &loaded, a.copy_test, a.json),
         Command::Config(c) => match c {

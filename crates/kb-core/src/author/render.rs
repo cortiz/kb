@@ -262,6 +262,63 @@ impl Draft {
         out.into_bytes()
     }
 
+    /// The file `kb add --editor` opens: the canonical layout with the required fields in place,
+    /// the optional type fields as `# key: value` comments, and an empty fence to fill in.
+    pub fn template(&self, clock: &dyn Clock) -> String {
+        let mut draft = self.clone();
+        // placeholders where the lint step would otherwise only find empty strings
+        if let DraftFields::Code {
+            repo,
+            git_ref,
+            path,
+            ..
+        } = &mut draft.fields
+        {
+            for (field, placeholder) in [
+                (repo, "owner/name"),
+                (git_ref, "main"),
+                (path, "src/file.rs"),
+            ] {
+                if field.is_empty() {
+                    *field = placeholder.into();
+                }
+            }
+        }
+        let text = String::from_utf8_lossy(&draft.render(clock)).into_owned();
+        let comments: &[&str] = match draft.entry_type {
+            EntryType::Sql => &["# dialect: postgres", "# database: mydb"],
+            EntryType::Sumo => &["# range: -15m"],
+            EntryType::Cw => &[
+                "# log_groups: [/aws/lambda/name]",
+                "# range: -1h",
+                "# region: us-east-1",
+            ],
+            EntryType::Cmd => &["# shell: bash", "# cwd: ~/work"],
+            EntryType::Code => &["  # symbol: Class.method", "  # end_line: 20"],
+            EntryType::Prompt | EntryType::Link => &[],
+        };
+        let at = text
+            .find("\nvars:")
+            .or_else(|| text.find("\ncreated:"))
+            .map_or(text.len(), |i| i + 1);
+        let mut out = String::with_capacity(text.len() + 120);
+        out.push_str(&text[..at]);
+        for line in comments {
+            // optional keys the draft already holds are not offered again
+            let key = line
+                .trim_start_matches([' ', '#'])
+                .split(':')
+                .next()
+                .unwrap_or("");
+            if !text[..at].contains(&format!("{key}:")) {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        out.push_str(&text[at..]);
+        out
+    }
+
     /// Renders, then runs the checks `kb lint` runs on the bytes, as the entry `id`.
     pub fn check(&self, id: &str, clock: &dyn Clock) -> Check {
         let bytes = self.render(clock);
@@ -386,6 +443,74 @@ mod tests {
         ] {
             assert_eq!(parse_rfc3339_utc(bad), None, "{bad}");
         }
+    }
+
+    fn template_of(ty: EntryType, body: &str) -> (Draft, String) {
+        let opts = DraftOptions {
+            ty: Some(ty),
+            ..Default::default()
+        };
+        let d = Draft::from_text(body, DraftSource::Empty, &opts);
+        let t = d.template(&clock());
+        (d, t)
+    }
+
+    #[test]
+    fn templates_have_every_required_field_and_the_optional_ones_as_comments() {
+        for ty in EntryType::ALL {
+            let (_, t) = template_of(ty, "");
+            let entry = parse_entry("new/x", "new/x.md", t.clone().into_bytes())
+                .entry
+                .unwrap_or_else(|| panic!("{} did not parse:\n{t}", ty.name()));
+            assert_eq!(entry.entry_type(), Some(ty));
+            assert!(
+                t.contains("kb_format: 1\n")
+                    && t.contains(&format!("created: {}", "2026-10-09T12:00:00Z")),
+                "{t}"
+            );
+            assert!(t.contains("title:"), "{t}");
+            let optional = match ty {
+                EntryType::Sql => "# dialect: ",
+                EntryType::Sumo => "# range: ",
+                EntryType::Cw => "# log_groups: ",
+                EntryType::Cmd => "# shell: ",
+                EntryType::Link => "url: ",
+                EntryType::Code => "# symbol: ",
+                EntryType::Prompt => "type: prompt",
+            };
+            assert!(t.contains(optional), "{}:\n{t}", ty.name());
+            assert_eq!(t.contains("```"), ty.has_payload(), "{}:\n{t}", ty.name());
+        }
+    }
+
+    #[test]
+    fn a_template_reaches_the_lint_step_and_keeps_what_was_given() {
+        let opts = DraftOptions {
+            title: Some("My title".into()),
+            tags: vec!["a".into()],
+            ty: Some(EntryType::Sql),
+            ..Default::default()
+        };
+        let d = Draft::from_text("select 1 from t;", DraftSource::Stdin, &opts);
+        let t = d.template(&clock());
+        assert!(
+            t.contains("title: My title\n")
+                && t.contains("tags: [a]\n")
+                && t.contains("select 1 from t;"),
+            "{t}"
+        );
+        let findings = check_text("sql/my-title", t.into_bytes());
+        assert!(
+            findings.iter().all(|f| f.severity != Severity::Error),
+            "{findings:?}"
+        );
+        // an untouched blank template has errors (no title), which is what "fill it in" means
+        let (_, blank) = template_of(EntryType::Cmd, "");
+        assert!(
+            check_text("cmd/x", blank.into_bytes())
+                .iter()
+                .any(|f| f.severity == Severity::Error)
+        );
     }
 
     #[test]

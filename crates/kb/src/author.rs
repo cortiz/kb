@@ -100,7 +100,7 @@ pub fn finding_line(f: &Finding) -> String {
     )
 }
 
-const SECRET_WAYS_OUT: &str =
+pub const SECRET_WAYS_OUT: &str =
     "remove the value, use a {{variable}} of kind secret, or mark it with kb:allow-secret";
 
 fn entry_type(name: &str) -> Result<EntryType, CliError> {
@@ -188,6 +188,9 @@ pub fn run_add(
         "opening an empty form"
     };
     let interactive = !args.yes && !args.editor;
+    if args.editor && !platform.has_terminal() {
+        return Err(CliError::new("usage", "no terminal to run the editor on"));
+    }
     if interactive && !platform.has_terminal() {
         return Err(CliError::new(
             "usage",
@@ -209,6 +212,9 @@ pub fn run_add(
     let mut kb = Kb::open(root).map_err(io_error)?;
     if args.yes {
         return save_without_asking(&mut kb, &draft, args.json);
+    }
+    if args.editor {
+        return crate::editfile::add_with_editor(platform, &mut kb, loaded, &draft, &args);
     }
     commands::run_add_ui(platform, root, loaded, draft, body.unavailable)
 }
@@ -328,6 +334,164 @@ fn save_without_asking(kb: &mut Kb, draft: &Draft, json: bool) -> Result<ExitCod
         println!("{}", saved.id);
     }
     Ok(ExitCode::SUCCESS)
+}
+
+// ---- kb mv, kb rm and the git behind them ----
+
+const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Whether `rel` (a path relative to the KB root) is tracked by git in a work tree that holds
+/// the root, and git can be run.
+fn git_tracks(platform: &impl Platform, root: &Path, rel: &str) -> bool {
+    let ok = |args: &[&str]| {
+        platform
+            .run_git(root, args, GIT_TIMEOUT)
+            .is_ok_and(|o| o.success() && (args[0] != "rev-parse" || o.stdout.trim() == "true"))
+    };
+    ok(&["rev-parse", "--is-inside-work-tree"]) && ok(&["ls-files", "--error-unmatch", "--", rel])
+}
+
+/// Renames an entry with `git mv` when it is tracked, else (or when git fails) with a plain
+/// rename; usage and remembered values follow. Returns what happened and how.
+pub fn move_entry(
+    platform: &impl Platform,
+    kb: &mut Kb,
+    old: &str,
+    new: &str,
+) -> Result<(kb_core::author::fsops::Renamed, &'static str), FsError> {
+    let root = kb.root().to_path_buf();
+    let method = std::cell::Cell::new("rename");
+    let mover = |from: &Path, to: &Path| -> io::Result<()> {
+        let rel = |p: &Path| {
+            p.strip_prefix(&root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .into_owned()
+        };
+        let (from_rel, to_rel) = (rel(from), rel(to));
+        if git_tracks(platform, &root, &from_rel)
+            && platform
+                .run_git(&root, &["mv", "--", &from_rel, &to_rel], GIT_TIMEOUT)
+                .is_ok_and(|o| o.success())
+        {
+            method.set("git mv");
+            return Ok(());
+        }
+        std::fs::rename(from, to)
+    };
+    let renamed = kb.rename_entry(old, new, &mover)?;
+    Ok((renamed, method.get()))
+}
+
+/// Deletes an entry with `git rm` when it is tracked, else (or when git fails) from the disk.
+pub fn delete_entry(
+    platform: &impl Platform,
+    kb: &mut Kb,
+    id: &str,
+) -> Result<&'static str, FsError> {
+    let root = kb.root().to_path_buf();
+    let method = std::cell::Cell::new("delete");
+    let remover = |path: &Path| -> io::Result<()> {
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .into_owned();
+        if git_tracks(platform, &root, &rel)
+            && platform
+                .run_git(&root, &["rm", "-q", "-f", "--", &rel], GIT_TIMEOUT)
+                .is_ok_and(|o| o.success())
+        {
+            method.set("git rm");
+            return Ok(());
+        }
+        std::fs::remove_file(path)
+    };
+    kb.remove_entry(id, &remover)?;
+    Ok(method.get())
+}
+
+/// `kb mv`.
+pub fn run_mv(
+    platform: &impl Platform,
+    root: &Path,
+    old: &str,
+    new: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    let new = new.strip_suffix(".md").unwrap_or(new);
+    let old = old.strip_suffix(".md").unwrap_or(old);
+    if old == new {
+        return Ok(ExitCode::SUCCESS);
+    }
+    match move_entry(platform, &mut kb, old, new) {
+        Ok((renamed, method)) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({ "id": renamed.to, "from": renamed.from, "to": renamed.to, "method": method })
+                );
+            } else {
+                println!("renamed {} -> {} ({method})", renamed.from, renamed.to);
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e @ FsError::Io { .. }) => Err(io_error(e)),
+        Err(e) => {
+            eprintln!("kb: {e}");
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
+/// `kb rm`.
+pub fn run_rm(
+    platform: &impl Platform,
+    root: &Path,
+    id: &str,
+    yes: bool,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    let id = id.strip_suffix(".md").unwrap_or(id);
+    if kb.entry_path(id).is_err() {
+        eprintln!("kb: no entry with ID \"{id}\"");
+        return Ok(ExitCode::from(1));
+    }
+    if !yes {
+        let Ok(tty) = platform
+            .open_tty()
+            .ok()
+            .filter(|_| platform.has_terminal())
+            .ok_or(())
+        else {
+            return Err(CliError::new(
+                "usage",
+                "kb rm needs --yes when there is no terminal",
+            ));
+        };
+        let signals = crate::tui::terminal::Signals::register();
+        let answer = crate::editfile::ask_line(&tty, &signals, &format!("Delete {id}? (y/N) "));
+        if !answer.is_some_and(|a| matches!(a.trim().to_ascii_lowercase().as_str(), "y" | "yes")) {
+            return Ok(ExitCode::from(130));
+        }
+    }
+    match delete_entry(platform, &mut kb, id) {
+        Ok(method) => {
+            if json {
+                println!("{}", serde_json::json!({ "id": id, "method": method }));
+            } else {
+                println!("deleted {id} ({method})");
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Err(e @ FsError::Io { .. }) => Err(io_error(e)),
+        Err(e) => {
+            eprintln!("kb: {e}");
+            Ok(ExitCode::from(1))
+        }
+    }
 }
 
 #[cfg(test)]

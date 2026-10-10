@@ -487,6 +487,41 @@ starts on the type when the clipboard was empty or unreadable or kb was not sure
 After saving, the entry is selected in the list (the search line holds its title).
 **`Ctrl-N` used to select the next result**; it now adds. `↓` and `Ctrl-J` still move down.
 
+### Writing in your editor
+
+`kb add --editor` skips the form: a template for the type (with `--title`, `--tag` and any body
+already in place, the optional fields as `# key: value` comments) opens in your editor on a
+private temporary file in the system temp directory, never in the KB. When the editor closes kb
+checks the result; a valid one is saved and its ID printed. Otherwise the problems are listed and
+you choose `[e]dit again`, `[s]ave anyway` (not offered when there is a likely secret) or
+`[d]iscard`. Saving an unchanged template, or an editor that exits with an error, cancels (exit
+130). The ID is `--path`, else made from the type and title as above. Editors that return at once
+(`code`, `subl`) need their wait flag, for example `editor = "code --wait"`.
+
+### Editing, renaming and deleting
+
+```sh
+kb edit <id|words>      # the entry's file in your editor, then the same checks as above
+kb mv <id> <new-id>     # rename; folders are created, emptied ones removed
+kb rm <id> [-y]         # delete after asking "Delete cw/foo? (y/N)"
+```
+
+`kb edit` takes an exact ID, or words that find exactly one entry (several matches list up to five
+IDs and exit 1). A clean change gets a new `updated`; nothing else in the file is touched. With
+errors you get the same three choices, and `[d]iscard` puts the old file back. `--json` prints
+`{"id", "status", "findings"}` and never asks. The list's `Ctrl-E` still just opens the editor and
+shows the first error; it does not touch `updated`.
+
+`kb mv` carries the entry's usage and remembered variable values to the new ID, so its place in the
+list does not change, even if the content was edited first. It refuses a target that exists (in
+any letter case). `kb rm` forgets usage and remembered values. When the KB is a git work tree and
+the file is tracked, both use `git mv` / `git rm` (and say so); otherwise, or if git fails, they
+use plain file operations. Committing is up to you. `Ctrl-R` and `Ctrl-X` in the list do the same
+with a prompt on the key bar.
+
+Exit codes for `add`, `edit`, `mv` and `rm`: `0` done, `1` invalid, not found, ambiguous or target
+exists, `2` usage or I/O error, `130` cancelled.
+
 ## Checking your setup
 
 ```sh
