@@ -191,14 +191,14 @@ check and `config` listing twelve settings.
 
 ### Tests first (must fail)
 
-- [ ] T050 [P] [US5] Write failing tests for `suggest_vars` and `Draft::accept` in `crates/kb-core/src/author/suggest.rs` over `tests/fixtures/authoring/suggest/`: exactly the FR-015 patterns; `-30m` → `-{{minutes}}m` (digits only), `24h` → hours, `7d` → days, `INTERVAL '1 day'` → days; env as `enum` with options `[dev, qa, stage, prod]` (short) or `[dev, qa, staging, production]` (long) and the original as default (so lint KB045 passes); one suggestion per distinct value with all positions, accepting replaces every occurrence; names unique against declared variables and each other (`env`, `env_2`); nothing inside `{{…}}` or `\{{…}}`; negative cases produce nothing; every suggested value matches `[A-Za-z0-9._/-]+`; SC-006 table test: accept all, resolve with M5's `varres` using defaults, in `cmd` (bare, `"…"`, `'…'`), `sql` and `url` contexts, equals the pasted text; accepted suggestions are removed and the rest keep their positions (re-run).
-- [ ] T051 [P] [US5] Write failing tests in `crates/kb/src/tui/add.rs` and a pty case in `tui_add_pty.rs`: suggestion rows appear under Variables showing value, proposed name and kind; Space on a row accepts it (body and declarations change, `changed` set); without Space nothing changes (US5.3); `kb add --yes` never applies any (also in `cli_add.rs`); variable rows: `k` cycles kind, `d` edits the default (refused on secret, with a message), `o` edits options, `l` marks literal; snapshot with suggestions (extends T030).
+- [X] T050 [P] [US5] Write failing tests for `suggest_vars` and `Draft::accept` in `crates/kb-core/src/author/suggest.rs` over `tests/fixtures/authoring/suggest/`: exactly the FR-015 patterns; `-30m` → `-{{minutes}}m` (digits only), `24h` → hours, `7d` → days, `INTERVAL '1 day'` → days; env as `enum` with options `[dev, qa, stage, prod]` (short) or `[dev, qa, staging, production]` (long) and the original as default (so lint KB045 passes); one suggestion per distinct value with all positions, accepting replaces every occurrence; names unique against declared variables and each other (`env`, `env_2`); nothing inside `{{…}}` or `\{{…}}`; negative cases produce nothing; every suggested value matches `[A-Za-z0-9._/-]+`; SC-006 table test: accept all, resolve with M5's `varres` using defaults, in `cmd` (bare, `"…"`, `'…'`), `sql` and `url` contexts, equals the pasted text; accepted suggestions are removed and the rest keep their positions (re-run).
+- [X] T051 [P] [US5] Write failing tests in `crates/kb/src/tui/add.rs` and a pty case in `tui_add_pty.rs`: suggestion rows appear under Variables showing value, proposed name and kind; Space on a row accepts it (body and declarations change, `changed` set); without Space nothing changes (US5.3); `kb add --yes` never applies any (also in `cli_add.rs`); variable rows: `k` cycles kind, `d` edits the default (refused on secret, with a message), `o` edits options, `l` marks literal; snapshot with suggestions (extends T030).
 
 ### Implementation
 
-- [ ] T052 [US5] Implement `suggest_vars`, `VariableSuggestion`, `SuggestPattern` and `Draft::accept` in `crates/kb-core/src/author/suggest.rs` (R4). Makes T050 pass.
-- [ ] T053 [US5] Implement suggestion and variable rows in `AddState` / `draw_add` (`crates/kb/src/tui/add.rs`, `add_view.rs`). Makes T051 pass.
-- [ ] T054 [US5] Document the five suggestion patterns and "never automatic" in `README.md`.
+- [X] T052 [US5] Implement `suggest_vars`, `VariableSuggestion`, `SuggestPattern` and `Draft::accept` in `crates/kb-core/src/author/suggest.rs` (R4). Makes T050 pass.
+- [X] T053 [US5] Implement suggestion and variable rows in `AddState` / `draw_add` (`crates/kb/src/tui/add.rs`, `add_view.rs`). Makes T051 pass.
+- [X] T054 [US5] Document the five suggestion patterns and "never automatic" in `README.md`.
 
 **Checkpoint**: Quickstart scenario 5 passes.
 

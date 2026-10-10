@@ -388,3 +388,16 @@ fn the_new_entry_is_searchable_at_once() {
         .unwrap();
     assert_eq!(text(&found.stdout), "sql/zebra-stripes\n");
 }
+
+#[test]
+fn yes_never_applies_a_suggestion() {
+    let (_d, root) = new_root();
+    let body = "_sourceCategory=prod/lambda/authorizer | timeslice 5m | count by x";
+    let out = add(&root, &["-t", "Literal", "--yes"], body);
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let t = file(&root, "sumo/literal");
+    assert!(
+        t.contains(body) && !t.contains("{{") && !t.contains("vars:"),
+        "{t}"
+    );
+}

@@ -348,3 +348,31 @@ fn list_ctrl_e_is_unchanged_it_does_not_bump_updated() {
     assert_eq!(after, format!("{before}note\n"));
     s.send(CTRL_C);
 }
+
+#[test]
+fn space_accepts_a_suggestion_and_saving_declares_it() {
+    let (t, home, root) = kb_home("search");
+    let query = "_sourceCategory=prod/lambda/authorizer | timeslice 1m | count by x\n";
+    let mut s = Session::spawn(&spec(&t, &home, &root, &[], query));
+    s.wait_for("entries");
+    s.send(CTRL_N);
+    s.wait_for("detected sumo");
+    s.type_text("By env");
+    s.send(TAB); // tags
+    s.send(TAB); // variables
+    s.wait_for("suggest  prod → {{env}}");
+    s.type_text(" ");
+    s.wait_for("_sourceCategory={{env}}/lambda/authorizer");
+    s.send(CTRL_S);
+    s.wait_for("Saved sumo/by-env");
+    let saved = fs::read_to_string(root.join("sumo/by-env.md")).unwrap();
+    assert!(
+        saved.contains("env: { kind: enum, options: [dev, qa, stage, prod], default: prod }"),
+        "{saved}"
+    );
+    assert!(
+        saved.contains("timeslice 1m"),
+        "the other suggestion was not applied:\n{saved}"
+    );
+    s.send(CTRL_C);
+}

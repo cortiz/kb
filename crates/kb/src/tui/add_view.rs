@@ -86,7 +86,7 @@ fn blit(src: &Buffer, dst: &mut Buffer, area: Rect) {
 /// Rows the left column wants.
 fn left_rows(add: &AddState) -> u16 {
     let vars = if add.draft.entry_type.has_payload() {
-        2 + add.declared().len().max(1) + add.draft.suggestions.len()
+        3 + add.declared().len().max(1) + add.draft.suggestions.len()
     } else {
         0
     };
@@ -194,7 +194,7 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     if add.draft.entry_type.has_payload() && y < end {
         label(buf, r, y, "Variables", focused(Field::Variables), theme);
         y += 1;
-        if add.declared().is_empty() && y < end {
+        if add.declared().is_empty() && add.draft.suggestions.is_empty() && y < end {
             buf.set_string(
                 r.x + 2,
                 y,
@@ -203,13 +203,14 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             );
             y += 1;
         }
-        for v in add.declared() {
+        for (i, v) in add.declared().iter().enumerate() {
             if y >= end {
                 break;
             }
+            let selected = focused(Field::Variables) && add.var_row == i;
             let kind = pad(super::add::kind_name(v.kind), 7);
             let mut spans = vec![
-                Span::raw("  "),
+                Span::styled(if selected { "▸ " } else { "  " }, theme.warning()),
                 Span::styled(pad(&v.name, 12), theme.text()),
                 Span::styled(kind, theme.muted()),
                 Span::styled(format!("{{{{{}}}}}", v.name), theme.variable()),
@@ -217,8 +218,64 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             if let Some(d) = &v.default {
                 spans.push(Span::styled(format!("  = {d}"), theme.muted()));
             }
+            if !v.options.is_empty() {
+                spans.push(Span::styled(
+                    format!("  [{}]", v.options.join(", ")),
+                    theme.muted(),
+                ));
+            }
             buf.set_line(r.x, y, &Line::from(spans), r.width);
             y += 1;
+        }
+        let declared = add.declared().len();
+        for (i, s) in add.draft.suggestions.iter().enumerate() {
+            if y >= end {
+                break;
+            }
+            let selected = focused(Field::Variables) && add.var_row == declared + i;
+            let mut text = format!(
+                "suggest  {} → {{{{{}}}}}  {}",
+                s.value,
+                s.name,
+                super::add::kind_name(s.kind)
+            );
+            if selected {
+                text.push_str("   [space]");
+            }
+            let style = if selected {
+                theme.text()
+            } else {
+                theme.muted()
+            };
+            buf.set_string(
+                r.x,
+                y,
+                truncate(
+                    &format!("{}{text}", if selected { "▸ " } else { "  " }),
+                    usize::from(r.width),
+                ),
+                style,
+            );
+            y += 1;
+        }
+        if let Some(edit) = &add.var_edit {
+            if y < end {
+                let what = match edit.what {
+                    super::add::VarSetting::Default => "default",
+                    super::add::VarSetting::Options => "options",
+                };
+                buf.set_string(r.x + 2, y, format!("{} {what}:", edit.name), theme.muted());
+                let x = r.x + 4 + (edit.name.len() + what.len()) as u16;
+                draw_input(
+                    buf,
+                    Rect::new(x, y, r.width.saturating_sub(x - r.x + 1), 1),
+                    &edit.editor,
+                    true,
+                    "",
+                    theme,
+                );
+                y += 1;
+            }
         }
         y += 1;
     }

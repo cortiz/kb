@@ -508,6 +508,25 @@ impl Draft {
         self.refresh();
     }
 
+    /// Accepts suggestion `index`: every occurrence of its value becomes a reference, and the
+    /// variable is declared with the original value as its default, so the entry still resolves to
+    /// the pasted text.
+    pub fn accept(&mut self, index: usize) {
+        let Some(s) = self.suggestions.get(index).cloned() else {
+            return;
+        };
+        for range in s.positions.iter().rev() {
+            self.body
+                .replace_range(range.clone(), &format!("{{{{{}}}}}", s.name));
+        }
+        self.refresh();
+        if let Some(var) = self.vars.iter_mut().find(|v| v.name == s.name) {
+            var.kind = s.kind;
+            var.options = s.options;
+            var.default = Some(s.default);
+        }
+    }
+
     /// The entry ID. `taken` says whether an ID exists already (any case).
     pub fn target_id(&self, taken: &dyn Fn(&str) -> bool) -> Result<String, DraftError> {
         let usable =

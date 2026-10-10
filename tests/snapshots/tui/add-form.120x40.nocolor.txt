@@ -58,8 +58,10 @@
 4:56..58 dim
 4:92..103 bold+reverse
 6:0..10 dim
+7:0..2 bold
 7:14..21 dim
 7:21..27 bold+reverse
+8:0..2 bold
 8:14..21 dim
 8:21..32 bold+reverse
 10:0..9 dim

@@ -487,6 +487,29 @@ starts on the type when the clipboard was empty or unreadable or kb was not sure
 After saving, the entry is selected in the list (the search line holds its title).
 **`Ctrl-N` used to select the next result**; it now adds. `↓` and `Ctrl-J` still move down.
 
+### Variable suggestions
+
+In the form, the Variables list also shows **suggestions**: literal values kb thinks are
+parameters. Select one with `↑` `↓` and press `Space` to accept it: every occurrence of the value
+becomes `{{name}}` and the variable is declared with the original value as its default, so the
+entry still resolves to exactly the text you pasted. Nothing is ever applied on its own, and
+`kb add --yes` applies none. Only these five patterns are looked for:
+
+| Pattern | Becomes |
+|---------|---------|
+| `prod`, `production`, `stage`, `staging`, `dev`, `qa` (whole words) | `env`, an enum of the matching options |
+| AWS regions such as `us-east-1` | `region` |
+| `-30m`, `24h`, `7d`, `INTERVAL '1 day'` (only the number) | `minutes`, `hours` or `days`, a number |
+| a 12-digit account ID in an ARN or after `account` | `account` |
+| a UUID, or a run of nine or more digits | `id` |
+
+On a declared variable, `k` cycles its kind (`text`, `number`, `enum`, `secret`), `d` sets the
+default (refused for a secret), `o` sets an enum's options and `l` writes the reference as a
+literal (`\{{name}}`), for text that only looks like a variable. A name that looks numeric
+(`minutes`, `limit`, `days`, `count`, `port`) starts as a number and one that looks like a secret
+(`token`, `password`, `secret`, `key`, `api_key`, or ending in `_token`, `_password`, `_secret`,
+`_key`) as a secret with no default.
+
 ### Writing in your editor
 
 `kb add --editor` skips the form: a template for the type (with `--title`, `--tag` and any body

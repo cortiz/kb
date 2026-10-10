@@ -566,6 +566,22 @@ mod add_form {
     }
 
     #[test]
+    fn suggestions_show_under_the_variables() {
+        let (mut state, theme) = open(
+            "_sourceCategory=prod/lambda/authorizer | timeslice 5m | where region = \"us-east-1\"",
+            (120, 40),
+            "dark",
+        );
+        state.add.as_mut().unwrap().focus = kb_cli::tui::add::Field::Variables;
+        let shot = render(&state, &theme);
+        assert!(
+            shot.contains("suggest  prod → {{env}}  enum   [space]"),
+            "{shot}"
+        );
+        assert_snapshot("add-form-suggestions.120x40.dark", &shot);
+    }
+
+    #[test]
     fn narrow() {
         let (state, theme) = open(CW, (80, 30), "dark");
         assert_snapshot("add-form.80x30.dark", &render(&state, &theme));

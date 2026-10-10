@@ -245,6 +245,21 @@ fn type_field_rows(fields: &DraftFields) -> Vec<(&'static str, String)> {
     }
 }
 
+/// Which setting of a variable the small editor under the Variables list is changing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VarSetting {
+    Default,
+    Options,
+}
+
+/// A variable setting being typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarEdit {
+    pub name: String,
+    pub what: VarSetting,
+    pub editor: LineEditor,
+}
+
 #[derive(Debug, Clone)]
 pub struct AddState {
     pub draft: Draft,
@@ -256,6 +271,9 @@ pub struct AddState {
     /// The inputs of a `link` or `code` entry: label and editor.
     pub type_fields: Vec<(&'static str, LineEditor)>,
     pub type_row: usize,
+    /// The selected row of the Variables list: declared variables, then suggestions.
+    pub var_row: usize,
+    pub var_edit: Option<VarEdit>,
     /// Tags in use in the KB with their counts, most used first (for completion).
     pub known_tags: Vec<(String, u32)>,
     /// Anything was edited, so Esc asks first.
@@ -305,6 +323,8 @@ impl AddState {
             notes: TextArea::new(&draft.notes),
             type_fields: Vec::new(),
             type_row: 0,
+            var_row: 0,
+            var_edit: None,
             known_tags,
             changed: false,
             confirm_discard: false,
@@ -350,7 +370,7 @@ impl AddState {
     }
 
     /// Re-parses the draft to color the body (after the body or the type changed).
-    fn rehighlight(&mut self) {
+    pub fn rehighlight(&mut self) {
         let ty = self.draft.entry_type;
         let bytes = self.draft.render(&self.clock());
         let entry = parse_entry("new", "new.md", bytes).entry;
@@ -546,6 +566,9 @@ impl AddState {
 
     pub fn handle_key(&mut self, key: Key) -> AddEvent {
         self.message = None;
+        if self.var_edit.is_some() {
+            return self.var_edit_key(key);
+        }
         if self.confirm_discard {
             self.confirm_discard = false;
             return if matches!(key.code, Code::Char('y' | 'Y')) && key.mods == 0 {
@@ -674,8 +697,135 @@ impl AddState {
             }
             Field::Fields => self.fields_key(key),
             Field::Notes => self.notes_key(key),
-            Field::Variables | Field::Body => {}
+            Field::Variables => self.variables_key(key),
+            Field::Body => {}
         }
+    }
+
+    /// Rows in the Variables list: declared variables, then pending suggestions.
+    pub fn var_rows(&self) -> usize {
+        self.draft.vars.len() + self.draft.suggestions.len()
+    }
+
+    fn variables_key(&mut self, key: Key) {
+        let rows = self.var_rows();
+        if rows == 0 {
+            return;
+        }
+        self.var_row = self.var_row.min(rows - 1);
+        let declared = self.draft.vars.len();
+        match (key.code, key.mods) {
+            (Code::Down, 0) => self.var_row = (self.var_row + 1).min(rows - 1),
+            (Code::Up, 0) => self.var_row = self.var_row.saturating_sub(1),
+            (Code::Char(' '), 0) if self.var_row >= declared => {
+                self.draft.accept(self.var_row - declared);
+                self.edited();
+                self.rehighlight();
+                self.var_row = self.var_row.min(self.var_rows().saturating_sub(1));
+            }
+            (Code::Char(c), 0) if self.var_row < declared => {
+                let name = self.draft.vars[self.var_row].name.clone();
+                self.variable_setting(&name, c);
+            }
+            _ => {}
+        }
+    }
+
+    /// `k` kind, `d` default, `o` options, `l` literal, on the variable `name`.
+    fn variable_setting(&mut self, name: &str, key: char) {
+        use kb_core::vars::VarKind;
+        let Some(var) = self.draft.vars.iter().find(|v| v.name == name).cloned() else {
+            return;
+        };
+        match key {
+            'k' => {
+                let next = match var.kind {
+                    VarKind::Text => VarKind::Number,
+                    VarKind::Number => VarKind::Enum,
+                    VarKind::Enum => VarKind::Secret,
+                    VarKind::Secret => VarKind::Text,
+                };
+                if self.draft.set_var_kind(name, next).is_ok() {
+                    self.edited();
+                    if next == VarKind::Enum {
+                        self.message = Some("enum: type its options, separated by commas".into());
+                        self.start_edit(name, VarSetting::Options);
+                    }
+                }
+            }
+            'd' => {
+                if var.kind == VarKind::Secret {
+                    self.message = Some("a secret variable can't have a default".into());
+                } else {
+                    self.start_edit(name, VarSetting::Default);
+                }
+            }
+            'o' => {
+                if var.kind == VarKind::Enum {
+                    self.start_edit(name, VarSetting::Options);
+                } else {
+                    self.message =
+                        Some("options are for enum variables (k changes the kind)".into());
+                }
+            }
+            'l' => {
+                self.draft.mark_literal(name);
+                self.edited();
+                self.rehighlight();
+                self.var_row = self.var_row.min(self.var_rows().saturating_sub(1));
+                self.message = Some(format!("{{{{{name}}}}} is now written literally"));
+            }
+            _ => {}
+        }
+    }
+
+    fn start_edit(&mut self, name: &str, what: VarSetting) {
+        let Some(var) = self.draft.vars.iter().find(|v| v.name == name) else {
+            return;
+        };
+        let text = match what {
+            VarSetting::Default => var.default.clone().unwrap_or_default(),
+            VarSetting::Options => var.options.join(", "),
+        };
+        self.var_edit = Some(VarEdit {
+            name: name.to_string(),
+            what,
+            editor: LineEditor::new(&text),
+        });
+    }
+
+    fn var_edit_key(&mut self, key: Key) -> AddEvent {
+        let Some(edit) = self.var_edit.as_mut() else {
+            return AddEvent::None;
+        };
+        match (key.code, key.mods) {
+            (Code::Esc, 0) => self.var_edit = None,
+            (Code::Enter, 0) => {
+                let text = edit.editor.text().trim().to_string();
+                let (name, what) = (edit.name.clone(), edit.what);
+                self.var_edit = None;
+                let result = match what {
+                    VarSetting::Default => self
+                        .draft
+                        .set_var_default(&name, (!text.is_empty()).then_some(text)),
+                    VarSetting::Options => self.draft.set_var_options(
+                        &name,
+                        text.split(',')
+                            .map(|o| o.trim().to_string())
+                            .filter(|o| !o.is_empty())
+                            .collect(),
+                    ),
+                };
+                match result {
+                    Ok(()) => self.edited(),
+                    Err(e) => self.message = Some(e.to_string()),
+                }
+            }
+            _ => {
+                line_key(&mut edit.editor, key);
+            }
+        }
+        AddEvent::None
     }
 
     fn fields_key(&mut self, key: Key) {
@@ -1120,5 +1270,74 @@ mod tests {
         assert_eq!(t.position(), (1, 0));
         assert!(t.backspace());
         assert_eq!(t.text(), "abcde\nf");
+    }
+
+    #[test]
+    fn suggestions_appear_under_the_variables_and_space_accepts_one() {
+        let mut s = open_with(
+            "_sourceCategory=prod/x | timeslice 5m",
+            DraftSource::Clipboard,
+            None,
+        );
+        s.focus = Field::Variables;
+        assert_eq!(s.draft.suggestions.len(), 2);
+        assert_eq!(s.var_rows(), 2);
+        let before = s.draft.body.clone();
+        press(&mut s, Code::Down, 0);
+        // nothing changes without Space
+        assert_eq!(s.draft.body, before);
+        assert!(!s.changed);
+        press(&mut s, Code::Char(' '), 0);
+        assert_eq!(
+            s.draft.body,
+            "_sourceCategory=prod/x | timeslice {{minutes}}m"
+        );
+        assert!(s.changed);
+        assert_eq!(s.draft.suggestions.len(), 1);
+        assert_eq!(s.draft.vars[0].name, "minutes");
+        assert!(
+            s.body_lines
+                .iter()
+                .flatten()
+                .any(|sp| sp.text.contains("{{minutes}}"))
+        );
+    }
+
+    #[test]
+    fn variable_rows_change_kind_default_options_and_literal() {
+        use kb_core::vars::VarKind;
+        let mut s = open_with("echo {{who}} {{token2}}", DraftSource::Clipboard, None);
+        s.focus = Field::Variables;
+        press(&mut s, Code::Char('k'), 0);
+        assert_eq!(s.draft.vars[0].kind, VarKind::Number);
+        press(&mut s, Code::Char('k'), 0);
+        assert_eq!(s.draft.vars[0].kind, VarKind::Enum);
+        assert!(s.var_edit.is_some(), "an enum asks for its options");
+        type_text(&mut s, "a, b");
+        press(&mut s, Code::Enter, 0);
+        assert_eq!(s.draft.vars[0].options, ["a", "b"]);
+        press(&mut s, Code::Char('d'), 0);
+        type_text(&mut s, "c");
+        press(&mut s, Code::Enter, 0);
+        assert!(s.message.as_deref().unwrap().contains("one of the options"));
+        press(&mut s, Code::Char('d'), 0);
+        press(&mut s, Code::Char('u'), CTRL);
+        type_text(&mut s, "b");
+        press(&mut s, Code::Enter, 0);
+        assert_eq!(s.draft.vars[0].default.as_deref(), Some("b"));
+        press(&mut s, Code::Char('k'), 0);
+        assert_eq!(s.draft.vars[0].kind, VarKind::Secret);
+        press(&mut s, Code::Char('d'), 0);
+        assert!(s.var_edit.is_none());
+        assert!(s.message.as_deref().unwrap().contains("secret"));
+        press(&mut s, Code::Char('o'), 0);
+        assert!(s.message.as_deref().unwrap().contains("enum"));
+        press(&mut s, Code::Char('l'), 0);
+        assert_eq!(s.draft.body, "echo \\{{who}} {{token2}}");
+        assert_eq!(s.draft.vars.len(), 1);
+        // Esc leaves the small editor, not the form
+        press(&mut s, Code::Char('d'), 0);
+        assert_eq!(press(&mut s, Code::Esc, 0), AddEvent::None);
+        assert!(s.var_edit.is_none() && !s.confirm_discard);
     }
 }
