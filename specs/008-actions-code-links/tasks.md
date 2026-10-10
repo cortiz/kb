@@ -185,13 +185,13 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 6
 
-- [ ] T050 [P] [US6] Write failing tests for custom action parsing and placeholder validation in `crates/kb-core/src/action.rs`: verify `input` defaults to `stdin` if omitted, `input = "arg"` appends payload as last argument, `{{field}}` placeholders are shell-escaped, missing placeholder fields disable action, and key conflicts with built-in keys report warning and disable action.
-- [ ] T051 [P] [US6] Write failing integration tests for custom actions in `tests/cli_run.rs`: verify `kb run <id> --action <name>` runs custom command, pipes payload via stdin, interpolates fields, and applies destructive checks.
+- [X] T050 [P] [US6] Write failing tests for custom action parsing and placeholder validation in `crates/kb-core/src/action.rs`: verify `input` defaults to `stdin` if omitted, `input = "arg"` appends payload as last argument, `{{field}}` placeholders are shell-escaped, missing placeholder fields disable action, and key conflicts with built-in keys report warning and disable action.
+- [X] T051 [P] [US6] Write failing integration tests for custom actions in `tests/cli_run.rs`: verify `kb run <id> --action <name>` runs custom command, pipes payload via stdin, interpolates fields, and applies destructive checks.
 
 ### Implementation for User Story 6
 
-- [ ] T052 [US6] Implement custom action resolution, field placeholder substitution, default `stdin` input handling, and key conflict detection in `crates/kb-core/src/action.rs` and `crates/kb-core/src/run.rs`. Makes T050 pass.
-- [ ] T053 [US6] Wire `--action <name>` flag into `kb run` CLI subcommand in `crates/kb/src/commands.rs` and Action Menu in `crates/kb/src/tui/action_view.rs`. Makes T051 pass.
+- [X] T052 [US6] Implement custom action resolution, field placeholder substitution, default `stdin` input handling, and key conflict detection in `crates/kb-core/src/action.rs` and `crates/kb-core/src/run.rs`. Makes T050 pass.
+- [X] T053 [US6] Wire `--action <name>` flag into `kb run` CLI subcommand in `crates/kb/src/commands.rs` and Action Menu in `crates/kb/src/tui/action_view.rs`. Makes T051 pass.
 
 **Checkpoint**: Custom actions execute smoothly via CLI `--action` and TUI Action Menu.
 

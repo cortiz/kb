@@ -271,6 +271,7 @@ pub trait Platform {
         command: &str,
         cwd: Option<&Path>,
         env_vars: &[(String, String)],
+        stdin_payload: Option<&str>,
     ) -> io::Result<RunResult>;
 }
 

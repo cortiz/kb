@@ -37,6 +37,7 @@ pub struct RunPlan {
     pub secret_env_vars: Vec<SecretEnvVar>,
     pub destructive_warnings: Vec<DestructiveWarning>,
     pub requires_typed_run: bool,
+    pub stdin_payload: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,29 +249,33 @@ impl RunService {
         };
 
         // Command template
+        let mut stdin_payload = None;
         let resolved_command = if let Some(action) = custom_action {
-            let mut cmd = action.command.clone();
-            // Replace custom action placeholders: {{payload}}, {{id}}, {{title}}, {{path}}, etc.
-            let payload = entry.payload().map(|p| p.text.as_str()).unwrap_or("");
-            cmd = cmd.replace("{{payload}}", payload);
-            cmd = cmd.replace("{{id}}", entry.id());
-            cmd = cmd.replace("{{title}}", entry.title().unwrap_or(""));
-            cmd = cmd.replace("{{path}}", entry.path());
+            let cmd = crate::action::ActionService::resolve_custom_action_command(
+                &action.command,
+                entry,
+                Some(values),
+                action.input,
+            )
+            .map_err(|e| {
+                if let Some(f) = e.strip_prefix("missing field '").and_then(|s| s.strip_suffix('\'')) {
+                    RunPlanError::MissingPlaceholderField(f.to_string())
+                } else {
+                    RunPlanError::VarResolution(e)
+                }
+            })?;
 
-            // Handle any missing {{field}} placeholder
-            if let Some(pos) = cmd.find("{{")
-                && let Some(end) = cmd[pos..].find("}}")
-            {
-                let field = &cmd[pos + 2..pos + end];
-                return Err(RunPlanError::MissingPlaceholderField(
-                    field.trim().to_string(),
-                ));
+            if action.input == crate::config::CustomActionInput::Stdin {
+                let mut resolved_payload = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
+                for p in &plan.vars {
+                    let var_placeholder = format!("{{{{{}}}}}", p.var.name);
+                    if let Some(v) = values.get(&p.var.name) {
+                        resolved_payload = resolved_payload.replace(&var_placeholder, v.reveal());
+                    }
+                }
+                stdin_payload = Some(resolved_payload);
             }
 
-            if action.input == crate::config::CustomActionInput::Arg {
-                cmd.push(' ');
-                cmd.push_str(&format!("'{payload}'"));
-            }
             cmd
         } else {
             // For cmd entries, replace variables in payload
@@ -301,6 +306,7 @@ impl RunService {
             secret_env_vars,
             destructive_warnings,
             requires_typed_run,
+            stdin_payload,
         })
     }
 }

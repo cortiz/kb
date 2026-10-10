@@ -264,13 +264,60 @@ pub fn run(
                     dirty = true;
                 }
                 Effect::RunCustomAction { id, action_name } => {
-                    pending.extend(state.update(
-                        Action::CopyDone(CopyReport {
-                            message: format!("Custom action '{action_name}' on '{id}'"),
-                            sent: true,
-                        }),
-                        Instant::now(),
-                    ));
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            let custom = settings
+                                .custom_actions()
+                                .iter()
+                                .find(|a| a.name == action_name)
+                                .cloned();
+                            if let Some(custom) = custom {
+                                let spec = FormSpec::load(&ui_kb, &id, &real_env);
+                                let action = match spec {
+                                    Ok(Some(spec)) => {
+                                        Action::FormLoaded(Ok(Box::new(spec)), Then::Run)
+                                    }
+                                    Err(e) => Action::FormLoaded(Err(e), Then::Run),
+                                    _ => {
+                                        let values = kb_core::varres::Values::new();
+                                        match kb_core::run::RunService::build_run_plan(
+                                            &entry,
+                                            &values,
+                                            Some(&custom),
+                                            settings.run_destructive_patterns(),
+                                        ) {
+                                            Ok(plan) => {
+                                                Action::OpenRunModal { id, plan }
+                                            }
+                                            Err(e) => Action::CopyDone(CopyReport {
+                                                message: format!("Cannot run custom action: {e}"),
+                                                sent: false,
+                                            }),
+                                        }
+                                    }
+                                };
+                                pending.extend(state.update(action, Instant::now()));
+                            } else {
+                                pending.extend(state.update(
+                                    Action::CopyDone(CopyReport {
+                                        message: format!("Custom action '{action_name}' not found"),
+                                        sent: false,
+                                    }),
+                                    Instant::now(),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Error loading entry '{id}': {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
                     dirty = true;
                 }
                 Effect::OpenCodeTarget { id, target } => {
@@ -540,6 +587,7 @@ pub fn run(
                         &plan.resolved_command,
                         plan.cwd.as_deref(),
                         &env_tuples,
+                        plan.stdin_payload.as_deref(),
                     );
                     let _ = guard.resume();
                     if let Ok(sz) = terminal.size() {

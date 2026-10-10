@@ -1154,6 +1154,7 @@ fn deliver_run_values_map(
             &run_plan.resolved_command,
             run_plan.cwd.as_deref(),
             &env_tuples,
+            run_plan.stdin_payload.as_deref(),
         )
         .map_err(|e| CliError::new("io", format!("failed to run command: {e}")))?;
 

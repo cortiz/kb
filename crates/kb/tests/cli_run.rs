@@ -275,3 +275,187 @@ fn cli_run_destructive_requires_typing_run() {
     assert_eq!(s2.wait_exit(), 0, "{}", s2.screen());
     assert!(marker.exists(), "marker should exist when typing 'run'");
 }
+
+#[test]
+fn cli_run_custom_action_pipes_payload_via_stdin_and_interpolates_fields() {
+    let (dir, home, root) = setup_run_kb();
+    let out_file = dir.path().join("psql_out.txt");
+    let out_str = out_file.display().to_string();
+
+    let config_dir = home.join(".config/kb");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            r#"
+[[actions.sql]]
+name = "psql-test"
+key = "p"
+command = "sh -c 'echo \"DB: $1\" > \"$2\"; cat >> \"$2\"' -- {{{{database}}}} '{out_str}'"
+input = "stdin"
+"#
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("report.md"),
+        r#"---
+kb_format: 1
+type: sql
+title: Daily Report
+database: analytics_prod
+---
+
+```sql
+SELECT count(*) FROM events;
+```
+"#,
+    )
+    .unwrap();
+
+    let out = kb_in(&root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .args(["run", "report", "--action", "psql-test", "-y"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out_file.exists(), "out_file should exist");
+    let content = fs::read_to_string(out_file).unwrap();
+    assert!(content.contains("DB: analytics_prod"), "content: {content}");
+    assert!(
+        content.contains("SELECT count(*) FROM events;"),
+        "content: {content}"
+    );
+}
+
+#[test]
+fn cli_run_custom_action_appends_arg_payload() {
+    let (dir, home, root) = setup_run_kb();
+    let out_file = dir.path().join("arg_out.txt");
+    let out_str = out_file.display().to_string();
+
+    let config_dir = home.join(".config/kb");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            r#"
+[[actions.sql]]
+name = "echo-arg"
+key = "e"
+command = "sh -c 'echo \"PAYLOAD: $1\" > \"{out_str}\"' --"
+input = "arg"
+"#
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("report.md"),
+        r#"---
+kb_format: 1
+type: sql
+title: Daily Report
+database: analytics_prod
+---
+
+```sql
+SELECT 42;
+```
+"#,
+    )
+    .unwrap();
+
+    let out = kb_in(&root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .args(["run", "report", "--action", "echo-arg", "-y"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(out_file.exists(), "out_file should exist");
+    let content = fs::read_to_string(out_file).unwrap();
+    assert!(content.contains("PAYLOAD: SELECT 42;"), "content: {content}");
+}
+
+#[test]
+fn cli_run_custom_action_applies_destructive_checks() {
+    let (dir, home, root) = setup_run_kb();
+    let marker = dir.path().join("destructive_marker.txt");
+    let marker_str = marker.display().to_string();
+
+    let config_dir = home.join(".config/kb");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(
+        config_dir.join("config.toml"),
+        format!(
+            r#"
+[[actions.sql]]
+name = "drop-all"
+key = "d"
+command = "rm -rf /tmp/fake_dangerous_path && echo 'EXECUTED' > '{marker_str}'"
+"#
+        ),
+    )
+    .unwrap();
+
+    fs::write(
+        root.join("report.md"),
+        r#"---
+kb_format: 1
+type: sql
+title: Daily Report
+database: analytics_prod
+---
+
+```sql
+DROP TABLE events;
+```
+"#,
+    )
+    .unwrap();
+
+    // -y without --force should fail
+    let out = kb_in(&root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .args(["run", "report", "--action", "drop-all", "-y"])
+        .output()
+        .unwrap();
+
+    assert_ne!(out.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("destructive"), "stderr: {err}");
+    assert!(!marker.exists(), "marker should not exist without --force");
+
+    // -y with --force should succeed
+    let out_force = kb_in(&root)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .args(["run", "report", "--action", "drop-all", "-y", "--force"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        out_force.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_force.stderr)
+    );
+    assert!(marker.exists(), "marker should exist with --force");
+}
+
