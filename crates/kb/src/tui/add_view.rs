@@ -258,8 +258,8 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             );
             y += 1;
         }
-        if let Some(edit) = &add.var_edit {
-            if y < end {
+        if let Some(edit) = add.var_edit.as_ref().filter(|_| y < end) {
+            {
                 let what = match edit.what {
                     super::add::VarSetting::Default => "default",
                     super::add::VarSetting::Options => "options",
@@ -399,10 +399,10 @@ fn draw_body(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
                     .count();
                 for col in from..to {
                     let x = inner.x + 1 + (gutter + 1 + col) as u16;
-                    if x < inner.x + inner.width {
-                        if let Some(cell) = buf.cell_mut((x, y)) {
-                            cell.set_style(theme.warning().add_modifier(Modifier::REVERSED));
-                        }
+                    if x < inner.x + inner.width
+                        && let Some(cell) = buf.cell_mut((x, y))
+                    {
+                        cell.set_style(theme.warning().add_modifier(Modifier::REVERSED));
                     }
                 }
             }
@@ -485,10 +485,10 @@ fn draw_notes(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     if add.focus == Field::Notes {
         let x = inner.x + 1 + col.min(cols) as u16;
         let y = inner.y + (row - first) as u16;
-        if x < inner.x + inner.width {
-            if let Some(cell) = buf.cell_mut((x, y)) {
-                cell.set_style(theme.cursor());
-            }
+        if x < inner.x + inner.width
+            && let Some(cell) = buf.cell_mut((x, y))
+        {
+            cell.set_style(theme.cursor());
         }
     }
 }

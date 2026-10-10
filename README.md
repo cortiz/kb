@@ -555,7 +555,7 @@ kb doctor --json
 
 `kb doctor` looks at the KB root and index, the config file (and any problems in it), the display
 server, SSH, tmux and screen, which clipboard method kb will use and which others work, true
-color, the editor Ctrl-E will launch, and the URL opener. It exits 1 if a check fails; warnings
+color, the program `kb add` and Ctrl-N read the clipboard with (it only looks for the program; it never reads your clipboard), the editor Ctrl-E will launch, and the URL opener. It exits 1 if a check fails; warnings
 alone exit 0.
 
 ## JSON output

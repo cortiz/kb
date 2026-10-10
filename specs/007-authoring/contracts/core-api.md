@@ -78,7 +78,8 @@ impl Draft {
     pub fn target_id(&self, taken: &dyn Fn(&str) -> bool) -> Result<String, DraftError>;
 
     pub fn render(&self, clock: &dyn Clock) -> Vec<u8>;           // canonical bytes (FR-018)
-    pub fn check(&self, clock: &dyn Clock) -> Check;
+    pub fn check(&self, id: &str, clock: &dyn Clock) -> Check;   // `id` from target_id
+    pub fn template(&self, clock: &dyn Clock) -> String;           // `kb add --editor`
 }
 
 pub struct DraftOptions {
@@ -123,14 +124,14 @@ findings and not too large. A secret finding is any of `KB060`–`KB065` (not su
 
 ```rust
 impl Kb {
-    pub fn create_entry(&self, check: &Check) -> Result<PathBuf, FsError>;
-    pub fn rename_entry(&self, old: &str, new: &str,
+    pub fn create_entry(&mut self, check: &Check) -> Result<PathBuf, FsError>;
+    pub fn rename_entry(&mut self, old: &str, new: &str,
                         mover: &dyn Fn(&Path, &Path) -> io::Result<()>) -> Result<Renamed, FsError>;
-    pub fn remove_entry(&self, id: &str,
+    pub fn remove_entry(&mut self, id: &str,
                         remover: &dyn Fn(&Path) -> io::Result<()>) -> Result<(), FsError>;
-    pub fn save_edit(&self, id: &str, based_on: &Version, clock: &dyn Clock)
+    pub fn save_edit(&mut self, id: &str, based_on: &Version, clock: &dyn Clock)
                         -> Result<Saved, FsError>;          // bump `updated`, atomic, conflict-checked
-    pub fn restore(&self, id: &str, bytes: &[u8]) -> Result<(), FsError>;   // "discard" in kb edit
+    pub fn restore(&mut self, id: &str, bytes: &[u8]) -> Result<(), FsError>;   // "discard" in kb edit
     pub fn version(&self, id: &str) -> Result<Version, FsError>;
     pub fn tag_counts(&self) -> Vec<(String, u32)>;
     pub fn id_taken(&self, id: &str) -> bool;                // file exists, case-insensitively

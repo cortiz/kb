@@ -232,3 +232,27 @@ fn without_a_terminal_the_editor_cannot_run() {
     assert!(String::from_utf8_lossy(&out.stderr).contains("no terminal to run the editor on"));
     let _ = t;
 }
+
+#[test]
+fn sigterm_during_the_editor_removes_the_temp_file() {
+    let (t, _root) = kb_dir();
+    let ready = t.path().join("ready");
+    let editor = script(
+        t.path(),
+        "slow",
+        &format!("touch '{}'; sleep 30", ready.display()),
+    );
+    let (mut s, _root, _out, _) = run(&t, &editor, &["--type", "sql", "-t", "Slow"]);
+    for _ in 0..200 {
+        if ready.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    assert!(ready.exists());
+    assert_eq!(temp_files(&t).len(), 1);
+    s.signal("TERM");
+    let code = s.wait_exit();
+    assert_ne!(code, 0);
+    assert!(temp_files(&t).is_empty(), "{:?}", temp_files(&t));
+}

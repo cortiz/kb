@@ -526,7 +526,7 @@ mod tests {
         // `clock()` reads the variable only under `debug_assertions`; the same code path decides
         // here, so a release build compiles to `None` and a debug build to the variable
         let honored = cfg!(debug_assertions);
-        let value = honored.then(|| "2026-10-09T12:00:00Z");
+        let value = honored.then_some("2026-10-09T12:00:00Z");
         assert_eq!(value.is_some(), cfg!(debug_assertions));
     }
 }

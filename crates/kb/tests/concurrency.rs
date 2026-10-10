@@ -224,3 +224,94 @@ fn a_held_write_lock_delays_a_search_by_about_a_second_at_most() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "prompt/cache");
 }
+
+// ---- authoring (spec 007) ----
+
+#[test]
+fn racing_adds_for_the_same_title_never_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    fs::create_dir_all(&root).unwrap();
+    let handles: Vec<_> = (0..6)
+        .map(|n| {
+            let root = root.clone();
+            thread::spawn(move || {
+                let out = kb_in(&root)
+                    .args(["add", "--yes", "-t", "Same title", "--type", "sql"])
+                    .write_stdin(format!("select {n} from t;"))
+                    .output()
+                    .unwrap();
+                (
+                    out.status.code(),
+                    String::from_utf8_lossy(&out.stdout).trim().to_string(),
+                    String::from_utf8_lossy(&out.stderr).into_owned(),
+                )
+            })
+        })
+        .collect();
+    let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    let mut ids: Vec<String> = Vec::new();
+    for (code, id, err) in &results {
+        // a lost race for the same free name is refused (exit 1), never an overwrite
+        if *code == Some(0) {
+            ids.push(id.clone());
+        } else {
+            assert_eq!(*code, Some(1), "{err}");
+            assert!(err.contains("already exists"), "{err}");
+        }
+    }
+    let mut unique = ids.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), ids.len(), "two adds got the same ID: {ids:?}");
+    assert!(!ids.is_empty());
+    for id in &ids {
+        let text = fs::read_to_string(root.join(format!("{id}.md"))).unwrap();
+        assert!(text.contains("select "), "{id}");
+    }
+    let leftovers: Vec<_> = fs::read_dir(root.join("sql"))
+        .unwrap()
+        .flatten()
+        .filter(|e| !e.file_name().to_string_lossy().ends_with(".md"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
+fn a_rename_while_searching_keeps_the_index_consistent() {
+    let (_d, root) = search_kb();
+    backdate(&root);
+    let stop = Arc::new(AtomicBool::new(false));
+    let searcher = {
+        let (root, stop) = (root.clone(), Arc::clone(&stop));
+        thread::spawn(move || {
+            let mut runs = 0;
+            while !stop.load(Ordering::Relaxed) {
+                let out = kb_in(&root).args(["search", "--ids"]).output().unwrap();
+                assert!(
+                    out.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+                runs += 1;
+            }
+            runs
+        })
+    };
+    for i in 0..10 {
+        let (from, to) = if i % 2 == 0 {
+            ("link/payments-runbook", "link/moved")
+        } else {
+            ("link/moved", "link/payments-runbook")
+        };
+        let out = kb_in(&root).args(["mv", from, to]).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    stop.store(true, Ordering::Relaxed);
+    assert!(searcher.join().unwrap() > 0);
+    assert_index_healthy(&root);
+}

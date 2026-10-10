@@ -1,5 +1,6 @@
 //! Variable suggestions for literal values (FR-014 to FR-016, research R4).
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::LazyLock;
 
@@ -33,25 +34,31 @@ pub struct VariableSuggestion {
 
 /// Literal values in `body` that could be variables. Names are unique against `declared` and each other.
 pub fn suggest_vars(body: &str, declared: &[VarDecl]) -> Vec<VariableSuggestion> {
-    let mut claimed: Vec<Range<usize>> = REFERENCE
+    // start -> end of every range that is taken; they never overlap, so only the last one that
+    // starts before `r` ends can get in its way
+    type Claimed = BTreeMap<usize, usize>;
+    let mut claimed: Claimed = REFERENCE
         .find_iter(body)
-        .map(|m| m.start()..m.end())
+        .map(|m| (m.start(), m.end()))
         .collect();
-    let free = |claimed: &[Range<usize>], r: &Range<usize>| {
-        claimed.iter().all(|c| r.end <= c.start || r.start >= c.end)
+    let free = |claimed: &Claimed, r: &Range<usize>| {
+        claimed
+            .range(..r.end)
+            .next_back()
+            .is_none_or(|(_, end)| *end <= r.start)
     };
     // (pattern, name, value, kind, options, positions)
     let mut found: Vec<Found> = Vec::new();
-    let mut add = |claimed: &mut Vec<Range<usize>>,
-                   found: &mut Vec<Found>,
-                   pattern: SuggestPattern,
-                   base: &str,
-                   value: &str,
-                   range: Range<usize>| {
+    let add = |claimed: &mut Claimed,
+               found: &mut Vec<Found>,
+               pattern: SuggestPattern,
+               base: &str,
+               value: &str,
+               range: Range<usize>| {
         if !free(claimed, &range) {
             return;
         }
-        claimed.push(range.clone());
+        claimed.insert(range.start, range.end);
         match found
             .iter_mut()
             .find(|f| f.pattern == pattern && f.base == base && f.value == value)
