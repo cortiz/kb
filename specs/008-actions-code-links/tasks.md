@@ -92,17 +92,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 2
 
-- [ ] T021 [P] [US2] Write failing tests for destructive pattern scanner in `crates/kb-core/src/run.rs`: verify all 30 hostile commands in `hostile_commands.txt` are detected as destructive, non-destructive commands pass, and user patterns from config are additive.
-- [ ] T022 [P] [US2] Write failing tests for `RunPlan` builder and secret isolation in `crates/kb-core/src/run.rs`: verify `secret` variables are substituted with `"$KB_SECRET_<NAME>"`, mapped to `secret_env_vars`, secrets never appear in `resolved_command`, non-existent `cwd` returns `MissingCwd` error, and shell defaults to entry's `shell` or `sh`.
-- [ ] T023 [P] [US2] Write failing integration tests for `kb run` CLI in `tests/cli_run.rs`: verify interactive confirmation (`y` to run), destructive confirmation (requires typing `run`), `--yes` without prompt, `--yes` on destructive command rejected without `--force`, exit code forwarding, and signal exit code (`128 + signal`).
-- [ ] T024 [P] [US2] Write failing PTY integration tests in `tests/tui_run_pty.rs`: verify `Ctrl-G` opens confirmation modal, running suspends TUI, terminal input/output works for interactive commands, post-run pause screen shows exit code and duration, and raw mode is restored cleanly.
+- [X] T021 [P] [US2] Write failing tests for destructive pattern scanner in `crates/kb-core/src/run.rs`: verify all 30 hostile commands in `hostile_commands.txt` are detected as destructive, non-destructive commands pass, and user patterns from config are additive.
+- [X] T022 [P] [US2] Write failing tests for `RunPlan` builder and secret isolation in `crates/kb-core/src/run.rs`: verify `secret` variables are substituted with `"$KB_SECRET_<NAME>"`, mapped to `secret_env_vars`, secrets never appear in `resolved_command`, non-existent `cwd` returns `MissingCwd` error, and shell defaults to entry's `shell` or `sh`.
+- [X] T023 [P] [US2] Write failing integration tests for `kb run` CLI in `tests/cli_run.rs`: verify interactive confirmation (`y` to run), destructive confirmation (requires typing `run`), `--yes` without prompt, `--yes` on destructive command rejected without `--force`, exit code forwarding, and signal exit code (`128 + signal`).
+- [X] T024 [P] [US2] Write failing PTY integration tests in `tests/tui_run_pty.rs`: verify `Ctrl-G` opens confirmation modal, running suspends TUI, terminal input/output works for interactive commands, post-run pause screen shows exit code and duration, and raw mode is restored cleanly.
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Implement `RunService::check_destructive` with built-in compiled regexes in `crates/kb-core/src/run.rs`. Makes T021 pass.
-- [ ] T026 [US2] Implement `RunService::build_run_plan` with secret env var extraction and shell quotation in `crates/kb-core/src/run.rs`. Makes T022 pass.
-- [ ] T027 [US2] Implement `kb run` CLI subcommand in `crates/kb/src/commands.rs` supporting `--yes`, `--force`, `--var`, and exit code forwarding. Makes T023 pass.
-- [ ] T028 [US2] Implement TUI Run Modal (`run_modal.rs`) and execution handler in `crates/kb/src/tui/app.rs`: render confirmation details, prompt for `run` on destructive commands, invoke `Platform::run_interactive_command`, display pause banner, and bind `Ctrl-G` in `crates/kb/src/tui/keys.rs`. Makes T024 pass.
+- [X] T025 [US2] Implement `RunService::check_destructive` with built-in compiled regexes in `crates/kb-core/src/run.rs`. Makes T021 pass.
+- [X] T026 [US2] Implement `RunService::build_run_plan` with secret env var extraction and shell quotation in `crates/kb-core/src/run.rs`. Makes T022 pass.
+- [X] T027 [US2] Implement `kb run` CLI subcommand in `crates/kb/src/commands.rs` supporting `--yes`, `--force`, `--var`, and exit code forwarding. Makes T023 pass.
+- [X] T028 [US2] Implement TUI Run Modal (`run_modal.rs`) and execution handler in `crates/kb/src/tui/app.rs`: render confirmation details, prompt for `run` on destructive commands, invoke `Platform::run_interactive_command`, display pause banner, and bind `Ctrl-G` in `crates/kb/src/tui/keys.rs`. Makes T024 pass.
 
 **Checkpoint**: All 30 destructive commands require typed `run` confirmation; secrets never appear in process listings; terminal restores cleanly after runs.
 
@@ -116,17 +116,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 4
 
-- [ ] T029 [P] [US4] Write failing tests for local clone discovery and caching in `crates/kb-core/src/code/clone.rs`: verify lookup in `code.repos`, 1-level search in `code.search_paths`, SSH/HTTPS URL normalization (`git@github.com:...` == `https://github.com/...`), caching in `.kb/clones.json`, and cache invalidation on missing path.
-- [ ] T030 [P] [US4] Write failing tests for git diff line mapping in `crates/kb-core/src/code/drift.rs`: using `scripted_repo.sh`, test mapping pinned lines through `git diff -M -U0` hunks for `current`, `moved`, `changed`, `renamed`, and `gone`, tracking branch resolution priority (`code.branch` -> config -> `origin/HEAD` -> `origin/main` -> `origin/master`), and symbol search fallback.
-- [ ] T031 [P] [US4] Write failing tests for format-preserving re-pinning in `crates/kb-core/src/code/repin.rs`: verify byte-for-byte preservation of entry frontmatter comments and body, updating only `ref`, `path`, `line`, `end_line`, and `updated`, and rejecting write on concurrent file modifications.
-- [ ] T032 [P] [US4] Write failing integration tests for `kb code` CLI in `tests/cli_code.rs`: verify `kb code check [--json] [--fetch]`, exit 1 on drift, `kb code repin <id>... | --all [-y]`, and skipping `gone`/`unknown` entries.
+- [X] T029 [P] [US4] Write failing tests for local clone discovery and caching in `crates/kb-core/src/code/clone.rs`: verify lookup in `code.repos`, 1-level search in `code.search_paths`, SSH/HTTPS URL normalization (`git@github.com:...` == `https://github.com/...`), caching in `.kb/clones.json`, and cache invalidation on missing path.
+- [X] T030 [P] [US4] Write failing tests for git diff line mapping in `crates/kb-core/src/code/drift.rs`: using `scripted_repo.sh`, test mapping pinned lines through `git diff -M -U0` hunks for `current`, `moved`, `changed`, `renamed`, and `gone`, tracking branch resolution priority (`code.branch` -> config -> `origin/HEAD` -> `origin/main` -> `origin/master`), and symbol search fallback.
+- [X] T031 [P] [US4] Write failing tests for format-preserving re-pinning in `crates/kb-core/src/code/repin.rs`: verify byte-for-byte preservation of entry frontmatter comments and body, updating only `ref`, `path`, `line`, `end_line`, and `updated`, and rejecting write on concurrent file modifications.
+- [X] T032 [P] [US4] Write failing integration tests for `kb code` CLI in `tests/cli_code.rs`: verify `kb code check [--json] [--fetch]`, exit 1 on drift, `kb code repin <id>... | --all [-y]`, and skipping `gone`/`unknown` entries.
 
 ### Implementation for User Story 4
 
-- [ ] T033 [US4] Implement `CodeService::find_clone`, remote URL normalizer, and `.kb/clones.json` caching in `crates/kb-core/src/code/clone.rs`. Makes T029 pass.
-- [ ] T034 [US4] Implement `CodeService::check_drift`, `git diff -M -U0` hunk parser, tracking branch resolver, and symbol fallback search in `crates/kb-core/src/code/drift.rs`. Makes T030 pass.
-- [ ] T035 [US4] Implement `CodeService::repin_entry` using format-preserving frontmatter updates and mtime check in `crates/kb-core/src/code/repin.rs`. Makes T031 pass.
-- [ ] T036 [US4] Implement `kb code check` and `kb code repin` CLI subcommands in `crates/kb/src/commands.rs`. Makes T032 pass.
+- [X] T033 [US4] Implement `CodeService::find_clone`, remote URL normalizer, and `.kb/clones.json` caching in `crates/kb-core/src/code/clone.rs`. Makes T029 pass.
+- [X] T034 [US4] Implement `CodeService::check_drift`, `git diff -M -U0` hunk parser, tracking branch resolver, and symbol fallback search in `crates/kb-core/src/code/drift.rs`. Makes T030 pass.
+- [X] T035 [US4] Implement `CodeService::repin_entry` using format-preserving frontmatter updates and mtime check in `crates/kb-core/src/code/repin.rs`. Makes T031 pass.
+- [X] T036 [US4] Implement `kb code check` and `kb code repin` CLI subcommands in `crates/kb/src/commands.rs`. Makes T032 pass.
 
 **Checkpoint**: `kb code check` accurately detects drift on fixture repository; `kb code repin` updates only target fields byte-for-byte.
 
@@ -140,17 +140,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 3
 
-- [ ] T037 [P] [US3] Write failing tests for git snippet extraction in `crates/kb-core/src/code/snippet.rs`: verify `git show <ref>:<path>` extracts lines with 3 lines context before and 8 lines after, and line range extraction when `end_line` is present.
-- [ ] T038 [P] [US3] Write failing tests for web permalink generation in `crates/kb-core/src/code/permalink.rs`: verify permalink formatting for GitHub, GitLab, Bitbucket, and custom `code.web_url` template, using full commit SHA and line/range anchors.
-- [ ] T039 [P] [US3] Write failing tests for `kb code show` CLI in `tests/cli_code.rs`: verify text snippet output and `--json` format.
-- [ ] T040 [P] [US3] Write failing PTY integration tests in `tests/tui_code_pty.rs`: verify `Ctrl-O` on code entry opens Code View (Screen 3), `Enter` triggers default open (`web`), `g` opens web permalink, `v` opens VS Code, `i` opens IntelliJ, `y` copies `path:line`, `Y` copies permalink, `u` re-pins, `F` fetches and re-checks, and `Esc` returns to list.
+- [X] T037 [P] [US3] Write failing tests for git snippet extraction in `crates/kb-core/src/code/snippet.rs`: verify `git show <ref>:<path>` extracts lines with 3 lines context before and 8 lines after, and line range extraction when `end_line` is present.
+- [X] T038 [P] [US3] Write failing tests for web permalink generation in `crates/kb-core/src/code/permalink.rs`: verify permalink formatting for GitHub, GitLab, Bitbucket, and custom `code.web_url` template, using full commit SHA and line/range anchors.
+- [X] T039 [P] [US3] Write failing tests for `kb code show` CLI in `tests/cli_code.rs`: verify text snippet output and `--json` format.
+- [X] T040 [P] [US3] Write failing PTY integration tests in `tests/tui_code_pty.rs`: verify `Ctrl-O` on code entry opens Code View (Screen 3), `Enter` triggers default open (`web`), `g` opens web permalink, `v` opens VS Code, `i` opens IntelliJ, `y` copies `path:line`, `Y` copies permalink, `u` re-pins, `F` fetches and re-checks, and `Esc` returns to list.
 
 ### Implementation for User Story 3
 
-- [ ] T041 [US3] Implement `CodeService::get_snippet` in `crates/kb-core/src/code/snippet.rs`. Makes T037 pass.
-- [ ] T042 [US3] Implement `CodeService::build_permalink` for GitHub, GitLab, Bitbucket, and custom hosts in `crates/kb-core/src/code/permalink.rs`. Makes T038 pass.
-- [ ] T043 [US3] Implement `kb code show` CLI subcommand in `crates/kb/src/commands.rs`. Makes T039 pass.
-- [ ] T044 [US3] Implement TUI Code View (Screen 3) in `crates/kb/src/tui/code_view.rs`: header metadata, syntax-highlighted code snippet box with target line marker (`▶`), drift status badge, disabled state when clone is missing, and key handling for `Enter`, `g`, `v`, `i`, `y`, `Y`, `u`, `F`, `Ctrl-E`, `Esc`. Wire into `crates/kb/src/tui/app.rs`. Makes T040 pass.
+- [X] T041 [US3] Implement `CodeService::get_snippet` in `crates/kb-core/src/code/snippet.rs`. Makes T037 pass.
+- [X] T042 [US3] Implement `CodeService::build_permalink` for GitHub, GitLab, Bitbucket, and custom hosts in `crates/kb-core/src/code/permalink.rs`. Makes T038 pass.
+- [X] T043 [US3] Implement `kb code show` CLI subcommand in `crates/kb/src/commands.rs`. Makes T039 pass.
+- [X] T044 [US3] Implement TUI Code View (Screen 3) in `crates/kb/src/tui/code_view.rs`: header metadata, syntax-highlighted code snippet box with target line marker (`▶`), drift status badge, disabled state when clone is missing, and key handling for `Enter`, `g`, `v`, `i`, `y`, `Y`, `u`, `F`, `Ctrl-E`, `Esc`. Wire into `crates/kb/src/tui/app.rs`. Makes T040 pass.
 
 **Checkpoint**: Screen 3 renders code snippet with drift status; keys open in browser or desktop editors seamlessly.
 
@@ -164,14 +164,14 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 5
 
-- [ ] T045 [P] [US5] Write failing integration tests for `kb actions` CLI in `tests/cli_actions.rs`: verify plain text list and `--json` schema output for each entry type.
-- [ ] T046 [P] [US5] Write failing PTY integration tests in `tests/tui_pty.rs`: verify `Alt-A` and `F2` open Action Menu popup overlay, pressing action key runs action, for `code` entries `Alt-A` opens Code View, and `Esc` closes menu.
+- [X] T045 [P] [US5] Write failing integration tests for `kb actions` CLI in `tests/cli_actions.rs`: verify plain text list and `--json` schema output for each entry type.
+- [X] T046 [P] [US5] Write failing PTY integration tests in `tests/tui_pty.rs`: verify `Alt-A` and `F2` open Action Menu popup overlay, pressing action key runs action, for `code` entries `Alt-A` opens Code View, and `Esc` closes menu.
 
 ### Implementation for User Story 5
 
-- [ ] T047 [US5] Implement `kb actions` CLI subcommand in `crates/kb/src/commands.rs`. Makes T045 pass.
-- [ ] T048 [US5] Implement TUI Action Menu modal (`action_view.rs`) in `crates/kb/src/tui/action_view.rs`: floating overlay window listing actions with keys, primary action first. Wire `Alt-A` and `F2` in `crates/kb/src/tui/keys.rs` and `crates/kb/src/tui/app.rs`. Makes T046 pass.
-- [ ] T049 [US5] Update TUI footer key bar in `crates/kb/src/tui/view.rs` to dynamically display the actions available for the currently selected entry type (FR-038).
+- [X] T047 [US5] Implement `kb actions` CLI subcommand in `crates/kb/src/commands.rs`. Makes T045 pass.
+- [X] T048 [US5] Implement TUI Action Menu modal (`action_view.rs`) in `crates/kb/src/tui/action_view.rs`: floating overlay window listing actions with keys, primary action first. Wire `Alt-A` and `F2` in `crates/kb/src/tui/keys.rs` and `crates/kb/src/tui/app.rs`. Makes T046 pass.
+- [X] T049 [US5] Update TUI footer key bar in `crates/kb/src/tui/view.rs` to dynamically display the actions available for the currently selected entry type (FR-038).
 
 **Checkpoint**: `Alt-A` displays all available actions across all entry types; `kb actions` prints action listings.
 
@@ -185,13 +185,13 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 6
 
-- [ ] T050 [P] [US6] Write failing tests for custom action parsing and placeholder validation in `crates/kb-core/src/action.rs`: verify `input` defaults to `stdin` if omitted, `input = "arg"` appends payload as last argument, `{{field}}` placeholders are shell-escaped, missing placeholder fields disable action, and key conflicts with built-in keys report warning and disable action.
-- [ ] T051 [P] [US6] Write failing integration tests for custom actions in `tests/cli_run.rs`: verify `kb run <id> --action <name>` runs custom command, pipes payload via stdin, interpolates fields, and applies destructive checks.
+- [X] T050 [P] [US6] Write failing tests for custom action parsing and placeholder validation in `crates/kb-core/src/action.rs`: verify `input` defaults to `stdin` if omitted, `input = "arg"` appends payload as last argument, `{{field}}` placeholders are shell-escaped, missing placeholder fields disable action, and key conflicts with built-in keys report warning and disable action.
+- [X] T051 [P] [US6] Write failing integration tests for custom actions in `tests/cli_run.rs`: verify `kb run <id> --action <name>` runs custom command, pipes payload via stdin, interpolates fields, and applies destructive checks.
 
 ### Implementation for User Story 6
 
-- [ ] T052 [US6] Implement custom action resolution, field placeholder substitution, default `stdin` input handling, and key conflict detection in `crates/kb-core/src/action.rs` and `crates/kb-core/src/run.rs`. Makes T050 pass.
-- [ ] T053 [US6] Wire `--action <name>` flag into `kb run` CLI subcommand in `crates/kb/src/commands.rs` and Action Menu in `crates/kb/src/tui/action_view.rs`. Makes T051 pass.
+- [X] T052 [US6] Implement custom action resolution, field placeholder substitution, default `stdin` input handling, and key conflict detection in `crates/kb-core/src/action.rs` and `crates/kb-core/src/run.rs`. Makes T050 pass.
+- [X] T053 [US6] Wire `--action <name>` flag into `kb run` CLI subcommand in `crates/kb/src/commands.rs` and Action Menu in `crates/kb/src/tui/action_view.rs`. Makes T051 pass.
 
 **Checkpoint**: Custom actions execute smoothly via CLI `--action` and TUI Action Menu.
 
@@ -201,10 +201,10 @@ description: "Task list for M7: Actions and Code Links"
 
 **Purpose**: Enter key customization (`tui.enter = "primary"`), performance budget validation, documentation, and final end-to-end verification.
 
-- [ ] T054 [P] Implement `tui.enter = "primary"` support in `crates/kb/src/tui/app.rs` and `crates/kb/src/tui/keys.rs`: when set to `primary`, Enter runs primary open action on `link`, `sumo`, `cw`, `code`; copies payload on `cmd`, `sql`, `prompt`. Enter MUST never run a command (FR-040). Add PTY tests in `tests/tui_pty.rs`.
-- [ ] T055 [P] Implement performance benchmark tests in `tests/perf.rs`: assert drift check on single entry completes in $\le 500$ ms on 100,000-commit repository without fetching (FR-033), and `kb code check` across 200 entries in 10 repos finishes in $\le 10$ seconds (SC-006).
-- [ ] T056 [P] Update user documentation in `README.md`: document new CLI subcommands (`kb open`, `kb run`, `kb actions`, `kb code check/repin/show`), new keybindings (`Ctrl-O`, `Ctrl-G`, `Alt-A`, `F2`), Code View controls, and `config.toml` options (`[sumo]`, `[aws]`, `[code]`, `[run]`, `[[actions.<type>]]`).
-- [ ] T057 Execute full end-to-end verification scenarios from `specs/008-actions-code-links/quickstart.md` (including manual verification of SC-001 against real Sumo and AWS consoles), and verify `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --check` are 100% clean.
+- [X] T054 [P] Implement `tui.enter = "primary"` support in `crates/kb/src/tui/app.rs` and `crates/kb/src/tui/keys.rs`: when set to `primary`, Enter runs primary open action on `link`, `sumo`, `cw`, `code`; copies payload on `cmd`, `sql`, `prompt`. Enter MUST never run a command (FR-040). Add PTY tests in `tests/tui_pty.rs`.
+- [X] T055 [P] Implement performance benchmark tests in `tests/perf.rs`: assert drift check on single entry completes in $\le 500$ ms on 100,000-commit repository without fetching (FR-033), and `kb code check` across 200 entries in 10 repos finishes in $\le 10$ seconds (SC-006).
+- [X] T056 [P] Update user documentation in `README.md`: document new CLI subcommands (`kb open`, `kb run`, `kb actions`, `kb code check/repin/show`), new keybindings (`Ctrl-O`, `Ctrl-G`, `Alt-A`, `F2`), Code View controls, and `config.toml` options (`[sumo]`, `[aws]`, `[code]`, `[run]`, `[[actions.<type>]]`).
+- [X] T057 Execute full end-to-end verification scenarios from `specs/008-actions-code-links/quickstart.md` (including manual verification of SC-001 against real Sumo and AWS consoles), and verify `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --check` are 100% clean.
 
 ---
 

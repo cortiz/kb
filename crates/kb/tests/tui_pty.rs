@@ -1245,3 +1245,39 @@ fn a_tag_chip_is_visible_at_eighty_columns() {
     s.send(CTRL_C);
     assert_eq!(s.wait_exit(), 130);
 }
+
+#[test]
+fn tui_enter_primary_opens_link_and_copies_cmd() {
+    let (_t, home, root) = kb_home("search");
+    write_config(&home, "[tui]\nenter = \"primary\"\n");
+
+    // Test 1: link entry opens via opener
+    let mut spec1 = Spec::new(&["type:link"], &home, &root).unset("KB_TUI_ENTER");
+    spec1.allow_clipboard = true;
+    let mut s1 = Session::spawn(&spec1);
+    s1.wait_for("Enter pick");
+    s1.send(ENTER);
+    assert_eq!(s1.wait_exit(), 0);
+    let calls1 = s1.guarded_calls();
+    assert!(
+        calls1
+            .iter()
+            .any(|c| c.contains("open") && c.contains("http")),
+        "expected browser open call in guarded calls: {calls1:?}"
+    );
+
+    // Test 2: cmd entry copies payload and never runs command
+    let mut spec2 = Spec::new(&["type:cmd"], &home, &root).unset("KB_TUI_ENTER");
+    spec2.allow_clipboard = true;
+    let mut s2 = Session::spawn(&spec2);
+    s2.wait_for("Enter pick");
+    s2.send(ENTER);
+    assert_eq!(s2.wait_exit(), 0);
+    let calls2 = s2.guarded_calls();
+    assert!(
+        !calls2
+            .iter()
+            .any(|c| c.contains("open") && c.contains("http")),
+        "cmd should never open URL: {calls2:?}"
+    );
+}

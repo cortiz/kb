@@ -33,6 +33,14 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
         super::form_view::draw_form(state, form, theme, area, buf);
         return;
     }
+    if let (Screen::Ok(_), Some(modal)) = (&screen, &state.run_modal) {
+        super::run_modal::draw_run_modal(state, modal, theme, area, buf);
+        return;
+    }
+    if let (Screen::Ok(_), Some(cv)) = (&screen, &state.code_view) {
+        super::code_view::draw_code_view(state, cv, theme, area, buf);
+        return;
+    }
     let Screen::Ok(l) = screen else {
         let msg = "Terminal too small";
         let x = area.x + area.width.saturating_sub(width(msg) as u16) / 2;
@@ -50,6 +58,9 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
         draw_preview(state, theme, preview, buf);
     }
     draw_keybar(state, theme, &l, buf);
+    if let Some(ref menu) = state.action_menu {
+        super::action_view::draw_action_menu(state, menu, theme, area, buf);
+    }
     if state.overlay == Overlay::Help {
         draw_help(theme, area, buf);
     }
@@ -784,9 +795,14 @@ fn bar_kind(state: &AppState) -> BarKind {
             } else if state.results.is_empty() {
                 BarKind::NoResults { text_empty: blank }
             } else {
+                let entry_type = state
+                    .selected_id
+                    .as_ref()
+                    .and_then(|_| state.selected_result().map(|r| r.entry_type));
                 BarKind::Results {
                     text_empty: blank,
                     preview_scrolls: preview_scrolls(state),
+                    entry_type,
                 }
             }
         }

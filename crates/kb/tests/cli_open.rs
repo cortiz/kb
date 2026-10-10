@@ -2,9 +2,9 @@
 
 mod support;
 
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde_json::Value;
 use support::{fake_clipboard, kb_in, path_with};
 
 fn actions_kb() -> (tempfile::TempDir, PathBuf) {
@@ -43,7 +43,12 @@ fn open_link_launches_browser_and_records_use() {
         .output()
         .unwrap();
 
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let opened = fs::read_to_string(opened_log).expect("opened.log exists");
     assert!(
         opened.contains("https://manage.auth0.com/dashboard/us/example/scopes"),
@@ -70,7 +75,12 @@ fn open_sumo_with_configured_base_url_and_resolved_vars() {
         .output()
         .unwrap();
 
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let opened = fs::read_to_string(opened_log).expect("opened.log exists");
     assert!(
         opened.contains("https://service.us2.sumologic.com/ui/index.html#section/search/"),
@@ -89,7 +99,9 @@ fn open_sumo_missing_base_url_copies_query_and_explains() {
     let (_clip_name, clip_dir, clip_file, clip_env) = fake_clipboard(d.path());
 
     let mut combined_paths = vec![clip_dir, opener_dir];
-    combined_paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    combined_paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
     let path_val = std::env::join_paths(combined_paths).unwrap();
 
     let mut cmd = kb_in(&root);
@@ -114,7 +126,10 @@ fn open_sumo_missing_base_url_copies_query_and_explains() {
 
     // Query WAS copied to clipboard
     let copied = fs::read_to_string(&clip_file).expect("query copied to clipboard");
-    assert!(copied.contains("_sourceCategory=prod/lambda/authorizer"), "copied: {copied}");
+    assert!(
+        copied.contains("_sourceCategory=prod/lambda/authorizer"),
+        "copied: {copied}"
+    );
 }
 
 #[test]
@@ -130,13 +145,21 @@ fn open_cw_with_log_groups_and_resolved_range() {
         .output()
         .unwrap();
 
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let opened = fs::read_to_string(opened_log).expect("opened.log exists");
     assert!(
         opened.contains("https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:logs-insights$3FqueryDetail$3D~("),
         "opened content: {opened}"
     );
-    assert!(opened.contains("start~'-1800'"), "range -30m converted to -1800s: {opened}");
+    assert!(
+        opened.contains("start~'-1800'"),
+        "range -30m converted to -1800s: {opened}"
+    );
     assert!(
         opened.contains("source~(~'/aws/lambda/prod-authorizer'~'/aws/lambda/shared-auth')"),
         "log groups present: {opened}"
@@ -150,7 +173,9 @@ fn open_ssh_fallback_prints_and_copies_url() {
     let (_clip_name, clip_dir, clip_file, clip_env) = fake_clipboard(d.path());
 
     let mut combined_paths = vec![clip_dir, opener_dir];
-    combined_paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    combined_paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
     let path_val = std::env::join_paths(combined_paths).unwrap();
 
     let mut cmd = kb_in(&root);
@@ -166,7 +191,12 @@ fn open_ssh_fallback_prints_and_copies_url() {
     }
     let out = cmd.output().unwrap();
 
-    assert_eq!(out.status.code(), Some(0), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.contains("https://manage.auth0.com/dashboard/us/example/scopes"),

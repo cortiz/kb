@@ -21,7 +21,7 @@
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit
+ ↑↓ select · Enter pick · ^G run · ^E edit · Alt-A actions · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 fg=245
@@ -101,4 +101,4 @@
 21:0..1 fg=240
 21:79..80 fg=240
 22:0..80 fg=240
-23:1..74 fg=245
+23:1..78 fg=245

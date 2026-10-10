@@ -34,5 +34,10 @@ rusqlite.workspace = true
 vt100.workspace = true
 portable-pty.workspace = true
 
+[[test]]
+name = "perf"
+path = "../../tests/perf.rs"
+
 [lints]
 workspace = true
+

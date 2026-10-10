@@ -87,6 +87,7 @@ pub fn run_interactive_command(
     command: &str,
     cwd: Option<&Path>,
     env_vars: &[(String, String)],
+    stdin_payload: Option<&str>,
 ) -> io::Result<RunResult> {
     use std::os::unix::process::ExitStatusExt;
 
@@ -100,32 +101,64 @@ pub fn run_interactive_command(
         cmd.env(k, v);
     }
 
-    if let Ok(tty) = open_tty()
-        && let (Ok(in_f), Ok(out_f), Ok(err_f)) =
-            (tty.try_clone(), tty.try_clone(), tty.try_clone())
-    {
-        cmd.stdin(Stdio::from(in_f))
-            .stdout(Stdio::from(out_f))
-            .stderr(Stdio::from(err_f));
-    }
-
-    let mut child = cmd.spawn()?;
-    let status = child.wait()?;
-    let duration = start.elapsed();
-
-    let (exit_code, killed_by_signal) = match status.code() {
-        Some(code) => (code, None),
-        None => {
-            let sig = status.signal().unwrap_or(0);
-            (128 + sig, Some(sig))
+    if let Some(payload) = stdin_payload {
+        cmd.stdin(Stdio::piped());
+        if let Ok(tty) = open_tty()
+            && let (Ok(out_f), Ok(err_f)) = (tty.try_clone(), tty.try_clone())
+        {
+            cmd.stdout(Stdio::from(out_f)).stderr(Stdio::from(err_f));
         }
-    };
 
-    Ok(RunResult {
-        exit_code,
-        duration,
-        killed_by_signal,
-    })
+        let mut child = cmd.spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            let _ = stdin.write_all(payload.as_bytes());
+        }
+
+        let status = child.wait()?;
+        let duration = start.elapsed();
+
+        let (exit_code, killed_by_signal) = match status.code() {
+            Some(code) => (code, None),
+            None => {
+                let sig = status.signal().unwrap_or(0);
+                (128 + sig, Some(sig))
+            }
+        };
+
+        Ok(RunResult {
+            exit_code,
+            duration,
+            killed_by_signal,
+        })
+    } else {
+        if let Ok(tty) = open_tty()
+            && let (Ok(in_f), Ok(out_f), Ok(err_f)) =
+                (tty.try_clone(), tty.try_clone(), tty.try_clone())
+        {
+            cmd.stdin(Stdio::from(in_f))
+                .stdout(Stdio::from(out_f))
+                .stderr(Stdio::from(err_f));
+        }
+
+        let mut child = cmd.spawn()?;
+        let status = child.wait()?;
+        let duration = start.elapsed();
+
+        let (exit_code, killed_by_signal) = match status.code() {
+            Some(code) => (code, None),
+            None => {
+                let sig = status.signal().unwrap_or(0);
+                (128 + sig, Some(sig))
+            }
+        };
+
+        Ok(RunResult {
+            exit_code,
+            duration,
+            killed_by_signal,
+        })
+    }
 }
 
 // ---- programs on PATH ----
@@ -798,12 +831,12 @@ mod tests {
 
     #[test]
     fn run_interactive_command_execution_and_signal_mapping() {
-        let res = run_interactive_command("sh", "exit 42", None, &[]).unwrap();
+        let res = run_interactive_command("sh", "exit 42", None, &[], None).unwrap();
         assert_eq!(res.exit_code, 42);
         assert!(res.killed_by_signal.is_none());
         assert!(res.duration.as_millis() < 5000);
 
-        let res_sig = run_interactive_command("sh", "kill -TERM $$", None, &[]).unwrap();
+        let res_sig = run_interactive_command("sh", "kill -TERM $$", None, &[], None).unwrap();
         assert_eq!(res_sig.exit_code, 128 + 15);
         assert_eq!(res_sig.killed_by_signal, Some(15));
 
@@ -813,6 +846,7 @@ mod tests {
             "test -f marker && test \"$MY_VAR\" = 'special'",
             Some(d.path()),
             &[("MY_VAR".to_string(), "special".to_string())],
+            None,
         );
         assert_eq!(res_env.unwrap().exit_code, 1);
         std::fs::write(d.path().join("marker"), "ok").unwrap();
@@ -821,7 +855,22 @@ mod tests {
             "test -f marker && test \"$MY_VAR\" = 'special'",
             Some(d.path()),
             &[("MY_VAR".to_string(), "special".to_string())],
+            None,
         );
         assert_eq!(res_env2.unwrap().exit_code, 0);
+
+        let out_file = d.path().join("stdin_out.txt");
+        let res_stdin = run_interactive_command(
+            "sh",
+            &format!("cat > '{}'", out_file.display()),
+            None,
+            &[],
+            Some("piped content from stdin"),
+        );
+        assert_eq!(res_stdin.unwrap().exit_code, 0);
+        assert_eq!(
+            std::fs::read_to_string(out_file).unwrap(),
+            "piped content from stdin"
+        );
     }
 }

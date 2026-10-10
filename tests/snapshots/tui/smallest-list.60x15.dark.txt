@@ -12,7 +12,7 @@
 │        #docs                                             │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ? help · Esc quit
+ ↑↓ select · Enter pick · Alt-A actions · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 fg=245
@@ -58,4 +58,4 @@
 12:0..1 fg=240
 12:59..60 fg=240
 13:0..60 fg=240
-14:1..54 fg=245
+14:1..59 fg=245

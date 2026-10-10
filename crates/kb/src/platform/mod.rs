@@ -271,6 +271,7 @@ pub trait Platform {
         command: &str,
         cwd: Option<&Path>,
         env_vars: &[(String, String)],
+        stdin_payload: Option<&str>,
     ) -> io::Result<RunResult>;
 }
 
@@ -346,6 +347,25 @@ fn xdg_or(xdg: Option<&str>, home: Option<&Path>, fallback: &str) -> Option<Path
         .filter(|p| p.is_absolute())
         .or_else(|| home.map(|h| h.join(fallback)))
         .map(|base| base.join("kb"))
+}
+
+/// A [`kb_core::code::GitRunner`] using system git directly within the platform layer.
+#[derive(Debug, Clone, Default)]
+pub struct SystemGitRunner;
+
+impl kb_core::code::GitRunner for SystemGitRunner {
+    fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, kb_core::code::GitError> {
+        let output = unix::run_git(cwd, args, Duration::from_secs(10))
+            .map_err(|e| kb_core::code::GitError::Io(e.to_string()))?;
+        if output.success() {
+            Ok(output.stdout)
+        } else {
+            Err(kb_core::code::GitError::CommandFailed {
+                exit_code: output.code,
+                stderr: output.stderr,
+            })
+        }
+    }
 }
 
 #[cfg(test)]

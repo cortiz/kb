@@ -15,6 +15,7 @@ use super::input::{Change, LineEditor, SearchInput};
 use super::keys::{self, Command, Key, Mode};
 use super::layout::{self, Screen};
 use super::preview::PreviewModel;
+use super::run_modal::RunModalState;
 
 /// Results asked for at first; doubled when the selection nears the end.
 pub const PAGE: usize = 60;
@@ -201,6 +202,15 @@ pub enum Action {
     /// The new entry was written.
     Saved(String),
     SaveFailed(String),
+    /// Open the run confirmation modal.
+    OpenRunModal {
+        id: String,
+        plan: kb_core::run::RunPlan,
+    },
+    /// Open the code view (Screen 3).
+    OpenCodeView(Box<super::code_view::CodeViewState>),
+    /// Open the action menu modal.
+    OpenActionMenu(Box<super::action_view::ActionMenuState>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +236,31 @@ pub enum Effect {
     SubmitForm(Box<Submission>),
     /// Ctrl-O: open the selected entry's primary link or console.
     OpenEntry(String),
+    /// Alt-A / F2: open the action menu modal.
+    OpenActionMenu(String),
+    /// Run a custom action.
+    RunCustomAction {
+        id: String,
+        action_name: String,
+    },
+    /// Code view open target (web, vscode, idea).
+    OpenCodeTarget {
+        id: String,
+        target: String,
+    },
+    CopyCodeLocation(String),
+    CopyCodePermalink(String),
+    RepinCodeEntry {
+        id: String,
+        report: Box<kb_core::code::DriftReport>,
+    },
+    FetchAndRecheckCode(String),
+    /// Ctrl-G: run the selected cmd entry.
+    RunEntry(String),
+    ExecuteRun {
+        id: String,
+        plan: kb_core::run::RunPlan,
+    },
     EditEntry(String),
     /// Ctrl-N: read the clipboard (and ask for the tags in use) to open the add form.
     ReadClipboard,
@@ -283,6 +318,12 @@ pub struct AppState {
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// The add form, when it is open.
     pub add: Option<Box<AddState>>,
+    /// The run confirmation/pause modal, when it is open.
+    pub run_modal: Option<Box<RunModalState>>,
+    /// Screen 3: Code View, when it is open.
+    pub code_view: Option<Box<super::code_view::CodeViewState>>,
+    /// Action Menu modal, when it is open.
+    pub action_menu: Option<Box<super::action_view::ActionMenuState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
@@ -325,6 +366,9 @@ impl AppState {
             form: None,
             form_session: std::collections::BTreeMap::new(),
             add: None,
+            run_modal: None,
+            code_view: None,
+            action_menu: None,
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
@@ -351,7 +395,11 @@ impl AppState {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
-        } else if self.form.is_some() || self.add.is_some() {
+        } else if self.form.is_some()
+            || self.add.is_some()
+            || self.code_view.is_some()
+            || self.action_menu.is_some()
+        {
             Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
@@ -480,11 +528,20 @@ impl AppState {
                 if self.add.is_some() {
                     return self.add_key(e);
                 }
+                if self.run_modal.is_some() {
+                    return self.run_modal_key(e);
+                }
+                if self.action_menu.is_some() {
+                    return self.action_menu_key(e, now);
+                }
                 if self.prompt.is_some() {
                     return self.prompt_key(e, now);
                 }
                 if self.form.is_some() {
                     return self.form_key(e);
+                }
+                if self.code_view.is_some() {
+                    return self.code_view_key(e, now);
                 }
                 match Key::from_event(e).and_then(|k| keys::resolve(k, self.mode())) {
                     Some(command) => self.command(command, now),
@@ -694,6 +751,23 @@ impl AppState {
                 }
                 Vec::new()
             }
+            Action::OpenRunModal { id, plan } => {
+                self.run_modal = Some(Box::new(RunModalState::Confirming {
+                    id,
+                    plan,
+                    input: String::new(),
+                    error: None,
+                }));
+                Vec::new()
+            }
+            Action::OpenCodeView(cv) => {
+                self.code_view = Some(cv);
+                Vec::new()
+            }
+            Action::OpenActionMenu(menu) => {
+                self.action_menu = Some(menu);
+                Vec::new()
+            }
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
@@ -804,6 +878,221 @@ impl AppState {
                 vec![Effect::SubmitForm(Box::new(form.submission(print)))]
             }
         }
+    }
+
+    /// A key while the run confirmation / pause modal is open.
+    fn run_modal_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(modal) = self.run_modal.as_mut() else {
+            return Vec::new();
+        };
+        match modal.as_mut() {
+            RunModalState::Paused { .. } => {
+                self.run_modal = None;
+                Vec::new()
+            }
+            RunModalState::Confirming {
+                id,
+                plan,
+                input,
+                error,
+            } => {
+                if key.same(Key::new(keys::Code::Esc, 0)) {
+                    self.run_modal = None;
+                    return Vec::new();
+                }
+                if plan.requires_typed_run {
+                    match key.code {
+                        keys::Code::Char(c) if key.mods == 0 => {
+                            input.push(c);
+                            *error = None;
+                            Vec::new()
+                        }
+                        keys::Code::Backspace => {
+                            input.pop();
+                            *error = None;
+                            Vec::new()
+                        }
+                        keys::Code::Enter => {
+                            if input.trim() == "run" {
+                                let id = id.clone();
+                                let plan = plan.clone();
+                                vec![Effect::ExecuteRun { id, plan }]
+                            } else {
+                                *error = Some("Type 'run' to execute".to_string());
+                                Vec::new()
+                            }
+                        }
+                        _ => Vec::new(),
+                    }
+                } else {
+                    match key.code {
+                        keys::Code::Enter => {
+                            let id = id.clone();
+                            let plan = plan.clone();
+                            vec![Effect::ExecuteRun { id, plan }]
+                        }
+                        keys::Code::Char('y' | 'Y') if key.mods == 0 => {
+                            let id = id.clone();
+                            let plan = plan.clone();
+                            vec![Effect::ExecuteRun { id, plan }]
+                        }
+                        keys::Code::Char('n' | 'N') if key.mods == 0 => {
+                            self.run_modal = None;
+                            Vec::new()
+                        }
+                        _ => Vec::new(),
+                    }
+                }
+            }
+        }
+    }
+
+    /// A key while Screen 3 (Code View) is open.
+    fn code_view_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(cv) = self.code_view.as_mut() else {
+            return Vec::new();
+        };
+        match cv.handle_key(key) {
+            super::code_view::CodeViewEvent::None => Vec::new(),
+            super::code_view::CodeViewEvent::Close => {
+                self.code_view = None;
+                Vec::new()
+            }
+            super::code_view::CodeViewEvent::OpenDefault => {
+                let id = cv.id.clone();
+                let target = cv.default_open.clone();
+                vec![Effect::OpenCodeTarget { id, target }]
+            }
+            super::code_view::CodeViewEvent::OpenWeb => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "web".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::OpenVsCode => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "vscode".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::OpenIdea => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "idea".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::CopyLocation => {
+                let loc = if let Some(el) = cv.end_line {
+                    format!("{}:{}-{}", cv.path, cv.line, el)
+                } else {
+                    format!("{}:{}", cv.path, cv.line)
+                };
+                vec![Effect::CopyCodeLocation(loc)]
+            }
+            super::code_view::CodeViewEvent::CopyPermalink => {
+                let permalink = cv.permalink.clone().unwrap_or_default();
+                vec![Effect::CopyCodePermalink(permalink)]
+            }
+            super::code_view::CodeViewEvent::RepinPrompt => {
+                self.say("Press 'y' to confirm re-pin", MessageKind::Info, now, true);
+                Vec::new()
+            }
+            super::code_view::CodeViewEvent::RepinConfirm(report) => {
+                let id = cv.id.clone();
+                vec![Effect::RepinCodeEntry { id, report }]
+            }
+            super::code_view::CodeViewEvent::FetchAndRecheck => {
+                let id = cv.id.clone();
+                vec![Effect::FetchAndRecheckCode(id)]
+            }
+            super::code_view::CodeViewEvent::EditEntry => {
+                let id = cv.id.clone();
+                vec![Effect::EditEntry(id)]
+            }
+        }
+    }
+
+    /// A key while Action Menu modal is open.
+    fn action_menu_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        if key.code == keys::Code::Esc {
+            self.action_menu = None;
+            return Vec::new();
+        }
+        if let keys::Code::Char(c) = key.code {
+            if key.mods & (keys::CTRL | keys::ALT) != 0 {
+                return Vec::new();
+            }
+            let Some(menu) = self.action_menu.as_ref() else {
+                return Vec::new();
+            };
+            if let Some(action) = menu.actions.iter().find(|a| a.key == c) {
+                if !action.is_available(menu.has_local_clone, menu.is_ssh_without_display) {
+                    self.say("Action is disabled", MessageKind::Warning, now, true);
+                    return Vec::new();
+                }
+                let id = menu.id.clone();
+                let kind = action.kind;
+                let action_id = action.id.clone();
+                self.action_menu = None;
+                return match kind {
+                    kb_core::action::ActionKind::CopyPayload => vec![Effect::CopyPayload],
+                    kb_core::action::ActionKind::OpenUrl => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::RunCommand => vec![Effect::RunEntry(id)],
+                    kb_core::action::ActionKind::CodeView => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::CopyCodeLocation => {
+                        vec![Effect::CopyCodeLocation(id)]
+                    }
+                    kb_core::action::ActionKind::CopyWebPermalink => {
+                        vec![Effect::CopyCodePermalink(id)]
+                    }
+                    kb_core::action::ActionKind::OpenEditor => {
+                        if action_id == "open-vscode" {
+                            vec![Effect::OpenCodeTarget {
+                                id,
+                                target: "vscode".into(),
+                            }]
+                        } else if action_id == "open-idea" {
+                            vec![Effect::OpenCodeTarget {
+                                id,
+                                target: "idea".into(),
+                            }]
+                        } else {
+                            vec![Effect::OpenEntry(id)]
+                        }
+                    }
+                    kb_core::action::ActionKind::RepinCode => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::FetchAndCheck => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::CustomCommand => {
+                        vec![Effect::RunCustomAction {
+                            id,
+                            action_name: action_id,
+                        }]
+                    }
+                };
+            }
+        }
+        Vec::new()
     }
 
     fn results_arrived(&mut self, generation: u64, page: Page) -> Vec<Effect> {
@@ -931,6 +1220,26 @@ impl AppState {
             },
             Command::Open => match self.selected_result() {
                 Some(r) => vec![Effect::OpenEntry(r.id.clone())],
+                None => {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            },
+            Command::Run => match self.selected_result() {
+                Some(r) => vec![Effect::RunEntry(r.id.clone())],
+                None => {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            },
+            Command::ActionMenu => match self.selected_result() {
+                Some(r) => {
+                    if r.entry_type == kb_core::entry::EntryType::Code {
+                        vec![Effect::OpenEntry(r.id.clone())]
+                    } else {
+                        vec![Effect::OpenActionMenu(r.id.clone())]
+                    }
+                }
                 None => {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()
@@ -1906,7 +2215,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         assert_eq!(
             key_bar_text(&s, 200),
-            "↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit"
+            "↑↓ select · Enter pick · ^Y copy · ^E edit · Alt-A actions · ? help · Esc quit"
         );
         s.update(ch('x'), now);
         assert!(key_bar_text(&s, 200).ends_with("Esc clear"));

@@ -17,6 +17,7 @@ use crate::doctor::{self, Check, Status};
 use crate::output::CliError;
 use crate::platform::Platform;
 use crate::platform::clipboard::{self, ClipboardSettings, CopyOutcome, Method, Place};
+use crate::platform::{Opened, opener};
 use crate::show;
 use crate::tui::app::Options;
 use crate::tui::theme::{Theme, ThemeEnv};
@@ -24,7 +25,6 @@ use crate::tui::{self, Outcome};
 use crate::varcli::{self, Ask, Collected, TtyAsk, UseOpts};
 use kb_core::entry::{EntryType, TypeFields};
 use kb_core::varres;
-use crate::platform::{Opened, opener};
 
 fn io_error(e: impl std::fmt::Display) -> CliError {
     CliError::new("io", e.to_string())
@@ -65,12 +65,25 @@ pub enum PostPick {
     Raw,
     /// Open the entry's primary link or console deep link (`kb open`).
     Open(OpenOpts),
+    /// Run a cmd entry or custom action (`kb run`).
+    Run(RunOpts),
+    /// Execute primary open action for link/sumo/cw/code, copy for cmd/sql/prompt (`tui.enter = "primary"`).
+    Primary,
 }
 
 /// Options for `kb open`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpenOpts {
     pub with_target: Option<String>,
+    pub use_opts: UseOpts,
+}
+
+/// Options for `kb run`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunOpts {
+    pub yes: bool,
+    pub force: bool,
+    pub action: Option<String>,
     pub use_opts: UseOpts,
 }
 
@@ -399,6 +412,28 @@ pub fn run_pick(
         ),
         PostPick::Use(opts) => deliver(platform, &kb, &loaded.settings, id, opts),
         PostPick::Open(opts) => deliver_open(platform, &kb, &loaded.settings, id, opts),
+        PostPick::Run(opts) => deliver_run(platform, &kb, &loaded.settings, id, opts),
+        PostPick::Primary => {
+            let entry = kb.entry(id).map_err(io_error)?;
+            match entry.entry_type() {
+                Some(EntryType::Link)
+                | Some(EntryType::Sumo)
+                | Some(EntryType::Cw)
+                | Some(EntryType::Code) => {
+                    deliver_open(platform, &kb, &loaded.settings, id, &OpenOpts::default())
+                }
+                _ => deliver(
+                    platform,
+                    &kb,
+                    &loaded.settings,
+                    id,
+                    &UseOpts {
+                        remember: true,
+                        ..UseOpts::default()
+                    },
+                ),
+            }
+        }
         PostPick::Raw => {
             let outcome = copy_entry(platform, &kb, &loaded.settings, id)?;
             Ok(report_copy(&outcome, id, false, None))
@@ -704,7 +739,10 @@ pub fn deliver_open_resolved(
                 if target != "console" {
                     return Err(CliError::new(
                         "usage",
-                        format!("--with {target}: valid target for {} entries is 'console'", ty.name()),
+                        format!(
+                            "--with {target}: valid target for {} entries is 'console'",
+                            ty.name()
+                        ),
                     ));
                 }
             }
@@ -712,7 +750,9 @@ pub fn deliver_open_resolved(
                 if target != "web" && target != "vscode" && target != "idea" {
                     return Err(CliError::new(
                         "usage",
-                        format!("--with {target}: valid targets for code entries are 'web', 'vscode', 'idea'"),
+                        format!(
+                            "--with {target}: valid targets for code entries are 'web', 'vscode', 'idea'"
+                        ),
                     ));
                 }
             }
@@ -749,7 +789,10 @@ pub fn deliver_open_resolved(
         }
         EntryType::Sumo => {
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 kb.pick(id, PrintMode::Payload).map_err(io_error)?
             };
@@ -771,7 +814,9 @@ pub fn deliver_open_resolved(
             };
 
             let Some(base_url) = settings.sumo_base_url().filter(|u| !u.trim().is_empty()) else {
-                eprintln!("kb: Sumo deployment URL is not configured. Set `sumo.base_url` in config or via `kb config set sumo.base_url <url>`. Copying query to clipboard instead.");
+                eprintln!(
+                    "kb: Sumo deployment URL is not configured. Set `sumo.base_url` in config or via `kb config set sumo.base_url <url>`. Copying query to clipboard instead."
+                );
                 let outcome = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -792,7 +837,9 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             if !link.query_included {
-                eprintln!("kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening search console without query");
+                eprintln!(
+                    "kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening search console without query"
+                );
                 let _ = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -812,7 +859,10 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 kb.pick(id, PrintMode::Payload).map_err(io_error)?
             };
@@ -836,7 +886,10 @@ pub fn deliver_open_resolved(
             let mut resolved_log_groups = Vec::new();
             if let TypeFields::Cw { log_groups, .. } = entry.fields() {
                 for (i, lg) in log_groups.iter().enumerate() {
-                    if let Some(r) = resolved_result.as_ref().and_then(|res| res.get(&varres::Target::LogGroup(i))) {
+                    if let Some(r) = resolved_result
+                        .as_ref()
+                        .and_then(|res| res.get(&varres::Target::LogGroup(i)))
+                    {
                         resolved_log_groups.push(r.text.clone());
                     } else {
                         resolved_log_groups.push(lg.clone());
@@ -853,7 +906,9 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             if !link.query_included {
-                eprintln!("kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening CloudWatch console without query");
+                eprintln!(
+                    "kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening CloudWatch console without query"
+                );
                 let _ = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -905,6 +960,231 @@ fn execute_open_url(
             Ok(ExitCode::from(1))
         }
     }
+}
+
+/// `kb run <id|query>`.
+pub fn run_run(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, opts.use_opts.json)? {
+        Next::Entry(id) => deliver_run(platform, &kb, &loaded.settings, &id, opts),
+        Next::Choose => {
+            if !opts.use_opts.flags.is_empty() || opts.yes {
+                eprintln!("kb: --var and --yes are ignored when you choose in the UI");
+            }
+            let post = PostPick::Run(RunOpts {
+                action: opts.action.clone(),
+                yes: false,
+                force: opts.force,
+                use_opts: UseOpts {
+                    flags: Vec::new(),
+                    yes: false,
+                    ..opts.use_opts.clone()
+                },
+            });
+            run_ui(platform, root, loaded, text, &post, false)
+        }
+        Next::Done(code) => Ok(code),
+    }
+}
+
+pub fn deliver_run(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    varcli::check_flag_names(&plan, &opts.use_opts.flags)?;
+
+    let (values, used) = if plan.is_empty() {
+        (varres::Values::new(), Vec::new())
+    } else {
+        let (memory, _) = kb.remembered(id);
+        let mut tty = if opts.yes || !platform.has_terminal() {
+            None
+        } else {
+            TtyAsk::open(platform)
+        };
+        let ask = tty.as_mut().map(|t| t as &mut dyn Ask);
+        let env = |name: &str| std::env::var(name).ok();
+        match varcli::collect(&plan, &opts.use_opts.flags, &env, Some(&memory), ask)? {
+            Collected::Stop(code) => return Ok(code),
+            Collected::Ready(values, report) => (values, report),
+        }
+    };
+
+    deliver_run_values_map(platform, kb, settings, id, &values, &used, opts)
+}
+
+fn deliver_run_values(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    values: Vec<(String, kb_core::varres::Value, kb_core::varres::Source)>,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    let mut map = varres::Values::new();
+    let mut used = Vec::new();
+    for (name, value, source) in values {
+        if let Some(p) = plan.var(&name) {
+            used.push(varcli::Used {
+                name: name.clone(),
+                kind: p.var.kind,
+                source,
+                text: (!value.is_secret()).then(|| value.reveal().to_string()),
+            });
+            map.insert(name, value);
+        }
+    }
+    deliver_run_values_map(platform, kb, settings, id, &map, &used, opts)
+}
+
+fn deliver_run_values_map(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    values: &varres::Values,
+    used: &[varcli::Used],
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+
+    let custom_action = if let Some(ref action_name) = opts.action {
+        let ty = entry.entry_type().map(|t| t.name()).unwrap_or("");
+        let action = settings
+            .custom_actions()
+            .iter()
+            .find(|a| a.entry_type == ty && a.name == *action_name)
+            .ok_or_else(|| {
+                CliError::new(
+                    "usage",
+                    format!("action '{action_name}' not found for type '{ty}'"),
+                )
+            })?;
+        Some(action)
+    } else {
+        if entry.entry_type() != Some(EntryType::Cmd) {
+            let ty_name = entry.entry_type().map(|t| t.name()).unwrap_or("unknown");
+            return Err(CliError::new(
+                "usage",
+                format!("cannot run entry '{id}' of type '{ty_name}' (expected cmd)"),
+            ));
+        }
+        None
+    };
+
+    let run_plan = kb_core::run::RunService::build_run_plan(
+        &entry,
+        values,
+        custom_action,
+        settings.run_destructive_patterns(),
+    )
+    .map_err(|e| match e {
+        kb_core::run::RunPlanError::MissingCwd(path) => CliError::new(
+            "usage",
+            format!("working directory does not exist: {}", path.display()),
+        ),
+        kb_core::run::RunPlanError::MissingPlaceholderField(f) => {
+            CliError::new("usage", format!("missing field in template: {{{{{f}}}}}"))
+        }
+        kb_core::run::RunPlanError::VarResolution(msg) => CliError::new("usage", msg),
+    })?;
+
+    if opts.yes {
+        if run_plan.requires_typed_run && !opts.force {
+            return Err(CliError::new(
+                "usage",
+                "command matches destructive patterns; use --yes --force to execute non-interactively",
+            ));
+        }
+        eprintln!("kb: running: {}", run_plan.resolved_command);
+    } else {
+        if !platform.has_terminal() {
+            return Err(CliError::new(
+                "usage",
+                "cannot prompt for confirmation without a terminal; use --yes to run non-interactively",
+            ));
+        }
+
+        eprintln!("Command: {}", run_plan.resolved_command);
+        eprintln!("Shell:   {}", run_plan.shell);
+        if let Some(ref cwd) = run_plan.cwd {
+            eprintln!("Cwd:     {}", cwd.display());
+        }
+        if !run_plan.secret_env_vars.is_empty() {
+            let secret_names: Vec<_> = run_plan
+                .secret_env_vars
+                .iter()
+                .map(|s| s.env_key.as_str())
+                .collect();
+            eprintln!("Secrets: {}", secret_names.join(", "));
+        }
+        for warn in &run_plan.destructive_warnings {
+            eprintln!("WARNING: Destructive pattern matched: {}", warn.description);
+        }
+
+        let mut tty =
+            TtyAsk::open(platform).ok_or_else(|| CliError::new("io", "cannot open terminal"))?;
+
+        if run_plan.requires_typed_run {
+            let answer = tty
+                .line("This command matched destructive patterns. Type 'run' to execute: ")
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            match answer {
+                Some(ans) if ans.trim() == "run" => {}
+                _ => {
+                    eprintln!("kb: run cancelled");
+                    return Ok(ExitCode::from(130));
+                }
+            }
+        } else {
+            let answer = tty
+                .line("Run this command? [y/N]: ")
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            match answer {
+                Some(ans)
+                    if ans.trim().eq_ignore_ascii_case("y")
+                        || ans.trim().eq_ignore_ascii_case("yes") => {}
+                _ => {
+                    eprintln!("kb: run cancelled");
+                    return Ok(ExitCode::from(130));
+                }
+            }
+        }
+    }
+
+    let env_tuples: Vec<(String, String)> = run_plan
+        .secret_env_vars
+        .into_iter()
+        .map(|s| (s.env_key, s.secret_value))
+        .collect();
+
+    let res = platform
+        .run_interactive_command(
+            &run_plan.shell,
+            &run_plan.resolved_command,
+            run_plan.cwd.as_deref(),
+            &env_tuples,
+            run_plan.stdin_payload.as_deref(),
+        )
+        .map_err(|e| CliError::new("io", format!("failed to run command: {e}")))?;
+
+    finish_use(kb, settings, id, used, opts.use_opts.remember);
+
+    let code = u8::try_from(res.exit_code).unwrap_or(1);
+    Ok(ExitCode::from(code))
 }
 
 /// `kb copy --raw <id|query>`: the payload as it is in the file, placeholders included.
@@ -983,7 +1263,8 @@ pub fn post_pick_for(print: Option<PrintMode>, settings: &Settings) -> PostPick 
     match (print, settings.tui_enter()) {
         (Some(mode), _) => PostPick::Print(mode),
         (None, EnterAction::Print) => PostPick::Print(PrintMode::Payload),
-        (None, EnterAction::Copy | EnterAction::Primary) => PostPick::Copy,
+        (None, EnterAction::Primary) => PostPick::Primary,
+        (None, EnterAction::Copy) => PostPick::Copy,
     }
 }
 
@@ -1007,7 +1288,12 @@ pub fn run_ui(
         config_problems: loaded.warnings.len(),
         fill_variables: matches!(
             post,
-            PostPick::Copy | PostPick::Print(PrintMode::Payload) | PostPick::Use(_) | PostPick::Open(_)
+            PostPick::Copy
+                | PostPick::Print(PrintMode::Payload)
+                | PostPick::Use(_)
+                | PostPick::Open(_)
+                | PostPick::Run(_)
+                | PostPick::Primary
         ),
         remember_vars: loaded.settings.vars_remember()
             && !matches!(post, PostPick::Use(o) if !o.remember),
@@ -1028,7 +1314,42 @@ pub fn run_ui(
         Outcome::Resolved { id, values, print } => {
             if let PostPick::Open(open_opts) = post {
                 let kb = Kb::open(root).map_err(io_error)?;
-                return deliver_open_values(platform, &kb, &loaded.settings, &id, values, open_opts);
+                return deliver_open_values(
+                    platform,
+                    &kb,
+                    &loaded.settings,
+                    &id,
+                    values,
+                    open_opts,
+                );
+            }
+            if let PostPick::Run(run_opts) = post {
+                let kb = Kb::open(root).map_err(io_error)?;
+                return deliver_run_values(platform, &kb, &loaded.settings, &id, values, run_opts);
+            }
+            if let PostPick::Primary = post {
+                let kb = Kb::open(root).map_err(io_error)?;
+                let entry = kb.entry(&id).map_err(io_error)?;
+                return match entry.entry_type() {
+                    Some(EntryType::Link)
+                    | Some(EntryType::Sumo)
+                    | Some(EntryType::Cw)
+                    | Some(EntryType::Code) => deliver_open_values(
+                        platform,
+                        &kb,
+                        &loaded.settings,
+                        &id,
+                        values,
+                        &OpenOpts::default(),
+                    ),
+                    _ => {
+                        let opts = UseOpts {
+                            remember: true,
+                            ..UseOpts::default()
+                        };
+                        deliver_values(platform, &kb, &loaded.settings, &id, values, &opts)
+                    }
+                };
             }
             let mut opts = match post {
                 PostPick::Use(o) => o.clone(),
@@ -1397,6 +1718,666 @@ pub fn run_doctor(
     } else {
         ExitCode::from(1)
     })
+}
+
+#[derive(clap::Subcommand, Debug, Clone)]
+pub enum CodeCommand {
+    /// Inspect code links for drift against repository tracking branches.
+    Check(CodeCheckArgs),
+    /// Re-pin code links to current tracking branch commits.
+    Repin(CodeRepinArgs),
+    /// Display the code snippet and drift status.
+    Show(CodeShowArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct CodeCheckArgs {
+    /// Entry IDs to check (checks all code entries if omitted).
+    #[arg(num_args = 0..)]
+    pub ids: Vec<String>,
+    /// Fetch the latest remote commits before checking drift.
+    #[arg(short = 'f', long)]
+    pub fetch: bool,
+    /// Print the drift results as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct CodeRepinArgs {
+    /// Entry IDs to re-pin.
+    #[arg(num_args = 0..)]
+    pub ids: Vec<String>,
+    /// Re-pin all drifted code entries.
+    #[arg(long)]
+    pub all: bool,
+    /// Fetch the latest remote commits before re-pinning.
+    #[arg(short = 'f', long)]
+    pub fetch: bool,
+    /// Do not ask for confirmation.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
+}
+
+#[derive(clap::Args, Debug, Clone)]
+pub struct CodeShowArgs {
+    /// The code entry ID to display.
+    pub id: String,
+    /// Print the code snippet and metadata as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+pub fn run_code(
+    _platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    command: &CodeCommand,
+) -> Result<ExitCode, CliError> {
+    match command {
+        CodeCommand::Check(args) => run_code_check(root, loaded, args),
+        CodeCommand::Repin(args) => run_code_repin(root, loaded, args),
+        CodeCommand::Show(args) => run_code_show(root, loaded, args),
+    }
+}
+
+pub fn run_code_check(
+    root: &Path,
+    loaded: &Loaded,
+    args: &CodeCheckArgs,
+) -> Result<ExitCode, CliError> {
+    use crate::platform::SystemGitRunner;
+    use kb_core::code::{
+        CloneCache, CodeService, DriftConfidence, DriftReport, DriftStatus, LocalClone,
+    };
+    use kb_core::entry::TypeFields;
+
+    let cache_path = root.join(".kb/clones.json");
+    let mut cache = CloneCache::load(&cache_path);
+    let kb = Kb::open(root).map_err(|e| CliError::new("io", e.to_string()))?;
+
+    let entries_to_check: Vec<kb_core::entry::Entry> = if !args.ids.is_empty() {
+        let mut list = Vec::new();
+        for id in &args.ids {
+            match kb.entry(id) {
+                Ok(e) => list.push(e),
+                Err(e) => {
+                    return Err(CliError::new(
+                        "not_found",
+                        format!("entry '{id}' not found: {e}"),
+                    ));
+                }
+            }
+        }
+        list
+    } else {
+        let walked = kb_core::walk::walk(root, std::slice::from_ref(&root.to_path_buf()))
+            .map_err(|e| CliError::new("io", e.to_string()))?;
+        let mut list = Vec::new();
+        for file in walked.files {
+            if let Ok(bytes) = std::fs::read(&file.abs_path)
+                && let Some(e) = kb_core::entry::parse_entry(&file.id, &file.rel_path, bytes).entry
+                && matches!(e.fields(), TypeFields::Code { .. })
+            {
+                list.push(e);
+            }
+        }
+        list
+    };
+
+    let git_runner = SystemGitRunner;
+    let mut clone_map: std::collections::HashMap<String, Option<LocalClone>> =
+        std::collections::HashMap::new();
+
+    for entry in &entries_to_check {
+        if let TypeFields::Code { code: Some(c) } = entry.fields()
+            && !clone_map.contains_key(&c.repo)
+        {
+            let cl = CodeService::find_clone(&c.repo, &loaded.settings, &mut cache, &git_runner)
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+
+            if args.fetch
+                && let Some(ref found) = cl
+            {
+                let _ = CodeService::fetch_remote(found, &git_runner);
+            }
+            clone_map.insert(c.repo.clone(), cl);
+        }
+    }
+
+    let num_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(entries_to_check.len().max(1));
+
+    let mut reports: Vec<DriftReport> = Vec::with_capacity(entries_to_check.len());
+
+    if num_threads <= 1 || entries_to_check.len() <= 1 {
+        for entry in &entries_to_check {
+            let code_ref = match entry.fields() {
+                TypeFields::Code { code: Some(c) } => c,
+                _ => continue,
+            };
+            let clone = clone_map.get(&code_ref.repo).and_then(|c| c.as_ref());
+            let report = match clone {
+                Some(cl) => CodeService::check_drift(entry, cl, &git_runner)
+                    .map_err(|e| CliError::new("io", e.to_string()))?,
+                None => DriftReport {
+                    entry_id: entry.id().to_string(),
+                    repo: code_ref.repo.clone(),
+                    status: DriftStatus::Unknown {
+                        reason: format!("no local clone found for {}", code_ref.repo),
+                    },
+                    pinned_ref: code_ref.git_ref.clone(),
+                    pinned_path: code_ref.path.clone(),
+                    pinned_line: code_ref.line as usize,
+                    pinned_end_line: code_ref.end_line.map(|l| l as usize),
+                    tracking_branch: String::new(),
+                    tracking_ref: None,
+                    confidence: DriftConfidence::DiffMapped,
+                },
+            };
+            reports.push(report);
+        }
+    } else {
+        let chunk_size = entries_to_check.len().div_ceil(num_threads);
+        let mut results = Vec::new();
+
+        std::thread::scope(|s| {
+            let mut handles = Vec::new();
+            for (chunk_idx, chunk) in entries_to_check.chunks(chunk_size).enumerate() {
+                let clone_map_ref = &clone_map;
+                handles.push(s.spawn(move || {
+                    let thread_git = SystemGitRunner;
+                    let mut chunk_reports = Vec::with_capacity(chunk.len());
+                    for entry in chunk {
+                        let code_ref = match entry.fields() {
+                            TypeFields::Code { code: Some(c) } => c,
+                            _ => continue,
+                        };
+                        let clone = clone_map_ref.get(&code_ref.repo).and_then(|c| c.as_ref());
+                        let report = match clone {
+                            Some(cl) => CodeService::check_drift(entry, cl, &thread_git)
+                                .map_err(|e| CliError::new("io", e.to_string())),
+                            None => Ok(DriftReport {
+                                entry_id: entry.id().to_string(),
+                                repo: code_ref.repo.clone(),
+                                status: DriftStatus::Unknown {
+                                    reason: format!("no local clone found for {}", code_ref.repo),
+                                },
+                                pinned_ref: code_ref.git_ref.clone(),
+                                pinned_path: code_ref.path.clone(),
+                                pinned_line: code_ref.line as usize,
+                                pinned_end_line: code_ref.end_line.map(|l| l as usize),
+                                tracking_branch: String::new(),
+                                tracking_ref: None,
+                                confidence: DriftConfidence::DiffMapped,
+                            }),
+                        };
+                        chunk_reports.push(report);
+                    }
+                    (chunk_idx, chunk_reports)
+                }));
+            }
+            for handle in handles {
+                let (idx, chunk_reports) = handle.join().expect("thread panicked");
+                results.push((idx, chunk_reports));
+            }
+        });
+
+        results.sort_by_key(|(idx, _)| *idx);
+        for (_, chunk_res) in results {
+            for res in chunk_res {
+                reports.push(res?);
+            }
+        }
+    }
+
+    let has_drift_failure = reports.iter().any(|r| {
+        matches!(
+            r.status,
+            DriftStatus::Changed { .. } | DriftStatus::Renamed { .. } | DriftStatus::Gone { .. }
+        )
+    });
+
+    let _ = cache.save(&cache_path);
+
+    if args.json {
+        let json_items: Vec<serde_json::Value> = reports
+            .iter()
+            .map(|r| {
+                let (status_str, proposed_line) = match &r.status {
+                    DriftStatus::Current => ("current", None),
+                    DriftStatus::Moved { new_line, .. } => ("moved", Some(*new_line)),
+                    DriftStatus::Changed { new_line, .. } => ("changed", Some(*new_line)),
+                    DriftStatus::Renamed { new_line, .. } => ("renamed", Some(*new_line)),
+                    DriftStatus::Gone { .. } => ("gone", None),
+                    DriftStatus::Unknown { .. } => ("unknown", None),
+                };
+                serde_json::json!({
+                    "id": r.entry_id,
+                    "repo": r.repo,
+                    "status": status_str,
+                    "pinned_ref": r.pinned_ref,
+                    "pinned_path": r.pinned_path,
+                    "pinned_line": r.pinned_line,
+                    "proposed_line": proposed_line,
+                    "tracking_branch": r.tracking_branch,
+                    "confidence": match r.confidence {
+                        DriftConfidence::DiffMapped => "DiffMapped",
+                        DriftConfidence::SymbolMatched => "SymbolMatched",
+                    }
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&json_items).unwrap());
+    } else {
+        for r in &reports {
+            match &r.status {
+                DriftStatus::Current => {
+                    println!("{}: current ({})", r.entry_id, r.tracking_branch);
+                }
+                DriftStatus::Moved { new_line, .. } => {
+                    println!(
+                        "{}: moved (now at line {} on {})",
+                        r.entry_id, new_line, r.tracking_branch
+                    );
+                }
+                DriftStatus::Changed { diff_summary, .. } => {
+                    println!("{}: changed ({})", r.entry_id, diff_summary);
+                }
+                DriftStatus::Renamed {
+                    new_path, new_line, ..
+                } => {
+                    println!(
+                        "{}: renamed (now at {}:{} on {})",
+                        r.entry_id, new_path, new_line, r.tracking_branch
+                    );
+                }
+                DriftStatus::Gone { reason } => {
+                    println!("{}: gone ({})", r.entry_id, reason);
+                }
+                DriftStatus::Unknown { reason } => {
+                    println!("{}: unknown ({})", r.entry_id, reason);
+                }
+            }
+        }
+    }
+
+    if has_drift_failure {
+        Ok(ExitCode::from(1))
+    } else {
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+pub fn run_code_repin(
+    root: &Path,
+    loaded: &Loaded,
+    args: &CodeRepinArgs,
+) -> Result<ExitCode, CliError> {
+    use crate::platform::SystemGitRunner;
+    use kb_core::author::render::rfc3339_utc;
+    use kb_core::code::{CloneCache, CodeService, DriftConfidence, DriftReport, DriftStatus};
+    use kb_core::entry::TypeFields;
+
+    if args.ids.is_empty() && !args.all {
+        return Err(CliError::new(
+            "usage",
+            "specify entry IDs to re-pin, or pass --all",
+        ));
+    }
+
+    let cache_path = root.join(".kb/clones.json");
+    let mut cache = CloneCache::load(&cache_path);
+    let mut kb = Kb::open(root).map_err(|e| CliError::new("io", e.to_string()))?;
+
+    let entries_to_check: Vec<kb_core::entry::Entry> = if !args.ids.is_empty() {
+        let mut list = Vec::new();
+        for id in &args.ids {
+            match kb.entry(id) {
+                Ok(e) => list.push(e),
+                Err(e) => {
+                    return Err(CliError::new(
+                        "not_found",
+                        format!("entry '{id}' not found: {e}"),
+                    ));
+                }
+            }
+        }
+        list
+    } else {
+        let walked = kb_core::walk::walk(root, std::slice::from_ref(&root.to_path_buf()))
+            .map_err(|e| CliError::new("io", e.to_string()))?;
+        let mut list = Vec::new();
+        for file in walked.files {
+            if let Ok(bytes) = std::fs::read(&file.abs_path)
+                && let Some(e) = kb_core::entry::parse_entry(&file.id, &file.rel_path, bytes).entry
+                && matches!(e.fields(), TypeFields::Code { .. })
+            {
+                list.push(e);
+            }
+        }
+        list
+    };
+
+    let git_runner = SystemGitRunner;
+    let mut repin_targets: Vec<(kb_core::entry::Entry, DriftReport)> = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
+
+    for entry in entries_to_check {
+        let code_ref = match entry.fields() {
+            TypeFields::Code { code: Some(c) } => c,
+            _ => continue,
+        };
+
+        let clone =
+            CodeService::find_clone(&code_ref.repo, &loaded.settings, &mut cache, &git_runner)
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+
+        let report = match clone {
+            Some(cl) => {
+                if args.fetch {
+                    let _ = CodeService::fetch_remote(&cl, &git_runner);
+                }
+                CodeService::check_drift(&entry, &cl, &git_runner)
+                    .map_err(|e| CliError::new("io", e.to_string()))?
+            }
+            None => DriftReport {
+                entry_id: entry.id().to_string(),
+                repo: code_ref.repo.clone(),
+                status: DriftStatus::Unknown {
+                    reason: format!("no local clone found for {}", code_ref.repo),
+                },
+                pinned_ref: code_ref.git_ref.clone(),
+                pinned_path: code_ref.path.clone(),
+                pinned_line: code_ref.line as usize,
+                pinned_end_line: code_ref.end_line.map(|l| l as usize),
+                tracking_branch: String::new(),
+                tracking_ref: None,
+                confidence: DriftConfidence::DiffMapped,
+            },
+        };
+
+        match &report.status {
+            DriftStatus::Moved { .. }
+            | DriftStatus::Changed { .. }
+            | DriftStatus::Renamed { .. } => {
+                repin_targets.push((entry, report));
+            }
+            DriftStatus::Current => {}
+            DriftStatus::Gone { reason } => {
+                skipped.push((entry.id().to_string(), format!("gone: {reason}")));
+            }
+            DriftStatus::Unknown { reason } => {
+                skipped.push((entry.id().to_string(), format!("unknown: {reason}")));
+            }
+        }
+    }
+
+    let _ = cache.save(&cache_path);
+
+    if repin_targets.is_empty() {
+        if !skipped.is_empty() {
+            for (id, reason) in &skipped {
+                println!("skipped {id}: {reason}");
+            }
+        } else {
+            println!("all entries are current");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    if !args.yes {
+        print!("Re-pin {} entries? [y/N]: ", repin_targets.len());
+        std::io::stdout().flush().map_err(io_error)?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line).map_err(io_error)?;
+        if !matches!(line.trim(), "y" | "Y" | "yes" | "YES") {
+            println!("cancelled");
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+
+    let full_time = rfc3339_utc(SystemTime::now());
+    let today = if full_time.len() >= 10 {
+        &full_time[..10]
+    } else {
+        "2026-10-10"
+    };
+
+    for (entry, report) in &repin_targets {
+        let entry_path = root.join(entry.path());
+        let current_content =
+            String::from_utf8(entry.to_bytes()).map_err(|e| CliError::new("io", e.to_string()))?;
+
+        CodeService::repin_entry(&entry_path, &current_content, report, today).map_err(|e| {
+            CliError::new("repin_failed", format!("cannot repin {}: {e}", entry.id()))
+        })?;
+
+        println!("re-pinned {}", entry.id());
+    }
+
+    if !skipped.is_empty() {
+        for (id, reason) in &skipped {
+            println!("skipped {id}: {reason}");
+        }
+    }
+
+    let _ = kb.refresh();
+
+    Ok(ExitCode::SUCCESS)
+}
+
+pub fn run_code_show(
+    root: &Path,
+    loaded: &Loaded,
+    args: &CodeShowArgs,
+) -> Result<ExitCode, CliError> {
+    use crate::platform::SystemGitRunner;
+    use kb_core::code::{CloneCache, CodeService, DriftStatus};
+    use kb_core::entry::TypeFields;
+
+    let kb = Kb::open(root).map_err(|e| CliError::new("io", e.to_string()))?;
+    let entry = kb
+        .entry(&args.id)
+        .map_err(|e| CliError::new("not_found", format!("entry '{}' not found: {e}", args.id)))?;
+
+    let code_ref = match entry.fields() {
+        TypeFields::Code { code: Some(c) } => c,
+        _ => {
+            return Err(CliError::new(
+                "usage",
+                format!("entry '{}' is not a code entry", args.id),
+            ));
+        }
+    };
+
+    let cache_path = root.join(".kb/clones.json");
+    let mut cache = CloneCache::load(&cache_path);
+    let git_runner = SystemGitRunner;
+
+    let clone = CodeService::find_clone(&code_ref.repo, &loaded.settings, &mut cache, &git_runner)
+        .map_err(|e| CliError::new("io", e.to_string()))?;
+
+    let _ = cache.save(&cache_path);
+
+    let (status_str, snippet) = match &clone {
+        Some(cl) => {
+            let drift = CodeService::check_drift(&entry, cl, &git_runner)
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            let status = match &drift.status {
+                DriftStatus::Current => "current".to_string(),
+                DriftStatus::Moved { new_line, .. } => format!("moved (line {new_line})"),
+                DriftStatus::Changed { diff_summary, .. } => format!("changed ({diff_summary})"),
+                DriftStatus::Renamed {
+                    new_path, new_line, ..
+                } => {
+                    format!("renamed ({new_path}:{new_line})")
+                }
+                DriftStatus::Gone { reason } => format!("gone ({reason})"),
+                DriftStatus::Unknown { reason } => format!("unknown ({reason})"),
+            };
+            let snip = CodeService::get_snippet(
+                cl,
+                &code_ref.git_ref,
+                &code_ref.path,
+                code_ref.line as usize,
+                code_ref.end_line.map(|l| l as usize),
+                3,
+                8,
+                &git_runner,
+            )
+            .ok();
+            (status, snip)
+        }
+        None => ("unknown (no clone found)".to_string(), None),
+    };
+
+    let permalink = CodeService::build_permalink(
+        clone.as_ref(),
+        &code_ref.repo,
+        &code_ref.git_ref,
+        &code_ref.path,
+        code_ref.line as usize,
+        code_ref.end_line.map(|l| l as usize),
+        &loaded.settings,
+    )
+    .ok();
+
+    if args.json {
+        let doc = serde_json::json!({
+            "id": entry.id(),
+            "title": entry.title().unwrap_or(""),
+            "repo": code_ref.repo,
+            "path": code_ref.path,
+            "line": code_ref.line,
+            "end_line": code_ref.end_line,
+            "ref": code_ref.git_ref,
+            "branch": code_ref.branch,
+            "status": status_str,
+            "permalink": permalink,
+            "snippet": snippet,
+        });
+        println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+    } else {
+        println!("Title:  {}", entry.title().unwrap_or(""));
+        println!("Repo:   {}", code_ref.repo);
+        let loc = match code_ref.end_line {
+            Some(el) => format!("{}:{}-{}", code_ref.path, code_ref.line, el),
+            None => format!("{}:{}", code_ref.path, code_ref.line),
+        };
+        println!("File:   {}", loc);
+        println!("Ref:    {}", code_ref.git_ref);
+        println!("Status: {}", status_str);
+        if let Some(ref p) = permalink {
+            println!("Link:   {}", p);
+        }
+        println!();
+        if let Some(ref snip) = snippet {
+            let target_start = snip.target_line;
+            let target_end = snip.target_end_line.unwrap_or(target_start);
+            for (line_num, line_str) in &snip.lines {
+                let marker = if *line_num >= target_start && *line_num <= target_end {
+                    "▶"
+                } else {
+                    " "
+                };
+                println!("{} {:4} | {}", marker, line_num, line_str);
+            }
+        } else {
+            println!("(No snippet available - local clone not found)");
+        }
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+pub fn run_actions(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    use crate::platform::SystemGitRunner;
+    use kb_core::action::ActionService;
+    use kb_core::code::{CloneCache, CodeService};
+
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, json)? {
+        Next::Entry(id) => {
+            let entry = kb.entry(&id).map_err(io_error)?;
+            let mut clone = None;
+            if entry.entry_type() == Some(EntryType::Code)
+                && let TypeFields::Code {
+                    code: Some(code_ref),
+                } = entry.fields()
+            {
+                let cache_path = root.join(".kb/clones.json");
+                let mut cache = CloneCache::load(&cache_path);
+                let git_runner = SystemGitRunner;
+                clone = CodeService::find_clone(
+                    &code_ref.repo,
+                    &loaded.settings,
+                    &mut cache,
+                    &git_runner,
+                )
+                .ok()
+                .flatten();
+                let _ = cache.save(&cache_path);
+            }
+
+            let actions = ActionService::list_actions(&entry, &loaded.settings, clone.as_ref());
+            let primary = ActionService::primary_action(&entry, &loaded.settings, clone.as_ref());
+
+            let has_clone = clone.is_some();
+            let env = platform.env();
+            let is_ssh_without_display = env.ssh && env.display == crate::platform::Display::None;
+
+            if json {
+                let json_actions: Vec<serde_json::Value> = actions
+                    .iter()
+                    .map(|a| {
+                        let available = a.is_available(has_clone, is_ssh_without_display);
+                        serde_json::json!({
+                            "id": a.id,
+                            "key": a.key.to_string(),
+                            "name": a.name,
+                            "label": a.label,
+                            "kind": format!("{:?}", a.kind),
+                            "is_primary": a.is_primary,
+                            "needs_vars": a.needs_vars,
+                            "needs_confirm": a.needs_confirm,
+                            "available": available,
+                        })
+                    })
+                    .collect();
+
+                let doc = serde_json::json!({
+                    "id": entry.id(),
+                    "type": entry.entry_type().map(|t| t.name()).unwrap_or(""),
+                    "title": entry.title().unwrap_or(""),
+                    "primary_action": primary.as_ref().map(|p| p.id.as_str()),
+                    "actions": json_actions,
+                });
+                println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+            } else {
+                let ty_str = entry.entry_type().map(|t| t.name()).unwrap_or("entry");
+                let title = entry.title().unwrap_or(entry.id());
+                println!("Actions for {} ({}):", title, ty_str);
+                for a in &actions {
+                    println!("  [{}] {}", a.key, a.name);
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Next::Choose => {
+            eprintln!("kb: several close matches; use an exact ID");
+            Ok(ExitCode::from(1))
+        }
+        Next::Done(code) => Ok(code),
+    }
 }
 
 #[cfg(test)]

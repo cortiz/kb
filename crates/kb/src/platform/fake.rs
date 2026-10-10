@@ -45,20 +45,36 @@ type EditEffect = Box<dyn Fn(&Path)>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Call {
     FindTool(String),
-    RunCopyTool { tool: String, text: String },
+    RunCopyTool {
+        tool: String,
+        text: String,
+    },
     WriteTty(Vec<u8>),
-    Open { target: String, opener: String },
+    Open {
+        target: String,
+        opener: String,
+    },
     TmuxPassthrough,
     ResolveEditor,
-    RunEditor { command: String, path: PathBuf },
-    RunReadTool { tool: String },
-    RunGit { args: Vec<String> },
-    PrivateTempFile { extension: String },
+    RunEditor {
+        command: String,
+        path: PathBuf,
+    },
+    RunReadTool {
+        tool: String,
+    },
+    RunGit {
+        args: Vec<String>,
+    },
+    PrivateTempFile {
+        extension: String,
+    },
     RunInteractiveCommand {
         shell: String,
         command: String,
         cwd: Option<PathBuf>,
         env_vars: Vec<(String, String)>,
+        stdin_payload: Option<String>,
     },
 }
 
@@ -373,12 +389,14 @@ impl Platform for FakePlatform {
         command: &str,
         cwd: Option<&Path>,
         env_vars: &[(String, String)],
+        stdin_payload: Option<&str>,
     ) -> io::Result<RunResult> {
         self.record(Call::RunInteractiveCommand {
             shell: shell.to_string(),
             command: command.to_string(),
             cwd: cwd.map(Path::to_path_buf),
             env_vars: env_vars.to_vec(),
+            stdin_payload: stdin_payload.map(str::to_string),
         });
         if let Some(res) = self.interactive_result.borrow().as_ref() {
             return Ok(res.clone());
@@ -476,13 +494,16 @@ mod tests {
         let path = temp.path().to_path_buf();
         drop(temp);
         assert!(!path.exists(), "dropped temp files are deleted");
-        let res = p.run_interactive_command("sh", "echo ok", None, &[]).unwrap();
+        let res = p
+            .run_interactive_command("sh", "echo ok", None, &[], None)
+            .unwrap();
         assert_eq!(res.exit_code, 0);
         assert!(p.calls().contains(&Call::RunInteractiveCommand {
             shell: "sh".into(),
             command: "echo ok".into(),
             cwd: None,
             env_vars: Vec::new(),
+            stdin_payload: None,
         }));
     }
 

@@ -37,7 +37,7 @@
 │                                              ││ 28 // stage 27: filter and count                                     │
 │                                              ││ 29 | where status >= 428 | count by host_28                   ↓ more │
 └──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · S-↑↓ scroll · ? help · Esc quit
+ ↑↓ select · Enter pick · ^O console · ^E edit · Alt-A actions · S-↑↓ scroll · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 fg=241
@@ -365,4 +365,4 @@
 37:112..118 fg=241
 37:119..120 fg=246
 38:0..120 fg=246
-39:1..88 fg=241
+39:1..96 fg=241

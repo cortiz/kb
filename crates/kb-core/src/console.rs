@@ -1,15 +1,20 @@
 //! Console deep link builders for Sumo Logic and AWS CloudWatch Logs Insights.
 
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::config::Settings;
 use crate::entry::{Entry, TypeFields};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MAX_CONSOLE_URL_LENGTH: usize = 8000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConsoleTarget {
-    SumoLogic { base_url: String },
-    CloudWatch { region: String, log_groups: Vec<String> },
+    SumoLogic {
+        base_url: String,
+    },
+    CloudWatch {
+        region: String,
+        log_groups: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,10 +105,12 @@ pub fn parse_range(range_str: &str) -> Result<(u64, u64), ConsoleLinkError> {
         });
     }
     let (num_part, unit) = rest.split_at(rest.len() - 1);
-    let n: u64 = num_part.parse().map_err(|_| ConsoleLinkError::InvalidRange {
-        field: "range".into(),
-        value: range_str.to_string(),
-    })?;
+    let n: u64 = num_part
+        .parse()
+        .map_err(|_| ConsoleLinkError::InvalidRange {
+            field: "range".into(),
+            value: range_str.to_string(),
+        })?;
     if n == 0 {
         return Err(ConsoleLinkError::InvalidRange {
             field: "range".into(),
@@ -208,9 +215,8 @@ impl ConsoleService {
             "{base}/ui/index.html#section/search/{from_epoch_ms},{to_epoch_ms},{encoded_query}"
         );
         let (url, query_included) = if full_url.len() > MAX_CONSOLE_URL_LENGTH {
-            let truncated_url = format!(
-                "{base}/ui/index.html#section/search/{from_epoch_ms},{to_epoch_ms}"
-            );
+            let truncated_url =
+                format!("{base}/ui/index.html#section/search/{from_epoch_ms},{to_epoch_ms}");
             (truncated_url, false)
         } else {
             (full_url, true)
@@ -318,7 +324,8 @@ mod tests {
         let base = "https://service.us2.sumologic.com";
         let query = "_sourceCategory=prod/authorizer | count by status";
         let now = 1_700_000_000_000u64; // arbitrary epoch ms
-        let link = ConsoleService::build_sumo_link_with_now(base, query, Some("-15m"), now).unwrap();
+        let link =
+            ConsoleService::build_sumo_link_with_now(base, query, Some("-15m"), now).unwrap();
 
         assert_eq!(link.character_count, link.url.len());
         assert!(link.query_included);
@@ -337,24 +344,33 @@ mod tests {
         let now = 1_700_000_000_000u64;
 
         // -2h: 7,200,000 ms
-        let link_2h = ConsoleService::build_sumo_link_with_now(base, query, Some("-2h"), now).unwrap();
+        let link_2h =
+            ConsoleService::build_sumo_link_with_now(base, query, Some("-2h"), now).unwrap();
         assert_eq!(
             link_2h.url,
-            format!("https://service.us2.sumologic.com/ui/index.html#section/search/{},{now},error", now - 7_200_000)
+            format!(
+                "https://service.us2.sumologic.com/ui/index.html#section/search/{},{now},error",
+                now - 7_200_000
+            )
         );
 
         // -7d: 604,800,000 ms
-        let link_7d = ConsoleService::build_sumo_link_with_now(base, query, Some("-7d"), now).unwrap();
+        let link_7d =
+            ConsoleService::build_sumo_link_with_now(base, query, Some("-7d"), now).unwrap();
         assert_eq!(
             link_7d.url,
-            format!("https://service.us2.sumologic.com/ui/index.html#section/search/{},{now},error", now - 604_800_000)
+            format!(
+                "https://service.us2.sumologic.com/ui/index.html#section/search/{},{now},error",
+                now - 604_800_000
+            )
         );
     }
 
     #[test]
     fn sumo_link_invalid_range_rejected() {
         let base = "https://service.us2.sumologic.com";
-        let err = ConsoleService::build_sumo_link_with_now(base, "q", Some("15m"), 1000).unwrap_err();
+        let err =
+            ConsoleService::build_sumo_link_with_now(base, "q", Some("15m"), 1000).unwrap_err();
         assert!(matches!(err, ConsoleLinkError::InvalidRange { .. }));
         assert!(err.to_string().contains("Accepted forms: -15m, -2h, -7d"));
     }
@@ -370,7 +386,8 @@ mod tests {
         let base = "https://service.us2.sumologic.com";
         let huge_query = "x".repeat(8100);
         let now = 1_700_000_000_000u64;
-        let link = ConsoleService::build_sumo_link_with_now(base, &huge_query, Some("-15m"), now).unwrap();
+        let link =
+            ConsoleService::build_sumo_link_with_now(base, &huge_query, Some("-15m"), now).unwrap();
 
         assert!(!link.query_included);
         assert_eq!(link.character_count, link.url.len());
@@ -399,14 +416,18 @@ mod tests {
         assert!(link.url.starts_with("https://us-east-1.console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:logs-insights$3FqueryDetail$3D~("));
         assert!(link.url.contains("start~'-1800'"));
         assert!(link.url.contains("timeType~'RELATIVE'~unit~'seconds'"));
-        assert!(link.url.contains("source~(~'/aws/lambda/prod-authorizer'~'/aws/lambda/shared-auth')"));
+        assert!(
+            link.url
+                .contains("source~(~'/aws/lambda/prod-authorizer'~'/aws/lambda/shared-auth')")
+        );
         // Query should encode spaces as *20, newlines as *0A, @ as *40, > as *3E, | as *7C, ( as *28, ) as *29
         assert!(link.url.contains("editorString~'filter*20*40duration*20*3E*20200*0A*7C*20stats*20count*28*29*20by*20bin*285m*29'"));
     }
 
     #[test]
     fn cw_link_empty_log_groups_allowed() {
-        let link = ConsoleService::build_cw_link("eu-west-1", &[], "fields @message", None).unwrap();
+        let link =
+            ConsoleService::build_cw_link("eu-west-1", &[], "fields @message", None).unwrap();
         assert!(link.url.contains("source~()"));
         assert!(link.url.contains("start~'-900'")); // default -15m
     }
@@ -414,7 +435,13 @@ mod tests {
     #[test]
     fn cw_link_omits_query_when_exceeding_8000_chars() {
         let huge_query = "fields @message | filter ".to_string() + &"a".repeat(8000);
-        let link = ConsoleService::build_cw_link("us-east-1", &["/aws/lambda/foo".into()], &huge_query, Some("-1h")).unwrap();
+        let link = ConsoleService::build_cw_link(
+            "us-east-1",
+            &["/aws/lambda/foo".into()],
+            &huge_query,
+            Some("-1h"),
+        )
+        .unwrap();
         assert!(!link.query_included);
         assert!(link.url.contains("editorString~''"));
         assert!(link.url.len() < MAX_CONSOLE_URL_LENGTH);
@@ -422,21 +449,41 @@ mod tests {
 
     #[test]
     fn cw_region_precedence_resolution() {
-        let empty_settings = crate::config::load(&[], &|_| None, &crate::config::Flags::default()).settings;
+        let empty_settings =
+            crate::config::load(&[], &|_| None, &crate::config::Flags::default()).settings;
 
         // 1. entry.region wins
         let raw_entry = "---\nkb_format: 1\ntype: cw\ntitle: Test CW\nregion: us-west-2\n---\n```\nfields @message\n```\n";
-        let entry = parse_entry("test", "test.md", raw_entry.as_bytes().to_vec()).entry.unwrap();
-        let env = |k: &str| if k == "AWS_REGION" { Some("us-east-2".into()) } else { None };
+        let entry = parse_entry("test", "test.md", raw_entry.as_bytes().to_vec())
+            .entry
+            .unwrap();
+        let env = |k: &str| {
+            if k == "AWS_REGION" {
+                Some("us-east-2".into())
+            } else {
+                None
+            }
+        };
         let reg = ConsoleService::resolve_aws_region(&entry, &empty_settings, &env).unwrap();
         assert_eq!(reg, "us-west-2");
 
         // 2. config.aws.default_region wins over env
-        let raw_no_reg = "---\nkb_format: 1\ntype: cw\ntitle: Test CW\n---\n```\nfields @message\n```\n";
-        let entry_no_reg = parse_entry("test2", "test2.md", raw_no_reg.as_bytes().to_vec()).entry.unwrap();
-        let env_cfg = |k: &str| if k == "KB_AWS_DEFAULT_REGION" { Some("eu-central-1".into()) } else { None };
-        let settings_with_reg = crate::config::load(&[], &env_cfg, &crate::config::Flags::default()).settings;
-        let reg2 = ConsoleService::resolve_aws_region(&entry_no_reg, &settings_with_reg, &env).unwrap();
+        let raw_no_reg =
+            "---\nkb_format: 1\ntype: cw\ntitle: Test CW\n---\n```\nfields @message\n```\n";
+        let entry_no_reg = parse_entry("test2", "test2.md", raw_no_reg.as_bytes().to_vec())
+            .entry
+            .unwrap();
+        let env_cfg = |k: &str| {
+            if k == "KB_AWS_DEFAULT_REGION" {
+                Some("eu-central-1".into())
+            } else {
+                None
+            }
+        };
+        let settings_with_reg =
+            crate::config::load(&[], &env_cfg, &crate::config::Flags::default()).settings;
+        let reg2 =
+            ConsoleService::resolve_aws_region(&entry_no_reg, &settings_with_reg, &env).unwrap();
         assert_eq!(reg2, "eu-central-1");
 
         // 3. AWS_REGION wins over AWS_DEFAULT_REGION
@@ -445,17 +492,26 @@ mod tests {
             "AWS_DEFAULT_REGION" => Some("ap-northeast-1".into()),
             _ => None,
         };
-        let reg3 = ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_both).unwrap();
+        let reg3 =
+            ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_both).unwrap();
         assert_eq!(reg3, "ap-southeast-1");
 
         // 4. AWS_DEFAULT_REGION used if AWS_REGION is empty
-        let env_def = |k: &str| if k == "AWS_DEFAULT_REGION" { Some("sa-east-1".into()) } else { None };
-        let reg4 = ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_def).unwrap();
+        let env_def = |k: &str| {
+            if k == "AWS_DEFAULT_REGION" {
+                Some("sa-east-1".into())
+            } else {
+                None
+            }
+        };
+        let reg4 =
+            ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_def).unwrap();
         assert_eq!(reg4, "sa-east-1");
 
         // 5. MissingRegionError if none set
         let env_none = |_: &str| None;
-        let err = ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_none).unwrap_err();
+        let err = ConsoleService::resolve_aws_region(&entry_no_reg, &empty_settings, &env_none)
+            .unwrap_err();
         assert_eq!(err, MissingRegionError);
     }
 }

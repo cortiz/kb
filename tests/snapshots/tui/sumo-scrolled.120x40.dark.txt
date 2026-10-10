@@ -37,7 +37,7 @@
 │                                              ││ 2. read the counts                                                   │
 │                                              ││ 3. then narrow by host                                               │
 └──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · S-↑↓ scroll · ? help · Esc quit
+ ↑↓ select · Enter pick · ^O console · ^E edit · Alt-A actions · S-↑↓ scroll · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 fg=245
@@ -324,4 +324,4 @@
 37:50..53 fg=245
 37:119..120 fg=240
 38:0..120 fg=240
-39:1..88 fg=245
+39:1..96 fg=245

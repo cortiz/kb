@@ -20,6 +20,8 @@ pub enum Then {
     Stay,
     /// Open the primary link or console and stay in the UI (Ctrl-O).
     Open,
+    /// Run the command safely and stay in the UI (Ctrl-G).
+    Run,
 }
 
 /// Everything the form needs, read from the entry and the saved state. Built outside `update`.

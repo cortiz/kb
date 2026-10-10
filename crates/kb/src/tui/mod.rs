@@ -33,10 +33,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event};
 use ratatui::crossterm::terminal::size;
 
-use crate::platform::{Opened, Platform, opener};
 use crate::platform::clipboard::{self, ClipboardSettings, Place};
+use crate::platform::{Opened, Platform, opener};
 use app::{Action, AppState, CopyReport, Effect, Options, RefreshInfo};
 use form::{FormSpec, Submission, Then};
+use run_modal::RunModalState;
 use terminal::{Signals, TerminalGuard, exit_code_for_signal};
 use theme::{Theme, ThemeEnv};
 use worker::{Reply, Request, Worker};
@@ -195,6 +196,30 @@ pub fn run(
                     dirty = true;
                 }
                 Effect::OpenEntry(id) => {
+                    let entry = ui_kb.entry(&id);
+                    if let Ok(entry) = &entry
+                        && entry.entry_type() == Some(EntryType::Code)
+                    {
+                        match code_view::load_code_view_state(&ui_kb, &id, &settings, false) {
+                            Ok(cv) => {
+                                pending.extend(
+                                    state
+                                        .update(Action::OpenCodeView(Box::new(cv)), Instant::now()),
+                                );
+                            }
+                            Err(e) => {
+                                pending.extend(state.update(
+                                    Action::CopyDone(CopyReport {
+                                        message: format!("Code view error: {e}"),
+                                        sent: false,
+                                    }),
+                                    Instant::now(),
+                                ));
+                            }
+                        }
+                        dirty = true;
+                        continue;
+                    }
                     let spec = FormSpec::load(&ui_kb, &id, &real_env);
                     let action = match spec {
                         Ok(Some(spec)) => Action::FormLoaded(Ok(Box::new(spec)), Then::Open),
@@ -209,6 +234,425 @@ pub fn run(
                         )),
                     };
                     pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::OpenActionMenu(id) => {
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            let env = platform.env();
+                            let is_ssh_without_display =
+                                env.ssh && env.display == crate::platform::Display::None;
+                            let actions = kb_core::action::ActionService::list_actions(
+                                &entry, &settings, None,
+                            );
+                            let title = entry.title().unwrap_or(entry.id()).to_string();
+                            let menu = action_view::ActionMenuState {
+                                id: id.clone(),
+                                title,
+                                entry_type: entry.entry_type(),
+                                actions,
+                                has_local_clone: false,
+                                is_ssh_without_display,
+                            };
+                            pending.extend(
+                                state
+                                    .update(Action::OpenActionMenu(Box::new(menu)), Instant::now()),
+                            );
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Error loading entry '{id}': {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::RunCustomAction { id, action_name } => {
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            let custom = settings
+                                .custom_actions()
+                                .iter()
+                                .find(|a| a.name == action_name)
+                                .cloned();
+                            if let Some(custom) = custom {
+                                let spec = FormSpec::load(&ui_kb, &id, &real_env);
+                                let action = match spec {
+                                    Ok(Some(spec)) => {
+                                        Action::FormLoaded(Ok(Box::new(spec)), Then::Run)
+                                    }
+                                    Err(e) => Action::FormLoaded(Err(e), Then::Run),
+                                    _ => {
+                                        let values = kb_core::varres::Values::new();
+                                        match kb_core::run::RunService::build_run_plan(
+                                            &entry,
+                                            &values,
+                                            Some(&custom),
+                                            settings.run_destructive_patterns(),
+                                        ) {
+                                            Ok(plan) => Action::OpenRunModal { id, plan },
+                                            Err(e) => Action::CopyDone(CopyReport {
+                                                message: format!("Cannot run custom action: {e}"),
+                                                sent: false,
+                                            }),
+                                        }
+                                    }
+                                };
+                                pending.extend(state.update(action, Instant::now()));
+                            } else {
+                                pending.extend(state.update(
+                                    Action::CopyDone(CopyReport {
+                                        message: format!("Custom action '{action_name}' not found"),
+                                        sent: false,
+                                    }),
+                                    Instant::now(),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Error loading entry '{id}': {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::OpenCodeTarget { id, target } => {
+                    let now = Instant::now();
+                    if let Some(cv) = &state.code_view {
+                        let report = match target.as_str() {
+                            "web" => {
+                                if let Some(permalink) = &cv.permalink {
+                                    match opener::open_url(
+                                        platform,
+                                        settings.opener_command(),
+                                        permalink,
+                                    ) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in browser".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(Opened::Printed(url)) => {
+                                            let outcome = clipboard::copy(
+                                                platform,
+                                                &clipboard_settings,
+                                                &url,
+                                                Place::Ui,
+                                            );
+                                            if outcome.sent() {
+                                                let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            }
+                                            CopyReport {
+                                                message: "Copied URL (no display)".into(),
+                                                sent: outcome.sent(),
+                                            }
+                                        }
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No web permalink available".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            "vscode" => {
+                                if platform.env().ssh {
+                                    CopyReport {
+                                        message: "Editor launch disabled over SSH".into(),
+                                        sent: false,
+                                    }
+                                } else if let Some(clone_path) = &cv.clone_path {
+                                    let abs_path = clone_path.join(&cv.path);
+                                    let url =
+                                        format!("vscode://file/{}:{}", abs_path.display(), cv.line);
+                                    match opener::open_url(
+                                        platform,
+                                        settings.opener_command(),
+                                        &url,
+                                    ) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in VS Code".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(_) => CopyReport {
+                                            message: "Opened in VS Code".into(),
+                                            sent: true,
+                                        },
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No local clone found".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            "idea" => {
+                                if platform.env().ssh {
+                                    CopyReport {
+                                        message: "Editor launch disabled over SSH".into(),
+                                        sent: false,
+                                    }
+                                } else if let Some(clone_path) = &cv.clone_path {
+                                    let abs_path = clone_path.join(&cv.path);
+                                    let url = format!(
+                                        "idea://open?file={}&line={}",
+                                        abs_path.display(),
+                                        cv.line
+                                    );
+                                    match opener::open_url(
+                                        platform,
+                                        settings.opener_command(),
+                                        &url,
+                                    ) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in IntelliJ".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(_) => CopyReport {
+                                            message: "Opened in IntelliJ".into(),
+                                            sent: true,
+                                        },
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No local clone found".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            _ => CopyReport {
+                                message: format!("Unknown open target: {target}"),
+                                sent: false,
+                            },
+                        };
+                        pending.extend(state.update(Action::CopyDone(report), now));
+                    }
+                    dirty = true;
+                }
+                Effect::CopyCodeLocation(loc) => {
+                    let outcome = clipboard::copy(platform, &clipboard_settings, &loc, Place::Ui);
+                    let report = CopyReport {
+                        message: if outcome.sent() {
+                            format!("Copied location: {loc}")
+                        } else {
+                            format!("Copy failed: {}", outcome.message_short())
+                        },
+                        sent: outcome.sent(),
+                    };
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
+                Effect::CopyCodePermalink(permalink) => {
+                    let outcome =
+                        clipboard::copy(platform, &clipboard_settings, &permalink, Place::Ui);
+                    let report = CopyReport {
+                        message: if outcome.sent() {
+                            "Copied permalink".to_string()
+                        } else {
+                            format!("Copy failed: {}", outcome.message_short())
+                        },
+                        sent: outcome.sent(),
+                    };
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
+                Effect::RepinCodeEntry { id, report } => {
+                    let now = Instant::now();
+                    let repin_res = (|| -> Result<(), String> {
+                        let entry = ui_kb.entry(&id).map_err(|e| e.to_string())?;
+                        let full_time = kb_core::author::render::rfc3339_utc(SystemTime::now());
+                        let today = if full_time.len() >= 10 {
+                            &full_time[..10]
+                        } else {
+                            "2026-10-10"
+                        };
+                        let file_path = std::path::Path::new(ui_kb.root()).join(entry.path());
+                        let content =
+                            std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+                        let updated = kb_core::code::CodeService::repin_entry(
+                            &file_path, &content, &report, today,
+                        )
+                        .map_err(|e| e.to_string())?;
+                        std::fs::write(&file_path, updated).map_err(|e| e.to_string())?;
+                        Ok(())
+                    })();
+
+                    match repin_res {
+                        Ok(()) => {
+                            if let Ok(cv) =
+                                code_view::load_code_view_state(&ui_kb, &id, &settings, false)
+                            {
+                                pending
+                                    .extend(state.update(Action::OpenCodeView(Box::new(cv)), now));
+                            }
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: "Re-pinned".to_string(),
+                                    sent: true,
+                                }),
+                                now,
+                            ));
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Re-pin failed: {e}"),
+                                    sent: false,
+                                }),
+                                now,
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::FetchAndRecheckCode(id) => {
+                    let now = Instant::now();
+                    match code_view::load_code_view_state(&ui_kb, &id, &settings, true) {
+                        Ok(cv) => {
+                            pending.extend(state.update(Action::OpenCodeView(Box::new(cv)), now));
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: "Fetched".to_string(),
+                                    sent: true,
+                                }),
+                                now,
+                            ));
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Fetch failed: {e}"),
+                                    sent: false,
+                                }),
+                                now,
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::RunEntry(id) => {
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            if entry.entry_type() != Some(EntryType::Cmd) {
+                                pending.extend(state.update(
+                                    Action::CopyDone(CopyReport {
+                                        message: format!("cannot run entry '{id}': expected cmd"),
+                                        sent: false,
+                                    }),
+                                    Instant::now(),
+                                ));
+                            } else {
+                                let spec = FormSpec::load(&ui_kb, &id, &real_env);
+                                let action = match spec {
+                                    Ok(Some(spec)) => {
+                                        Action::FormLoaded(Ok(Box::new(spec)), Then::Run)
+                                    }
+                                    Err(e) => Action::FormLoaded(Err(e), Then::Run),
+                                    _ => {
+                                        let values = kb_core::varres::Values::new();
+                                        match kb_core::run::RunService::build_run_plan(
+                                            &entry,
+                                            &values,
+                                            None,
+                                            settings.run_destructive_patterns(),
+                                        ) {
+                                            Ok(plan) => Action::OpenRunModal { id, plan },
+                                            Err(e) => Action::CopyDone(CopyReport {
+                                                message: format!("cannot run: {e}"),
+                                                sent: false,
+                                            }),
+                                        }
+                                    }
+                                };
+                                pending.extend(state.update(action, Instant::now()));
+                            }
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("cannot load entry: {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::ExecuteRun { id, plan } => {
+                    guard.suspend();
+                    let env_tuples: Vec<(String, String)> = plan
+                        .secret_env_vars
+                        .iter()
+                        .map(|s| (s.env_key.clone(), s.secret_value.clone()))
+                        .collect();
+                    let res = platform.run_interactive_command(
+                        &plan.shell,
+                        &plan.resolved_command,
+                        plan.cwd.as_deref(),
+                        &env_tuples,
+                        plan.stdin_payload.as_deref(),
+                    );
+                    let _ = guard.resume();
+                    if let Ok(sz) = terminal.size() {
+                        let _ =
+                            terminal.resize(ratatui::layout::Rect::new(0, 0, sz.width, sz.height));
+                    }
+                    let res = res.unwrap_or(kb_core::run::RunResult {
+                        exit_code: 1,
+                        duration: Duration::ZERO,
+                        killed_by_signal: None,
+                    });
+                    let _ = ui_kb.record_use(&id, SystemTime::now());
+                    let now = Instant::now();
+                    if res.exit_code == 0 && !settings.run_pause_after() {
+                        state.run_modal = None;
+                        pending.extend(state.update(
+                            Action::CopyDone(CopyReport {
+                                message: format!("Command completed in {:?}", res.duration),
+                                sent: false,
+                            }),
+                            now,
+                        ));
+                    } else {
+                        state.run_modal = Some(Box::new(RunModalState::Paused {
+                            id,
+                            exit_code: res.exit_code,
+                            duration: res.duration,
+                        }));
+                    }
                     dirty = true;
                 }
                 Effect::SubmitForm(sub) => {
@@ -241,6 +685,38 @@ pub fn run(
                                 );
                                 pending.extend(state.update(Action::CopyDone(report), now));
                                 pending.extend(state.update(Action::FormDone, now));
+                            }
+                            Then::Run => {
+                                let entry = ui_kb.entry(&sub.id).unwrap();
+                                let mut map = kb_core::varres::Values::new();
+                                for (name, val, _source) in &sub.values {
+                                    map.insert(name.clone(), val.clone());
+                                }
+                                match kb_core::run::RunService::build_run_plan(
+                                    &entry,
+                                    &map,
+                                    None,
+                                    settings.run_destructive_patterns(),
+                                ) {
+                                    Ok(plan) => {
+                                        pending.extend(state.update(Action::FormDone, now));
+                                        pending.extend(state.update(
+                                            Action::OpenRunModal {
+                                                id: sub.id.clone(),
+                                                plan,
+                                            },
+                                            now,
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        let report = CopyReport {
+                                            message: format!("cannot run: {e}"),
+                                            sent: false,
+                                        };
+                                        pending.extend(state.update(Action::CopyDone(report), now));
+                                        pending.extend(state.update(Action::FormDone, now));
+                                    }
+                                }
                             }
                         },
                         Recheck::Changed(spec) => {
@@ -676,7 +1152,10 @@ fn open_in_tui(
         }
         EntryType::Sumo => {
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 match kb.pick(id, PrintMode::Payload) {
                     Ok(p) => p,
@@ -716,11 +1195,7 @@ fn open_in_tui(
                 };
             };
 
-            let link = match ConsoleService::build_sumo_link(
-                base_url,
-                &query,
-                range.as_deref(),
-            ) {
+            let link = match ConsoleService::build_sumo_link(base_url, &query, range.as_deref()) {
                 Ok(l) => l,
                 Err(e) => {
                     return CopyReport {
@@ -775,7 +1250,10 @@ fn open_in_tui(
             };
 
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 match kb.pick(id, PrintMode::Payload) {
                     Ok(p) => p,

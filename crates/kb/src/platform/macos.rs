@@ -141,7 +141,8 @@ impl Platform for MacOs {
         command: &str,
         cwd: Option<&Path>,
         env_vars: &[(String, String)],
+        stdin_payload: Option<&str>,
     ) -> std::io::Result<super::RunResult> {
-        super::unix::run_interactive_command(shell, command, cwd, env_vars)
+        super::unix::run_interactive_command(shell, command, cwd, env_vars, stdin_payload)
     }
 }

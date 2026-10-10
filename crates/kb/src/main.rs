@@ -12,7 +12,7 @@ use kb_core::query::Query;
 use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
-use kb_cli::commands::{self, ShowMode, ShowOptions};
+use kb_cli::commands::{self, CodeCommand, ShowMode, ShowOptions};
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
 use kb_cli::varcli::VarArgs;
@@ -86,6 +86,37 @@ struct OpenArgs {
     with: Option<String>,
     #[command(flatten)]
     vars: VarArgs,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
+struct RunArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Force execution of destructive commands with --yes.
+    #[arg(long)]
+    force: bool,
+    /// Run a custom action instead of the entry's command.
+    #[arg(long, value_name = "NAME")]
+    action: Option<String>,
+    #[command(flatten)]
+    vars: VarArgs,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
+struct ActionsArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Print the actions as JSON.
+    #[arg(long)]
+    json: bool,
     /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
     #[arg(long = "not-tag", hide = true, value_name = "TAG")]
     not_tags: Vec<String>,
@@ -328,10 +359,14 @@ enum Command {
     Index(IndexCommand),
     /// Open the terminal UI (the same as running `kb` with no subcommand).
     Tui(TuiArgs),
+    /// List available actions for an entry.
+    Actions(ActionsArgs),
     /// Copy an entry's payload to the clipboard, asking for its variables first.
     Copy(CopyArgs),
     /// Open an entry's primary link, console deep link, or code target.
     Open(OpenArgs),
+    /// Run a command safely with confirmation and secret isolation.
+    Run(RunArgs),
     /// Fill in an entry's variables and copy (or print) the result.
     Use(UseArgs),
     /// List an entry's variables and the values that would be pre-filled.
@@ -351,6 +386,9 @@ enum Command {
     Config(ConfigCommand),
     /// Check the machine: root, index, config, clipboard, editor and opener, with fixes.
     Doctor(DoctorArgs),
+    /// Check, re-pin or inspect code links.
+    #[command(subcommand)]
+    Code(CodeCommand),
 }
 
 #[derive(Subcommand)]
@@ -486,8 +524,10 @@ fn main() -> ExitCode {
         Command::Search(a) => a.json,
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
+        Command::Actions(a) => a.json,
         Command::Copy(a) => a.json,
         Command::Open(_) => false,
+        Command::Run(_) => false,
         Command::Use(a) => a.json,
         Command::Vars(a) => a.json,
         Command::Show(a) => a.json,
@@ -501,6 +541,11 @@ fn main() -> ExitCode {
             ConfigCommand::Path(a) => a.json,
             ConfigCommand::Get(a) => a.json,
             ConfigCommand::Set(a) => a.json,
+        },
+        Command::Code(c) => match c {
+            CodeCommand::Check(a) => a.json,
+            CodeCommand::Repin(_) => false,
+            CodeCommand::Show(a) => a.json,
         },
         Command::Tui(_) => false,
     };
@@ -547,6 +592,13 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
+        Command::Actions(args) => commands::run_actions(
+            &platform,
+            &root,
+            &loaded,
+            &join_query(&args.query, &args.not_tags),
+            args.json,
+        ),
         Command::Copy(args) => {
             let query = join_query(&args.query, &args.not_tags);
             if args.raw {
@@ -563,6 +615,18 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
                 use_opts: args.vars.into_opts(false)?,
             };
             commands::run_open(&platform, &root, &loaded, &query, &opts)
+        }
+        Command::Run(args) => {
+            let query = join_query(&args.query, &args.not_tags);
+            let use_opts = args.vars.into_opts(false)?;
+            let yes = use_opts.yes;
+            let opts = kb_cli::commands::RunOpts {
+                yes,
+                force: args.force,
+                action: args.action,
+                use_opts,
+            };
+            commands::run_run(&platform, &root, &loaded, &query, &opts)
         }
         Command::Use(args) => {
             let query = join_query(&args.query, &args.not_tags);
@@ -606,6 +670,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             }
             ConfigCommand::List(a) => commands::config_list(&loaded, a.json),
         },
+        Command::Code(args) => commands::run_code(&platform, &root, &loaded, &args),
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }
