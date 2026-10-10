@@ -233,6 +233,46 @@ pub fn run(
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
+                Effect::OpenActionMenu(id) => {
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            let env = platform.env();
+                            let is_ssh_without_display = env.ssh && env.display == crate::platform::Display::None;
+                            let actions = kb_core::action::ActionService::list_actions(&entry, &settings, None);
+                            let title = entry.title().unwrap_or(entry.id()).to_string();
+                            let menu = action_view::ActionMenuState {
+                                id: id.clone(),
+                                title,
+                                entry_type: entry.entry_type(),
+                                actions,
+                                has_local_clone: false,
+                                is_ssh_without_display,
+                            };
+                            pending.extend(state.update(Action::OpenActionMenu(Box::new(menu)), Instant::now()));
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Error loading entry '{id}': {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::RunCustomAction { id, action_name } => {
+                    pending.extend(state.update(
+                        Action::CopyDone(CopyReport {
+                            message: format!("Custom action '{action_name}' on '{id}'"),
+                            sent: true,
+                        }),
+                        Instant::now(),
+                    ));
+                    dirty = true;
+                }
                 Effect::OpenCodeTarget { id, target } => {
                     let now = Instant::now();
                     if let Some(cv) = &state.code_view {

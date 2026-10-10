@@ -37,7 +37,7 @@
 │                                              ││                                                                      │
 │                                              ││                                                                      │
 └──────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit
+ ↑↓ select · Enter pick · ^Y copy · ^E edit · Alt-A actions · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 dim
@@ -94,4 +94,4 @@
 19:21..26 dim
 20:50..61 dim
 21:50..61 dim
-39:1..74 dim
+39:1..79 dim

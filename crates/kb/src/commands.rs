@@ -2155,6 +2155,89 @@ pub fn run_code_show(
     Ok(ExitCode::SUCCESS)
 }
 
+pub fn run_actions(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    use kb_core::action::ActionService;
+    use kb_core::code::{CloneCache, CodeService};
+    use crate::platform::SystemGitRunner;
+
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, json)? {
+        Next::Entry(id) => {
+            let entry = kb.entry(&id).map_err(io_error)?;
+            let mut clone = None;
+            if entry.entry_type() == Some(EntryType::Code) {
+                if let TypeFields::Code { code: Some(code_ref) } = entry.fields() {
+                    let cache_path = root.join(".kb/clones.json");
+                    let mut cache = CloneCache::load(&cache_path);
+                    let git_runner = SystemGitRunner;
+                    clone = CodeService::find_clone(
+                        &code_ref.repo,
+                        &loaded.settings,
+                        &mut cache,
+                        &git_runner,
+                    ).ok().flatten();
+                    let _ = cache.save(&cache_path);
+                }
+            }
+
+            let actions = ActionService::list_actions(&entry, &loaded.settings, clone.as_ref());
+            let primary = ActionService::primary_action(&entry, &loaded.settings, clone.as_ref());
+
+            let has_clone = clone.is_some();
+            let env = platform.env();
+            let is_ssh_without_display = env.ssh && env.display == crate::platform::Display::None;
+
+            if json {
+                let json_actions: Vec<serde_json::Value> = actions
+                    .iter()
+                    .map(|a| {
+                        let available = a.is_available(has_clone, is_ssh_without_display);
+                        serde_json::json!({
+                            "id": a.id,
+                            "key": a.key.to_string(),
+                            "name": a.name,
+                            "label": a.label,
+                            "kind": format!("{:?}", a.kind),
+                            "is_primary": a.is_primary,
+                            "needs_vars": a.needs_vars,
+                            "needs_confirm": a.needs_confirm,
+                            "available": available,
+                        })
+                    })
+                    .collect();
+
+                let doc = serde_json::json!({
+                    "id": entry.id(),
+                    "type": entry.entry_type().map(|t| t.name()).unwrap_or(""),
+                    "title": entry.title().unwrap_or(""),
+                    "primary_action": primary.as_ref().map(|p| p.id.as_str()),
+                    "actions": json_actions,
+                });
+                println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+            } else {
+                let ty_str = entry.entry_type().map(|t| t.name()).unwrap_or("entry");
+                let title = entry.title().unwrap_or(entry.id());
+                println!("Actions for {} ({}):", title, ty_str);
+                for a in &actions {
+                    println!("  [{}] {}", a.key, a.name);
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Next::Choose => {
+            eprintln!("kb: several close matches; use an exact ID");
+            Ok(ExitCode::from(1))
+        }
+        Next::Done(code) => Ok(code),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

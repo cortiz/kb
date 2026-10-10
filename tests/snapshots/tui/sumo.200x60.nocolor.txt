@@ -57,7 +57,7 @@
 │                                                                              ││ 48 | where status >= 447 | count by host_47                                                                          │
 │                                                                              ││ 49 // stage 48: filter and count                                                                              ↓ more │
 └──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
- ↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · S-↑↓ scroll · ? help · Esc quit
+ ↑↓ select · Enter pick · ^O console · ^E edit · Alt-A actions · S-↑↓ scroll · ? help · Esc quit
 --- styles ---
 0:0..3 bold
 0:3..22 dim
@@ -154,4 +154,4 @@
 56:82..85 dim
 57:82..85 dim
 57:192..198 dim
-59:1..88 dim
+59:1..96 dim

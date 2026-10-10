@@ -207,7 +207,7 @@ fn the_key_bar_in_each_state() {
     let results = state_for(&root, "", None, (120, 40), &theme);
     assert_eq!(
         bar(&results),
-        "↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit"
+        "↑↓ select · Enter pick · ^G run · ^E edit · Alt-A actions · ? help · Esc quit"
     );
     let typed = state_for(&root, "latency", None, (120, 40), &theme);
     assert!(bar(&typed).ends_with("Esc clear"), "{}", bar(&typed));

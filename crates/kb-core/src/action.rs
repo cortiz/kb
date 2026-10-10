@@ -32,6 +32,18 @@ pub struct Action {
     pub requires_display: bool, // disabled over SSH without GUI display
 }
 
+impl Action {
+    pub fn is_available(&self, has_local_clone: bool, is_ssh_without_display: bool) -> bool {
+        if self.requires_local_clone && !has_local_clone {
+            return false;
+        }
+        if self.requires_display && is_ssh_without_display {
+            return false;
+        }
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActionConfigWarning {
     pub entry_type: String,

@@ -110,6 +110,19 @@ struct RunArgs {
 }
 
 #[derive(Args)]
+struct ActionsArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Print the actions as JSON.
+    #[arg(long)]
+    json: bool,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
 struct UseArgs {
     /// An entry ID, or words to search for.
     #[arg(required = true, num_args = 1..)]
@@ -346,6 +359,8 @@ enum Command {
     Index(IndexCommand),
     /// Open the terminal UI (the same as running `kb` with no subcommand).
     Tui(TuiArgs),
+    /// List available actions for an entry.
+    Actions(ActionsArgs),
     /// Copy an entry's payload to the clipboard, asking for its variables first.
     Copy(CopyArgs),
     /// Open an entry's primary link, console deep link, or code target.
@@ -509,6 +524,7 @@ fn main() -> ExitCode {
         Command::Search(a) => a.json,
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
+        Command::Actions(a) => a.json,
         Command::Copy(a) => a.json,
         Command::Open(_) => false,
         Command::Run(_) => false,
@@ -576,6 +592,13 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
+        Command::Actions(args) => commands::run_actions(
+            &platform,
+            &root,
+            &loaded,
+            &join_query(&args.query, &args.not_tags),
+            args.json,
+        ),
         Command::Copy(args) => {
             let query = join_query(&args.query, &args.not_tags);
             if args.raw {

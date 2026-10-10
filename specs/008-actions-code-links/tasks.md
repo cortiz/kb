@@ -164,14 +164,14 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 5
 
-- [ ] T045 [P] [US5] Write failing integration tests for `kb actions` CLI in `tests/cli_actions.rs`: verify plain text list and `--json` schema output for each entry type.
-- [ ] T046 [P] [US5] Write failing PTY integration tests in `tests/tui_pty.rs`: verify `Alt-A` and `F2` open Action Menu popup overlay, pressing action key runs action, for `code` entries `Alt-A` opens Code View, and `Esc` closes menu.
+- [X] T045 [P] [US5] Write failing integration tests for `kb actions` CLI in `tests/cli_actions.rs`: verify plain text list and `--json` schema output for each entry type.
+- [X] T046 [P] [US5] Write failing PTY integration tests in `tests/tui_pty.rs`: verify `Alt-A` and `F2` open Action Menu popup overlay, pressing action key runs action, for `code` entries `Alt-A` opens Code View, and `Esc` closes menu.
 
 ### Implementation for User Story 5
 
-- [ ] T047 [US5] Implement `kb actions` CLI subcommand in `crates/kb/src/commands.rs`. Makes T045 pass.
-- [ ] T048 [US5] Implement TUI Action Menu modal (`action_view.rs`) in `crates/kb/src/tui/action_view.rs`: floating overlay window listing actions with keys, primary action first. Wire `Alt-A` and `F2` in `crates/kb/src/tui/keys.rs` and `crates/kb/src/tui/app.rs`. Makes T046 pass.
-- [ ] T049 [US5] Update TUI footer key bar in `crates/kb/src/tui/view.rs` to dynamically display the actions available for the currently selected entry type (FR-038).
+- [X] T047 [US5] Implement `kb actions` CLI subcommand in `crates/kb/src/commands.rs`. Makes T045 pass.
+- [X] T048 [US5] Implement TUI Action Menu modal (`action_view.rs`) in `crates/kb/src/tui/action_view.rs`: floating overlay window listing actions with keys, primary action first. Wire `Alt-A` and `F2` in `crates/kb/src/tui/keys.rs` and `crates/kb/src/tui/app.rs`. Makes T046 pass.
+- [X] T049 [US5] Update TUI footer key bar in `crates/kb/src/tui/view.rs` to dynamically display the actions available for the currently selected entry type (FR-038).
 
 **Checkpoint**: `Alt-A` displays all available actions across all entry types; `kb actions` prints action listings.
 

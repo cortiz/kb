@@ -209,6 +209,8 @@ pub enum Action {
     },
     /// Open the code view (Screen 3).
     OpenCodeView(Box<super::code_view::CodeViewState>),
+    /// Open the action menu modal.
+    OpenActionMenu(Box<super::action_view::ActionMenuState>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -234,6 +236,13 @@ pub enum Effect {
     SubmitForm(Box<Submission>),
     /// Ctrl-O: open the selected entry's primary link or console.
     OpenEntry(String),
+    /// Alt-A / F2: open the action menu modal.
+    OpenActionMenu(String),
+    /// Run a custom action.
+    RunCustomAction {
+        id: String,
+        action_name: String,
+    },
     /// Code view open target (web, vscode, idea).
     OpenCodeTarget {
         id: String,
@@ -313,6 +322,8 @@ pub struct AppState {
     pub run_modal: Option<Box<RunModalState>>,
     /// Screen 3: Code View, when it is open.
     pub code_view: Option<Box<super::code_view::CodeViewState>>,
+    /// Action Menu modal, when it is open.
+    pub action_menu: Option<Box<super::action_view::ActionMenuState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
@@ -357,6 +368,7 @@ impl AppState {
             add: None,
             run_modal: None,
             code_view: None,
+            action_menu: None,
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
@@ -383,7 +395,7 @@ impl AppState {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
-        } else if self.form.is_some() || self.add.is_some() || self.code_view.is_some() {
+        } else if self.form.is_some() || self.add.is_some() || self.code_view.is_some() || self.action_menu.is_some() {
             Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
@@ -514,6 +526,9 @@ impl AppState {
                 }
                 if self.run_modal.is_some() {
                     return self.run_modal_key(e);
+                }
+                if self.action_menu.is_some() {
+                    return self.action_menu_key(e, now);
                 }
                 if self.prompt.is_some() {
                     return self.prompt_key(e, now);
@@ -743,6 +758,10 @@ impl AppState {
             }
             Action::OpenCodeView(cv) => {
                 self.code_view = Some(cv);
+                Vec::new()
+            }
+            Action::OpenActionMenu(menu) => {
+                self.action_menu = Some(menu);
                 Vec::new()
             }
             Action::EditorReturned(error) => {
@@ -1007,6 +1026,61 @@ impl AppState {
         }
     }
 
+    /// A key while Action Menu modal is open.
+    fn action_menu_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        if key.code == keys::Code::Esc {
+            self.action_menu = None;
+            return Vec::new();
+        }
+        if let keys::Code::Char(c) = key.code {
+            if key.mods & (keys::CTRL | keys::ALT) != 0 {
+                return Vec::new();
+            }
+            let Some(menu) = self.action_menu.as_ref() else {
+                return Vec::new();
+            };
+            if let Some(action) = menu.actions.iter().find(|a| a.key == c) {
+                if !action.is_available(menu.has_local_clone, menu.is_ssh_without_display) {
+                    self.say("Action is disabled", MessageKind::Warning, now, true);
+                    return Vec::new();
+                }
+                let id = menu.id.clone();
+                let kind = action.kind;
+                let action_id = action.id.clone();
+                self.action_menu = None;
+                return match kind {
+                    kb_core::action::ActionKind::CopyPayload => vec![Effect::CopyPayload],
+                    kb_core::action::ActionKind::OpenUrl => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::RunCommand => vec![Effect::RunEntry(id)],
+                    kb_core::action::ActionKind::CodeView => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::CopyCodeLocation => vec![Effect::CopyCodeLocation(id)],
+                    kb_core::action::ActionKind::CopyWebPermalink => vec![Effect::CopyCodePermalink(id)],
+                    kb_core::action::ActionKind::OpenEditor => {
+                        if action_id == "open-vscode" {
+                            vec![Effect::OpenCodeTarget { id, target: "vscode".into() }]
+                        } else if action_id == "open-idea" {
+                            vec![Effect::OpenCodeTarget { id, target: "idea".into() }]
+                        } else {
+                            vec![Effect::OpenEntry(id)]
+                        }
+                    }
+                    kb_core::action::ActionKind::RepinCode => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::FetchAndCheck => vec![Effect::OpenEntry(id)],
+                    kb_core::action::ActionKind::CustomCommand => {
+                        vec![Effect::RunCustomAction { id, action_name: action_id }]
+                    }
+                };
+            }
+        }
+        Vec::new()
+    }
+
     fn results_arrived(&mut self, generation: u64, page: Page) -> Vec<Effect> {
         if generation != self.search_gen {
             return Vec::new();
@@ -1139,6 +1213,19 @@ impl AppState {
             },
             Command::Run => match self.selected_result() {
                 Some(r) => vec![Effect::RunEntry(r.id.clone())],
+                None => {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            },
+            Command::ActionMenu => match self.selected_result() {
+                Some(r) => {
+                    if r.entry_type == kb_core::entry::EntryType::Code {
+                        vec![Effect::OpenEntry(r.id.clone())]
+                    } else {
+                        vec![Effect::OpenActionMenu(r.id.clone())]
+                    }
+                }
                 None => {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()

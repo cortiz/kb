@@ -152,6 +152,8 @@ pub enum Command {
     Open,
     /// Ctrl-G: run the command safely with confirmation.
     Run,
+    /// Alt-A / F2: open the action menu modal.
+    ActionMenu,
     /// Alt-C: copy the payload with its `{{variables}}` left in.
     CopyTemplate,
     Edit,
@@ -297,6 +299,15 @@ pub const BINDINGS: &[Binding] = &[
         display: "Ctrl-G",
         label: "run the command safely",
         bar: bar(6, 6, "^G run"),
+    },
+    Binding {
+        keys: &[Key::new(Code::Char('a'), ALT), k(Code::F(2))],
+        modes: SF,
+        command: Command::ActionMenu,
+        group: Group::Pick,
+        display: "Alt-A  F2",
+        label: "open action menu",
+        bar: bar(7, 7, "Alt-A actions"),
     },
     Binding {
         keys: &[Key::new(Code::Char('c'), ALT)],
@@ -636,6 +647,7 @@ pub enum BarKind {
     Results {
         text_empty: bool,
         preview_scrolls: bool,
+        entry_type: Option<kb_core::entry::EntryType>,
     },
     NoResults {
         text_empty: bool,
@@ -666,18 +678,93 @@ pub fn key_bar(kind: BarKind, width: usize) -> String {
         BarKind::Results {
             text_empty,
             preview_scrolls,
+            entry_type,
         } => {
-            let mut items = from_table(Mode::Search, &|c| {
-                matches!(
-                    c,
-                    Command::Down
-                        | Command::Pick
-                        | Command::TypeNext
-                        | Command::Copy
-                        | Command::Edit
-                        | Command::HelpKey
-                ) || (preview_scrolls && c == Command::ScrollDown)
-            });
+            let mut items = match entry_type {
+                Some(kb_core::entry::EntryType::Link) => {
+                    let mut items = vec![
+                        (1, 8, "↑↓ select".to_string()),
+                        (2, 10, "Enter pick".to_string()),
+                        (3, 6, "^O open".to_string()),
+                        (4, 5, "^E edit".to_string()),
+                        (5, 7, "Alt-A actions".to_string()),
+                        (7, 7, "? help".to_string()),
+                    ];
+                    if preview_scrolls {
+                        items.push((6, 7, "S-↑↓ scroll".to_string()));
+                    }
+                    items
+                }
+                Some(kb_core::entry::EntryType::Sumo) | Some(kb_core::entry::EntryType::Cw) => {
+                    let mut items = vec![
+                        (1, 8, "↑↓ select".to_string()),
+                        (2, 10, "Enter pick".to_string()),
+                        (3, 6, "^O console".to_string()),
+                        (4, 5, "^E edit".to_string()),
+                        (5, 7, "Alt-A actions".to_string()),
+                        (7, 7, "? help".to_string()),
+                    ];
+                    if preview_scrolls {
+                        items.push((6, 7, "S-↑↓ scroll".to_string()));
+                    }
+                    items
+                }
+                Some(kb_core::entry::EntryType::Cmd) => {
+                    let mut items = vec![
+                        (1, 8, "↑↓ select".to_string()),
+                        (2, 10, "Enter pick".to_string()),
+                        (3, 6, "^G run".to_string()),
+                        (4, 5, "^E edit".to_string()),
+                        (5, 7, "Alt-A actions".to_string()),
+                        (7, 7, "? help".to_string()),
+                    ];
+                    if preview_scrolls {
+                        items.push((6, 7, "S-↑↓ scroll".to_string()));
+                    }
+                    items
+                }
+                Some(kb_core::entry::EntryType::Code) => {
+                    let mut items = vec![
+                        (1, 8, "↑↓ select".to_string()),
+                        (2, 10, "Enter pick".to_string()),
+                        (3, 6, "^O code view".to_string()),
+                        (4, 5, "^E edit".to_string()),
+                        (5, 7, "Alt-A actions".to_string()),
+                        (7, 7, "? help".to_string()),
+                    ];
+                    if preview_scrolls {
+                        items.push((6, 7, "S-↑↓ scroll".to_string()));
+                    }
+                    items
+                }
+                Some(kb_core::entry::EntryType::Sql) | Some(kb_core::entry::EntryType::Prompt) => {
+                    let mut items = vec![
+                        (1, 8, "↑↓ select".to_string()),
+                        (2, 10, "Enter pick".to_string()),
+                        (3, 4, "^Y copy".to_string()),
+                        (4, 5, "^E edit".to_string()),
+                        (5, 7, "Alt-A actions".to_string()),
+                        (7, 7, "? help".to_string()),
+                    ];
+                    if preview_scrolls {
+                        items.push((6, 7, "S-↑↓ scroll".to_string()));
+                    }
+                    items
+                }
+                None => {
+                    from_table(Mode::Search, &|c| {
+                        matches!(
+                            c,
+                            Command::Down
+                                | Command::Pick
+                                | Command::TypeNext
+                                | Command::Copy
+                                | Command::Edit
+                                | Command::HelpKey
+                        ) || (preview_scrolls && c == Command::ScrollDown)
+                    })
+                }
+            };
             items.push(esc(text_empty, 8));
             items
         }
@@ -734,6 +821,7 @@ pub fn short_label(c: Command) -> &'static str {
         Command::CopyTemplate => "copy template",
         Command::Open => "open",
         Command::Run => "run",
+        Command::ActionMenu => "action menu",
         Command::Edit => "edit entry",
         Command::AddEntry => "add entry",
         Command::RenameEntry => "rename entry",
