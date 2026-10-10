@@ -7,28 +7,28 @@
 │ cmd    Deploy service                        ││ cmd/cache-role-flush.md                                              │
 │        #deploy #prod                         ││                                                                      │
 │ cmd    Tail pod logs                         ││ ── payload ───────────────────────────────────────────────────────── │
-│        #k8s #prod                            ││ 1 redis-cli --scan --pattern 'roles:*' | xargs redis-cli del         │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Shift-PgUp         preview page                          │ │
-│ │ Ctrl-Y             copy payload                         Alt-P              zoom preview                          │ │
-│ │ Alt-C              copy template                        ←                  cursor left                           │ │
-│ │ Ctrl-E             edit entry                           →                  cursor right                          │ │
-│ │ ↓  Ctrl-N  Ctrl-J  next result                          Home  Ctrl-A       line start                            │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result                      End                line end                              │ │
-│ │ PgDn               page down                            Backspace          delete, drop chip                     │ │
-│ │ PgUp               page up                              Delete             delete                                │ │
-│ │ Ctrl-End           last result                          Ctrl-W             delete word                           │ │
-│ │ Ctrl-Home          first result                         Ctrl-U             clear line                            │ │
-│ │ Tab                next type                            Ctrl-L             refresh                               │ │
-│ │ Shift-Tab          previous type                        ?                  help                                  │ │
-│ │ Shift-↓            scroll preview                       F1                 help                                  │ │
-│ │ Shift-↑            scroll preview                       Esc                clear / quit                          │ │
-│ │ Shift-PgDn         preview page                         Ctrl-C             exit                                  │ │
+│ │ Enter              pick and exit                        Shift-PgDn         preview page                          │ │
+│ │ Ctrl-Y             copy payload                         Shift-PgUp         preview page                          │ │
+│ │ Alt-C              copy template                        Alt-P              zoom preview                          │ │
+│ │ Ctrl-E             edit entry                           ←                  cursor left                           │ │
+│ │ Ctrl-N             add entry                            →                  cursor right                          │ │
+│ │ Ctrl-R             rename entry                         Home  Ctrl-A       line start                            │ │
+│ │ Ctrl-X             delete entry                         End                line end                              │ │
+│ │ ↓  Ctrl-J          next result                          Backspace          delete, drop chip                     │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Delete             delete                                │ │
+│ │ PgDn               page down                            Ctrl-W             delete word                           │ │
+│ │ PgUp               page up                              Ctrl-U             clear line                            │ │
+│ │ Ctrl-End           last result                          Ctrl-L             refresh                               │ │
+│ │ Ctrl-Home          first result                         ?                  help                                  │ │
+│ │ Tab                next type                            F1                 help                                  │ │
+│ │ Shift-Tab          previous type                        Esc                clear / quit                          │ │
+│ │ Shift-↓            scroll preview                       Ctrl-C             exit                                  │ │
+│ │ Shift-↑            scroll preview                                                                                │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
-│ cw     Queue depth                           ││                                                                      │
 │        #prod #sqs                            ││                                                                      │
 │ link   Grafana dashboards                    ││                                                                      │
 │        #observability                        ││                                                                      │
@@ -81,24 +81,15 @@
 8:50..118 fg=246
 8:119..120 fg=246
 9:0..1 fg=246
-9:9..13 fg=241
-9:14..19 fg=241
-9:47..49 fg=246
-9:50..52 fg=241
-9:52..61 fg=25
-9:61..64 fg=240
-9:64..68 fg=94
-9:68..71 fg=240
-9:71..78 fg=94
-9:79..88 fg=22
-9:89..90 fg=240
-9:91..96 fg=25
+9:2..3 fg=246
+9:3..9 fg=241
+9:9..118 fg=246
 9:119..120 fg=246
 10:0..1 fg=246
 10:2..3 fg=246 bold
-10:3..8 fg=241 bold
-10:8..9 fg=241
-10:9..118 fg=246
+10:3..8 fg=34 bold
+10:47..49 fg=246
+10:117..118 fg=246
 10:119..120 fg=246
 11:0..1 fg=246
 11:2..3 fg=246
@@ -203,23 +194,27 @@
 26:119..120 fg=246
 27:0..1 fg=246
 27:2..3 fg=246
-27:4..72 fg=241
+27:9..14 fg=241
+27:15..23 fg=241
+27:47..49 fg=246
 27:117..118 fg=246
 27:119..120 fg=246
 28:0..1 fg=246
 28:2..3 fg=246 bold
 28:3..4 fg=106 bold
 28:4..8 fg=241 bold
-28:8..47 fg=241
-28:47..49 fg=246
+28:8..72 fg=241
 28:117..118 fg=246
 28:119..120 fg=246
 29:0..1 fg=246
-29:2..118 fg=246
+29:2..3 fg=246
+29:4..47 fg=241
+29:47..49 fg=246
+29:117..118 fg=246
 29:119..120 fg=246
 30:0..1 fg=246
-30:2..8 fg=106 bold
-30:47..49 fg=246
+30:2..8 fg=246 bold
+30:8..118 fg=246
 30:119..120 fg=246
 31:0..1 fg=246
 31:9..14 fg=241

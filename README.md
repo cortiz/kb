@@ -344,7 +344,10 @@ printed on stderr after the UI closes.
 | `Ctrl-Y` | copy the payload and stay open |
 | `Alt-C` | copy the payload with its `{{variables}}` left in |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
-| `↓  Ctrl-N  Ctrl-J` | select the next result |
+| `Ctrl-N` | add an entry from the clipboard |
+| `Ctrl-R` | rename the entry |
+| `Ctrl-X` | delete the entry |
+| `↓  Ctrl-J` | select the next result |
 | `↑  Ctrl-P  Ctrl-K` | select the previous result |
 | `PgDn` | down one page |
 | `PgUp` | up one page |
@@ -465,6 +468,83 @@ Reading the clipboard uses `pbpaste` (macOS), `wl-paste` (Wayland), then `xclip 
 (X11), 2 seconds each. Over SSH it is not read at all (terminals do not give the clipboard back),
 and kb says so and starts with an empty body. `kb doctor` shows which program will be used.
 
+### The add form
+
+`Ctrl-N` in the list (or `kb add` in a terminal without `--yes`) reads the clipboard and opens the
+add form: the type chips, title, tags, the variables found in the body, where the entry will be
+saved, the body (colored, read-only here) and optional notes. The focus starts on the title; it
+starts on the type when the clipboard was empty or unreadable or kb was not sure.
+
+| Key | |
+|-----|--|
+| `Tab`, `Shift-Tab` | next / previous field (a partial tag is completed from the tags already in the KB) |
+| `←` `→` on the type | change the type |
+| `Ctrl-S` | save: the entry is checked like `kb lint` first; a likely secret is marked in the body and refused, and there is no "save anyway" in the form |
+| `Ctrl-E` | edit the body in your editor; type and variables are detected again |
+| `Ctrl-P` | preview the entry as the list will show it; `Esc` returns |
+| `Esc` | close; asks `Discard this entry? (y/N)` if anything changed |
+
+After saving, the entry is selected in the list (the search line holds its title).
+**`Ctrl-N` used to select the next result**; it now adds. `↓` and `Ctrl-J` still move down.
+
+### Variable suggestions
+
+In the form, the Variables list also shows **suggestions**: literal values kb thinks are
+parameters. Select one with `↑` `↓` and press `Space` to accept it: every occurrence of the value
+becomes `{{name}}` and the variable is declared with the original value as its default, so the
+entry still resolves to exactly the text you pasted. Nothing is ever applied on its own, and
+`kb add --yes` applies none. Only these five patterns are looked for:
+
+| Pattern | Becomes |
+|---------|---------|
+| `prod`, `production`, `stage`, `staging`, `dev`, `qa` (whole words) | `env`, an enum of the matching options |
+| AWS regions such as `us-east-1` | `region` |
+| `-30m`, `24h`, `7d`, `INTERVAL '1 day'` (only the number) | `minutes`, `hours` or `days`, a number |
+| a 12-digit account ID in an ARN or after `account` | `account` |
+| a UUID, or a run of nine or more digits | `id` |
+
+On a declared variable, `k` cycles its kind (`text`, `number`, `enum`, `secret`), `d` sets the
+default (refused for a secret), `o` sets an enum's options and `l` writes the reference as a
+literal (`\{{name}}`), for text that only looks like a variable. A name that looks numeric
+(`minutes`, `limit`, `days`, `count`, `port`) starts as a number and one that looks like a secret
+(`token`, `password`, `secret`, `key`, `api_key`, or ending in `_token`, `_password`, `_secret`,
+`_key`) as a secret with no default.
+
+### Writing in your editor
+
+`kb add --editor` skips the form: a template for the type (with `--title`, `--tag` and any body
+already in place, the optional fields as `# key: value` comments) opens in your editor on a
+private temporary file in the system temp directory, never in the KB. When the editor closes kb
+checks the result; a valid one is saved and its ID printed. Otherwise the problems are listed and
+you choose `[e]dit again`, `[s]ave anyway` (not offered when there is a likely secret) or
+`[d]iscard`. Saving an unchanged template, or an editor that exits with an error, cancels (exit
+130). The ID is `--path`, else made from the type and title as above. Editors that return at once
+(`code`, `subl`) need their wait flag, for example `editor = "code --wait"`.
+
+### Editing, renaming and deleting
+
+```sh
+kb edit <id|words>      # the entry's file in your editor, then the same checks as above
+kb mv <id> <new-id>     # rename; folders are created, emptied ones removed
+kb rm <id> [-y]         # delete after asking "Delete cw/foo? (y/N)"
+```
+
+`kb edit` takes an exact ID, or words that find exactly one entry (several matches list up to five
+IDs and exit 1). A clean change gets a new `updated`; nothing else in the file is touched. With
+errors you get the same three choices, and `[d]iscard` puts the old file back. `--json` prints
+`{"id", "status", "findings"}` and never asks. The list's `Ctrl-E` still just opens the editor and
+shows the first error; it does not touch `updated`.
+
+`kb mv` carries the entry's usage and remembered variable values to the new ID, so its place in the
+list does not change, even if the content was edited first. It refuses a target that exists (in
+any letter case). `kb rm` forgets usage and remembered values. When the KB is a git work tree and
+the file is tracked, both use `git mv` / `git rm` (and say so); otherwise, or if git fails, they
+use plain file operations. Committing is up to you. `Ctrl-R` and `Ctrl-X` in the list do the same
+with a prompt on the key bar.
+
+Exit codes for `add`, `edit`, `mv` and `rm`: `0` done, `1` invalid, not found, ambiguous or target
+exists, `2` usage or I/O error, `130` cancelled.
+
 ## Checking your setup
 
 ```sh
@@ -475,7 +555,7 @@ kb doctor --json
 
 `kb doctor` looks at the KB root and index, the config file (and any problems in it), the display
 server, SSH, tmux and screen, which clipboard method kb will use and which others work, true
-color, the editor Ctrl-E will launch, and the URL opener. It exits 1 if a check fails; warnings
+color, the program `kb add` and Ctrl-N read the clipboard with (it only looks for the program; it never reads your clipboard), the editor Ctrl-E will launch, and the URL opener. It exits 1 if a check fails; warnings
 alone exit 0.
 
 ## JSON output

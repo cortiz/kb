@@ -7,28 +7,28 @@
 │ cmd    Deploy service                        ││ cmd/cache-role-flush.md                                              │
 │        #deploy #prod                         ││                                                                      │
 │ cmd    Tail pod logs                         ││ ── payload ───────────────────────────────────────────────────────── │
-│        #k8s #prod                            ││ 1 redis-cli --scan --pattern 'roles:*' | xargs redis-cli del         │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Shift-PgUp         preview page                          │ │
-│ │ Ctrl-Y             copy payload                         Alt-P              zoom preview                          │ │
-│ │ Alt-C              copy template                        ←                  cursor left                           │ │
-│ │ Ctrl-E             edit entry                           →                  cursor right                          │ │
-│ │ ↓  Ctrl-N  Ctrl-J  next result                          Home  Ctrl-A       line start                            │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result                      End                line end                              │ │
-│ │ PgDn               page down                            Backspace          delete, drop chip                     │ │
-│ │ PgUp               page up                              Delete             delete                                │ │
-│ │ Ctrl-End           last result                          Ctrl-W             delete word                           │ │
-│ │ Ctrl-Home          first result                         Ctrl-U             clear line                            │ │
-│ │ Tab                next type                            Ctrl-L             refresh                               │ │
-│ │ Shift-Tab          previous type                        ?                  help                                  │ │
-│ │ Shift-↓            scroll preview                       F1                 help                                  │ │
-│ │ Shift-↑            scroll preview                       Esc                clear / quit                          │ │
-│ │ Shift-PgDn         preview page                         Ctrl-C             exit                                  │ │
+│ │ Enter              pick and exit                        Shift-PgDn         preview page                          │ │
+│ │ Ctrl-Y             copy payload                         Shift-PgUp         preview page                          │ │
+│ │ Alt-C              copy template                        Alt-P              zoom preview                          │ │
+│ │ Ctrl-E             edit entry                           ←                  cursor left                           │ │
+│ │ Ctrl-N             add entry                            →                  cursor right                          │ │
+│ │ Ctrl-R             rename entry                         Home  Ctrl-A       line start                            │ │
+│ │ Ctrl-X             delete entry                         End                line end                              │ │
+│ │ ↓  Ctrl-J          next result                          Backspace          delete, drop chip                     │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Delete             delete                                │ │
+│ │ PgDn               page down                            Ctrl-W             delete word                           │ │
+│ │ PgUp               page up                              Ctrl-U             clear line                            │ │
+│ │ Ctrl-End           last result                          Ctrl-L             refresh                               │ │
+│ │ Ctrl-Home          first result                         ?                  help                                  │ │
+│ │ Tab                next type                            F1                 help                                  │ │
+│ │ Shift-Tab          previous type                        Esc                clear / quit                          │ │
+│ │ Shift-↓            scroll preview                       Ctrl-C             exit                                  │ │
+│ │ Shift-↑            scroll preview                                                                                │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
-│ cw     Queue depth                           ││                                                                      │
 │        #prod #sqs                            ││                                                                      │
 │ link   Grafana dashboards                    ││                                                                      │
 │        #observability                        ││                                                                      │
@@ -61,12 +61,10 @@
 7:9..16 dim
 7:17..22 dim
 8:2..8 bold
-9:9..13 dim
+9:3..13 dim
 9:14..19 dim
 9:50..52 dim
-10:2..3 bold
-10:3..8 bold+dim
-10:8..9 dim
+10:2..8 bold
 11:9..17 dim
 12:2..8 bold
 12:50..61 dim
@@ -88,12 +86,12 @@
 25:9..14 dim
 25:15..22 dim
 26:2..8 bold
-27:4..72 dim
+27:9..14 dim
+27:15..23 dim
 28:2..4 bold
 28:4..8 bold+dim
-28:8..47 dim
-29:9..15 dim
-29:16..24 dim
+28:8..72 dim
+29:4..47 dim
 30:2..8 bold
 31:9..14 dim
 31:15..19 dim

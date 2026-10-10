@@ -447,7 +447,14 @@ fn cmd(text: &str) -> Option<Confidence> {
     let program = words.next().unwrap_or("");
     let known =
         COMMANDS.contains(&program) || program.starts_with("./") || program.starts_with("~/");
+    // several lines that each start with a known command are a script even without flags
+    let every_line_a_command = lines.len() >= 2
+        && body.lines().filter(|l| !l.trim().is_empty()).all(|l| {
+            let first = l.split_whitespace().next().unwrap_or("");
+            COMMANDS.contains(&first)
+        });
     let others = [
+        every_line_a_command,
         FLAG.is_match(body),
         CHAIN.is_match(body),
         REDIRECT.is_match(body),

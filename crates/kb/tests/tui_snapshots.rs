@@ -487,3 +487,137 @@ mod form {
         assert!(render(&s, &theme).contains("range: -15m"));
     }
 }
+
+// ---- the add form (screen 4) ----
+
+mod add_form {
+    use super::*;
+    use kb_cli::tui::add::AddState;
+    use kb_cli::tui::app::{Action, AppState, Options};
+    use kb_cli::tui::keys::{CTRL, Code, Key};
+    use kb_core::author::{Draft, DraftOptions, DraftSource};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const CW: &str = "fields @timestamp, @message\n| filter @message like /{{fn}}/\n| stats pct(@duration, 99) by bin({{minutes}}m)";
+
+    fn open(
+        text: &str,
+        size: (u16, u16),
+        theme_name: &str,
+    ) -> (AppState, kb_cli::tui::theme::Theme) {
+        let theme = theme_of(theme_name);
+        let opts = DraftOptions {
+            title: Some("Authorizer p99 latency".into()),
+            tags: vec!["lambda".into()],
+            ..Default::default()
+        };
+        let draft = Draft::from_text(text, DraftSource::Clipboard, &opts);
+        let mut state = AppState::new(Options::default(), size, "", "~/kb".into());
+        let now = UNIX_EPOCH + Duration::from_secs(1_791_547_200);
+        let tags = vec![("lambda".to_string(), 3), ("auth".to_string(), 2)];
+        state.add = Some(Box::new(AddState::open(
+            draft,
+            tags,
+            None,
+            now,
+            theme.is_color(),
+        )));
+        (state, theme)
+    }
+
+    fn press(state: &mut AppState, code: Code, mods: u8) {
+        let ev = match code {
+            Code::Char(c) => {
+                let m = if mods & CTRL != 0 {
+                    ratatui::crossterm::event::KeyModifiers::CONTROL
+                } else {
+                    ratatui::crossterm::event::KeyModifiers::NONE
+                };
+                ratatui::crossterm::event::KeyEvent::new(
+                    ratatui::crossterm::event::KeyCode::Char(c),
+                    m,
+                )
+            }
+            Code::Esc => ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Esc,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ),
+            _ => unreachable!(),
+        };
+        let _ = Key::new(code, mods);
+        state.update(Action::Key(ev), std::time::Instant::now());
+    }
+
+    #[test]
+    fn wide_in_three_themes() {
+        for t in ["dark", "light", "nocolor"] {
+            let (state, theme) = open(CW, (120, 40), t);
+            let shot = render(&state, &theme);
+            assert!(
+                shot.contains("New entry · from clipboard · detected cw (high)"),
+                "{shot}"
+            );
+            assert!(
+                shot.contains("{{fn}}") && shot.contains("Saves to"),
+                "{shot}"
+            );
+            assert_snapshot(&format!("add-form.120x40.{t}"), &shot);
+        }
+    }
+
+    #[test]
+    fn suggestions_show_under_the_variables() {
+        let (mut state, theme) = open(
+            "_sourceCategory=prod/lambda/authorizer | timeslice 5m | where region = \"us-east-1\"",
+            (120, 40),
+            "dark",
+        );
+        state.add.as_mut().unwrap().focus = kb_cli::tui::add::Field::Variables;
+        let shot = render(&state, &theme);
+        assert!(
+            shot.contains("suggest  prod → {{env}}  enum   [space]"),
+            "{shot}"
+        );
+        assert_snapshot("add-form-suggestions.120x40.dark", &shot);
+    }
+
+    #[test]
+    fn narrow() {
+        let (state, theme) = open(CW, (80, 30), "dark");
+        assert_snapshot("add-form.80x30.dark", &render(&state, &theme));
+    }
+
+    #[test]
+    fn link_shows_fields_instead_of_a_body() {
+        let (state, theme) = open("https://example.com/runbooks/auth", (120, 40), "dark");
+        let shot = render(&state, &theme);
+        assert!(shot.contains("Link") && !shot.contains("Body"), "{shot}");
+        assert_snapshot("add-form-link.120x40.dark", &shot);
+    }
+
+    #[test]
+    fn a_secret_is_highlighted_and_explained() {
+        let (mut state, theme) = open(
+            "aws s3 ls # AKIAIOSFODNN7EXAMPLE\nkubectl get pods -n prod",
+            (120, 40),
+            "dark",
+        );
+        press(&mut state, Code::Char('s'), CTRL);
+        let shot = render(&state, &theme);
+        assert!(shot.contains("KB060"), "{shot}");
+        assert_snapshot("add-form-secret.120x40.dark", &shot);
+    }
+
+    #[test]
+    fn preview_and_the_discard_prompt() {
+        let (mut state, theme) = open(CW, (120, 40), "dark");
+        press(&mut state, Code::Char('p'), CTRL);
+        assert_snapshot("add-form-preview.120x40.dark", &render(&state, &theme));
+        press(&mut state, Code::Esc, 0);
+        state.add.as_mut().unwrap().changed = true;
+        press(&mut state, Code::Esc, 0);
+        let shot = render(&state, &theme);
+        assert!(shot.contains("Discard this entry? (y/N)"), "{shot}");
+        assert_snapshot("add-form-discard.120x40.dark", &shot);
+    }
+}

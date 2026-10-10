@@ -879,6 +879,14 @@ fn clear(buf: &mut Buffer, r: Rect) {
 fn draw_keybar(state: &AppState, theme: &Theme, l: &Layout, buf: &mut Buffer) {
     let r = l.keybar;
     let w = usize::from(r.width).saturating_sub(2);
+    if let Some(p) = &state.prompt {
+        let mut text = p.text();
+        if let Some(m) = &state.message {
+            text = format!("{text}   {}", m.text);
+        }
+        buf.set_string(r.x + 1, r.y, truncate(&text, w), theme.warning());
+        return;
+    }
     let (text, style) = match &state.message {
         Some(m) => (
             truncate(&m.text, w),

@@ -1,37 +1,40 @@
  kb · ~/kb · 32 entries
- ›                                                                      32 / 32
-  ┌ keys ────────────────────────────────────────────────────────────────────┐
-┌ │ Enter              pick and exit    Shift-PgUp         preview page      │─┐
-│ │ Ctrl-Y             copy payload     Alt-P              zoom preview      │ │
-│ │ Alt-C              copy template    ←                  cursor left       │ │
-│ │ Ctrl-E             edit entry       →                  cursor right      │ │
-│ │ ↓  Ctrl-N  Ctrl-J  next result      Home  Ctrl-A       line start        │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result  End                line end          │ │
-│ │ PgDn               page down        Backspace          delete, drop ch…  │ │
-│ │ PgUp               page up          Delete             delete            │ │
-│ │ Ctrl-End           last result      Ctrl-W             delete word       │ │
-│ │ Ctrl-Home          first result     Ctrl-U             clear line        │ │
-│ │ Tab                next type        Ctrl-L             refresh           │ │
-│ │ Shift-Tab          previous type    ?                  help              │ │
-│ │ Shift-↓            scroll preview   F1                 help              │ │
-│ │ Shift-↑            scroll preview   Esc                clear / quit      │ │
-│ │ Shift-PgDn         preview page     Ctrl-C             exit              │ │
+ ›┌ keys ────────────────────────────────────────────────────────────────────┐2
+  │ Enter              pick and exit    Shift-PgDn         preview page      │
+┌ │ Ctrl-Y             copy payload     Shift-PgUp         preview page      │─┐
+│ │ Alt-C              copy template    Alt-P              zoom preview      │ │
+│ │ Ctrl-E             edit entry       ←                  cursor left       │ │
+│ │ Ctrl-N             add entry        →                  cursor right      │ │
+│ │ Ctrl-R             rename entry     Home  Ctrl-A       line start        │ │
+│ │ Ctrl-X             delete entry     End                line end          │ │
+│ │ ↓  Ctrl-J          next result      Backspace          delete, drop ch…  │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result  Delete             delete            │ │
+│ │ PgDn               page down        Ctrl-W             delete word       │ │
+│ │ PgUp               page up          Ctrl-U             clear line        │ │
+│ │ Ctrl-End           last result      Ctrl-L             refresh           │ │
+│ │ Ctrl-Home          first result     ?                  help              │ │
+│ │ Tab                next type        F1                 help              │ │
+│ │ Shift-Tab          previous type    Esc                clear / quit      │ │
+│ │ Shift-↓            scroll preview   Ctrl-C             exit              │ │
+│ │ Shift-↑            scroll preview                                        │ │
 │ │                                                                          │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;     │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                              │ │
-│ └──────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────┘
+└─└──────────────────────────────────────────────────────────────────────────┘─┘
  any key closes
 --- styles ---
 0:0..3 bold
 0:3..23 fg=241
-1:0..3 fg=166 bold
-1:3..4 reverse
-1:72..80 fg=241
+1:0..2 fg=166 bold
+1:2..3 fg=246 bold
+1:3..4 fg=241 reverse
+1:4..9 fg=241
+1:9..78 fg=246
+1:78..80 fg=241
 2:1..2 fg=17 bg=153 bold
 2:2..3 fg=246 bg=153 bold
-2:3..9 fg=241 bg=153 bold
-2:9..78 fg=246
+2:3..9 fg=17 bg=153 bold
+2:77..78 fg=246
 3:0..1 fg=246
 3:1..2 fg=241
 3:2..3 fg=246
@@ -124,18 +127,20 @@
 18:79..80 fg=246
 19:0..1 fg=246
 19:2..3 fg=246
-19:4..72 fg=241
+19:9..13 fg=241
 19:77..78 fg=246
 19:79..80 fg=246
 20:0..1 fg=246
 20:2..3 fg=246 bold
 20:3..4 fg=106 bold
 20:4..8 fg=241 bold
-20:8..47 fg=241
+20:8..72 fg=241
 20:77..78 fg=246
 20:79..80 fg=246
 21:0..1 fg=246
-21:2..78 fg=246
+21:2..3 fg=246
+21:4..47 fg=241
+21:77..78 fg=246
 21:79..80 fg=246
 22:0..80 fg=246
 23:1..15 fg=241

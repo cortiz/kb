@@ -11,7 +11,7 @@ use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 
 use super::add::{AddEvent, AddState};
 use super::form::{FormEvent, FormSpec, FormState, Submission, Then};
-use super::input::{Change, SearchInput};
+use super::input::{Change, LineEditor, SearchInput};
 use super::keys::{self, Command, Key, Mode};
 use super::layout::{self, Screen};
 use super::preview::PreviewModel;
@@ -46,6 +46,31 @@ pub struct Options {
     pub highlight: bool,
     /// `kb add` opens the UI on the add form: closing it ends the UI.
     pub start_add: Option<Box<StartAdd>>,
+}
+
+/// A one-line question on the key bar (Ctrl-R, Ctrl-X).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListPrompt {
+    /// `Rename to: <id>`, filled in with the current ID.
+    Rename { from: String, editor: LineEditor },
+    /// `Delete <id>? (y/N)`.
+    Delete { id: String },
+}
+
+impl ListPrompt {
+    /// The key bar text, with a block where the cursor is.
+    pub fn text(&self) -> String {
+        match self {
+            ListPrompt::Rename { editor, .. } => {
+                let chars: Vec<char> = editor.text().chars().collect();
+                let at = editor.cursor().min(chars.len());
+                let head: String = chars[..at].iter().collect();
+                let tail: String = chars[at..].iter().collect();
+                format!("Rename to: {head}▌{tail}")
+            }
+            ListPrompt::Delete { id } => format!("Delete {id}? (y/N)"),
+        }
+    }
 }
 
 /// The draft `kb add` hands to the UI, and why the clipboard could not be read, if it could not.
@@ -159,6 +184,15 @@ pub enum Action {
     },
     /// Tags in use in the KB, most used first.
     TagCounts(Vec<(String, u32)>),
+    /// A rename from the list was done.
+    Renamed {
+        from: String,
+        to: String,
+    },
+    /// A delete from the list was done.
+    Removed(String),
+    /// A rename or delete from the list did not work.
+    OpFailed(String),
     /// Ctrl-E in the add form returned: the new body (`None`: unchanged or cancelled) or why not.
     BodyEdited(Result<Option<String>, String>),
     /// The new entry was written.
@@ -197,6 +231,15 @@ pub enum Effect {
     SaveDraft(Box<Draft>),
     /// `kb add`'s form saved this entry: leave the UI.
     Added(String),
+    /// Ctrl-R confirmed: rename an entry.
+    RenameEntry {
+        from: String,
+        to: String,
+    },
+    /// Ctrl-X confirmed: delete an entry.
+    RemoveEntry {
+        id: String,
+    },
     Quit(i32),
 }
 
@@ -239,6 +282,8 @@ pub struct AppState {
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
     pub started_by_add: bool,
+    /// The question on the key bar, when Ctrl-R or Ctrl-X asked one.
+    pub prompt: Option<ListPrompt>,
 }
 
 impl AppState {
@@ -277,6 +322,7 @@ impl AppState {
             add: None,
             tags: Vec::new(),
             started_by_add: false,
+            prompt: None,
         }
     }
 
@@ -428,6 +474,9 @@ impl AppState {
                 }
                 if self.add.is_some() {
                     return self.add_key(e);
+                }
+                if self.prompt.is_some() {
+                    return self.prompt_key(e, now);
                 }
                 if self.form.is_some() {
                     return self.form_key(e);
@@ -602,6 +651,38 @@ impl AppState {
                 self.status.refreshing = true;
                 vec![Effect::Refresh]
             }
+            Action::Renamed { from: _, to } => {
+                self.prompt = None;
+                self.selected_id = Some(to.clone());
+                self.say(&format!("Renamed to {to}"), MessageKind::Info, now, true);
+                self.status.refreshing = true;
+                vec![Effect::Refresh]
+            }
+            Action::Removed(id) => {
+                self.prompt = None;
+                // the next row takes its place; at the end, the previous one
+                let next = self
+                    .results
+                    .get(self.selected + 1)
+                    .or_else(|| {
+                        self.selected
+                            .checked_sub(1)
+                            .and_then(|i| self.results.get(i))
+                    })
+                    .map(|r| r.id.clone());
+                self.selected_id = next;
+                self.say(&format!("Deleted {id}"), MessageKind::Info, now, true);
+                self.status.refreshing = true;
+                vec![Effect::Refresh]
+            }
+            Action::OpFailed(message) => {
+                // a rename keeps its question open so the name can be fixed
+                if !matches!(self.prompt, Some(ListPrompt::Rename { .. })) {
+                    self.prompt = None;
+                }
+                self.say(&message, MessageKind::Warning, now, false);
+                Vec::new()
+            }
             Action::SaveFailed(message) => {
                 if let Some(add) = &mut self.add {
                     add.save_failed(message);
@@ -615,6 +696,52 @@ impl AppState {
                 }
                 vec![Effect::Refresh]
             }
+        }
+    }
+
+    /// A key while Ctrl-R or Ctrl-X is asking.
+    fn prompt_key(&mut self, e: KeyEvent, _now: Instant) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        self.message = None;
+        let Some(prompt) = self.prompt.as_mut() else {
+            return Vec::new();
+        };
+        match prompt {
+            ListPrompt::Delete { id } => {
+                let confirmed = matches!(key.code, keys::Code::Char('y' | 'Y')) && key.mods == 0;
+                let id = id.clone();
+                if confirmed {
+                    vec![Effect::RemoveEntry { id }]
+                } else {
+                    self.prompt = None;
+                    Vec::new()
+                }
+            }
+            ListPrompt::Rename { from, editor } => match (key.code, key.mods) {
+                (keys::Code::Esc, 0) => {
+                    self.prompt = None;
+                    Vec::new()
+                }
+                (keys::Code::Enter, 0) => {
+                    let to = editor.text().trim().to_string();
+                    let from = from.clone();
+                    if to.is_empty() || to == from {
+                        self.prompt = None;
+                        Vec::new()
+                    } else {
+                        vec![Effect::RenameEntry { from, to }]
+                    }
+                }
+                _ => {
+                    super::add::line_key(editor, key);
+                    Vec::new()
+                }
+            },
         }
     }
 
@@ -798,8 +925,21 @@ impl AppState {
                 }
             },
             Command::AddEntry => vec![Effect::ReadClipboard],
-            // rename and delete are built with the management commands
-            Command::RenameEntry | Command::DeleteEntry => Vec::new(),
+            Command::RenameEntry | Command::DeleteEntry => {
+                let Some(id) = self.selected_result().map(|r| r.id.clone()) else {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    return Vec::new();
+                };
+                self.prompt = Some(if command == Command::RenameEntry {
+                    ListPrompt::Rename {
+                        editor: LineEditor::new(&id),
+                        from: id,
+                    }
+                } else {
+                    ListPrompt::Delete { id }
+                });
+                Vec::new()
+            }
             Command::Refresh => {
                 self.status.refreshing = true;
                 vec![Effect::Refresh]
@@ -1117,7 +1257,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let k = |c, m| key(c, m);
         s.update(k(KeyCode::Down, KeyModifiers::NONE), now);
-        s.update(ctrl('n'), now);
+        s.update(k(KeyCode::Down, KeyModifiers::NONE), now);
         s.update(ctrl('j'), now);
         assert_eq!(s.selected, 3);
         s.update(ctrl('p'), now);
@@ -2135,5 +2275,102 @@ pub(crate) mod tests {
         assert!(!format!("{s:?}").contains("S3CR3T"));
         let e = s.update(key(KeyCode::Enter, KeyModifiers::NONE), Instant::now());
         assert!(!format!("{e:?}").contains("S3CR3T"));
+    }
+
+    fn clipboard(text: &str) -> Action {
+        Action::ClipboardRead {
+            outcome: ReadOutcome::Text(text.into()),
+            now: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn ctrl_n_reads_the_clipboard_and_opens_the_add_form() {
+        let mut s = loaded(&["a", "b"]);
+        let now = Instant::now();
+        let e = s.update(ctrl('n'), now);
+        assert_eq!(e, [Effect::ReadClipboard]);
+        assert!(s.add.is_none());
+        s.update(clipboard("select 1 from t;"), now);
+        let add = s.add.as_ref().unwrap();
+        assert_eq!(add.draft.entry_type, EntryType::Sql);
+        assert_eq!(s.mode(), Mode::Form);
+        // the unreadable clipboard opens an empty form that says why
+        let mut s = loaded(&["a"]);
+        s.update(
+            Action::ClipboardRead {
+                outcome: ReadOutcome::Unavailable(crate::platform::clipboard::Unavailable::OverSsh),
+                now: SystemTime::UNIX_EPOCH,
+            },
+            now,
+        );
+        assert!(s.add.as_ref().unwrap().header().contains("over SSH"));
+    }
+
+    #[test]
+    fn saving_closes_the_form_and_selects_the_new_entry() {
+        let mut s = loaded(&["a", "b"]);
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        for c in "My query".chars() {
+            s.update(ch(c), now);
+        }
+        let e = s.update(ctrl('s'), now);
+        let [Effect::SaveDraft(draft)] = e.as_slice() else {
+            panic!("{e:?}")
+        };
+        assert_eq!(draft.title, "My query");
+        // a failed save keeps the form open with the message
+        s.update(
+            Action::SaveFailed("sql/my-query already exists".into()),
+            now,
+        );
+        assert!(s.add.is_some());
+        assert_eq!(
+            s.add.as_ref().unwrap().message.as_deref(),
+            Some("sql/my-query already exists")
+        );
+        let e = s.update(Action::Saved("sql/my-query".into()), now);
+        assert!(s.add.is_none());
+        assert_eq!(s.selected_id.as_deref(), Some("sql/my-query"));
+        assert_eq!(s.message.as_ref().unwrap().text, "Saved sql/my-query");
+        assert!(e.contains(&Effect::Refresh));
+        // the next results put the selection on it
+        s.update(
+            Action::Refreshed(RefreshInfo {
+                indexed: 3,
+                skipped: 0,
+                duration: Duration::from_millis(5),
+            }),
+            now,
+        );
+        let g = s.search_gen;
+        s.update(Action::Results(g, page(&["a", "sql/my-query", "b"])), now);
+        assert_eq!(s.selected, 1);
+    }
+
+    #[test]
+    fn started_by_add_ends_the_ui_with_the_form() {
+        let mut s = state();
+        s.started_by_add = true;
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(
+            s.update(Action::Saved("sql/x".into()), now),
+            [Effect::Added("sql/x".into())]
+        );
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(
+            s.update(key(KeyCode::Esc, KeyModifiers::NONE), now),
+            [Effect::Quit(130)]
+        );
+    }
+
+    #[test]
+    fn ctrl_c_quits_from_the_add_form() {
+        let mut s = state();
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(s.update(ctrl('c'), now), [Effect::Quit(130)]);
     }
 }

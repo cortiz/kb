@@ -528,3 +528,70 @@ fn use_by_id_with_defaults_under_100ms() {
     println!("kb use <id> -y --print on {ENTRIES} entries: median {m:?} (runs {runs:?})");
     assert!(m < Duration::from_millis(100), "median {m:?}");
 }
+
+// ---- authoring (spec 007) ----
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn detecting_a_one_megabyte_paste_under_50ms() {
+    let _serial = serial();
+    let body = "select id, status from orders where status = 'failed' and region = 'us-east-1';\n"
+        .repeat(13_000);
+    assert!(body.len() > 1_000_000);
+    let started = Instant::now();
+    let draft = kb_core::author::Draft::from_text(
+        &body,
+        kb_core::author::DraftSource::Stdin,
+        &kb_core::author::DraftOptions::default(),
+    );
+    let took = started.elapsed();
+    println!("Draft::from_text on {} bytes: {took:?}", body.len());
+    assert_eq!(draft.entry_type, kb_core::entry::EntryType::Sql);
+    assert!(took < Duration::from_millis(50), "took {took:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn saving_a_new_entry_under_100ms_and_add_yes_cold_start_under_100ms() {
+    let _serial = serial();
+    let dir = indexed_kb();
+    let mut kb = kb_core::search::Kb::open(dir.path()).unwrap();
+    kb.refresh().unwrap();
+    let draft = kb_core::author::Draft::from_text(
+        "select 1 from t;",
+        kb_core::author::DraftSource::Stdin,
+        &kb_core::author::DraftOptions {
+            title: Some("Perf entry".into()),
+            ..Default::default()
+        },
+    );
+    let started = Instant::now();
+    let saved = kb_cli::author::save_new(&mut kb, &draft, &kb_core::author::SystemClock).unwrap();
+    let took = started.elapsed();
+    println!(
+        "save_new + refresh on {ENTRIES} entries: {took:?} ({})",
+        saved.id
+    );
+    assert!(took < Duration::from_millis(100), "took {took:?}");
+
+    let mut runs: Vec<Duration> = (0..5)
+        .map(|i| {
+            let started = Instant::now();
+            let out = kb_in(dir.path())
+                .args(["add", "--yes", "-t", &format!("Cold {i}"), "--type", "sql"])
+                .write_stdin("select 2 from t;")
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            started.elapsed()
+        })
+        .collect();
+    runs.sort();
+    println!("kb add --yes median: {:?}", runs[2]);
+    // the process starts, reads the body, checks it, writes the file and refreshes the index
+    assert!(runs[2] < Duration::from_millis(100), "median {:?}", runs[2]);
+}

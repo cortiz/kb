@@ -1,35 +1,35 @@
  kb · ~/kb · 32 entries
- ›                                                                      32 / 32
-  ┌ keys ────────────────────────────────────────────────────────────────────┐
-┌ │ Enter              pick and exit    Shift-PgUp         preview page      │─┐
-│ │ Ctrl-Y             copy payload     Alt-P              zoom preview      │ │
-│ │ Alt-C              copy template    ←                  cursor left       │ │
-│ │ Ctrl-E             edit entry       →                  cursor right      │ │
-│ │ ↓  Ctrl-N  Ctrl-J  next result      Home  Ctrl-A       line start        │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result  End                line end          │ │
-│ │ PgDn               page down        Backspace          delete, drop ch…  │ │
-│ │ PgUp               page up          Delete             delete            │ │
-│ │ Ctrl-End           last result      Ctrl-W             delete word       │ │
-│ │ Ctrl-Home          first result     Ctrl-U             clear line        │ │
-│ │ Tab                next type        Ctrl-L             refresh           │ │
-│ │ Shift-Tab          previous type    ?                  help              │ │
-│ │ Shift-↓            scroll preview   F1                 help              │ │
-│ │ Shift-↑            scroll preview   Esc                clear / quit      │ │
-│ │ Shift-PgDn         preview page     Ctrl-C             exit              │ │
+ ›┌ keys ────────────────────────────────────────────────────────────────────┐2
+  │ Enter              pick and exit    Shift-PgDn         preview page      │
+┌ │ Ctrl-Y             copy payload     Shift-PgUp         preview page      │─┐
+│ │ Alt-C              copy template    Alt-P              zoom preview      │ │
+│ │ Ctrl-E             edit entry       ←                  cursor left       │ │
+│ │ Ctrl-N             add entry        →                  cursor right      │ │
+│ │ Ctrl-R             rename entry     Home  Ctrl-A       line start        │ │
+│ │ Ctrl-X             delete entry     End                line end          │ │
+│ │ ↓  Ctrl-J          next result      Backspace          delete, drop ch…  │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result  Delete             delete            │ │
+│ │ PgDn               page down        Ctrl-W             delete word       │ │
+│ │ PgUp               page up          Ctrl-U             clear line        │ │
+│ │ Ctrl-End           last result      Ctrl-L             refresh           │ │
+│ │ Ctrl-Home          first result     ?                  help              │ │
+│ │ Tab                next type        F1                 help              │ │
+│ │ Shift-Tab          previous type    Esc                clear / quit      │ │
+│ │ Shift-↓            scroll preview   Ctrl-C             exit              │ │
+│ │ Shift-↑            scroll preview                                        │ │
 │ │                                                                          │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;     │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                              │ │
-│ └──────────────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────────────┘
+└─└──────────────────────────────────────────────────────────────────────────┘─┘
  any key closes
 --- styles ---
 0:0..3 bold
 0:3..23 dim
 1:0..3 bold
-1:3..4 reverse
+1:3..4 dim+reverse
+1:4..9 dim
 1:72..80 dim
-2:1..3 bold+reverse
-2:3..9 bold+dim+reverse
+2:1..9 bold+reverse
 3:1..10 dim
 4:1..2 reverse
 4:2..8 bold+reverse
@@ -53,9 +53,9 @@
 16:2..8 bold
 17:9..13 dim
 18:2..8 bold
-19:4..72 dim
+19:9..13 dim
 20:2..4 bold
 20:4..8 bold+dim
-20:8..47 dim
-21:9..14 dim
+20:8..72 dim
+21:4..47 dim
 23:1..15 dim

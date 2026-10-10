@@ -54,3 +54,16 @@ workflows), close and reopen it. If Actions may not open pull requests, the form
 the release as `kb.rb` instead.
 
 Every external action is pinned to a commit hash; Dependabot proposes updates weekly.
+
+## Authoring tests
+
+Type detection (`kb_core::author::detect`) is judged on the corpus in
+`tests/fixtures/authoring/detect/`, not on hand-picked examples: at least 95% of the snippets must
+be detected right and nothing may be detected `High` and wrong. **A change to the detection rules
+comes with a corpus case** that shows why (put deliberately ambiguous snippets in
+`detect/low/<type>/`). Rendering is checked byte for byte against `tests/fixtures/authoring/golden/`.
+Tests that touch the clipboard use fake `pbpaste` / `wl-paste` programs on `PATH` (see
+`support::fake_paste` and the pty `Spec::with_fake_tool`), editors are shell scripts, and every
+test gets its own `TMPDIR` when it checks that temp files are cleaned up. `KB_TEST_NOW` fixes the
+clock in debug builds. Never point a test at `~/kb` or the real clipboard.
+

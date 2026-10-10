@@ -1,0 +1,74 @@
+ New entry · from clipboard · detected cw (high)
+  Authorizer p99 latency
+  cw · #lambda · edited 2026-10-09T12:00:00Z
+  cw/authorizer-p99-latency.md
+
+  ── payload ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  1 fields @timestamp, @message
+  2 | filter @message like /{{fn}}/
+  3 | stats pct(@duration, 99) by bin({{minutes}}m)
+
+  ── variables ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  fn          text
+  minutes     number
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ^S save · ^E edit body · ^P preview · Tab next · Esc discard
+--- styles ---
+0:0..48 bold
+1:2..24 bold
+2:2..4 fg=106 bold
+2:4..44 fg=245
+3:2..30 fg=245
+5:2..118 fg=240
+6:2..4 fg=245
+6:4..10 fg=141 bold
+6:11..21 fg=179
+6:23..31 fg=179
+7:2..4 fg=245
+7:4..5 fg=250
+7:6..12 fg=141 bold
+7:13..21 fg=179
+7:22..26 fg=141 bold
+7:27..28 fg=107
+7:28..34 fg=215 bold+reverse
+7:34..35 fg=107
+8:2..4 fg=245
+8:4..5 fg=250
+8:6..11 fg=141 bold
+8:12..15 fg=110
+8:16..25 fg=179
+8:27..29 fg=173
+8:31..33 fg=141 bold
+8:34..37 fg=110
+8:38..49 fg=215 bold+reverse
+10:2..118 fg=240
+11:2..14 bold
+11:14..21 fg=245
+12:2..14 bold
+12:14..21 fg=245
+39:1..61 fg=245

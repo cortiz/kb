@@ -1028,35 +1028,6 @@ pub fn run_doctor(
     })
 }
 
-/// `kb edit`: Ctrl-E without the UI.
-pub fn run_edit(
-    platform: &impl Platform,
-    root: &Path,
-    loaded: &Loaded,
-    id: &str,
-) -> Result<ExitCode, CliError> {
-    let kb = Kb::open(root).map_err(io_error)?;
-    let path = kb.entry_path(id).map_err(io_error)?;
-    let tty = platform
-        .open_tty()
-        .map_err(|e| CliError::new("io", format!("no terminal to run the editor on: {e}")))?;
-    let editor = platform.resolve_editor(loaded.settings.editor());
-    let status = platform
-        .run_editor(&editor, &path, &tty, &|| false)
-        .map_err(|e| CliError::new("io", format!("could not start the editor: {e}")))?
-        .ok_or_else(|| CliError::new("io", "the editor was interrupted"))?;
-    if let Ok(findings) = kb.lint_entry(id)
-        && let Some(f) = findings.first()
-    {
-        eprintln!("{}:{}: error[{}]: {}", f.path, f.line, f.code, f.message);
-    }
-    Ok(if status.success() {
-        ExitCode::SUCCESS
-    } else {
-        ExitCode::from(1)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

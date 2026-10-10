@@ -244,6 +244,26 @@ pub fn run(
                     dirty = true;
                 }
                 Effect::Added(id) => added = Some(id),
+                Effect::RenameEntry { from, to } => {
+                    let to = to.strip_suffix(".md").unwrap_or(&to).to_string();
+                    let action = match crate::author::move_entry(platform, &mut ui_kb, &from, &to) {
+                        Ok((renamed, _)) => Action::Renamed {
+                            from: renamed.from,
+                            to: renamed.to,
+                        },
+                        Err(e) => Action::OpFailed(e.to_string()),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::RemoveEntry { id } => {
+                    let action = match crate::author::delete_entry(platform, &mut ui_kb, &id) {
+                        Ok(_) => Action::Removed(id),
+                        Err(e) => Action::OpFailed(e.to_string()),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
                 Effect::EditBody(text) => {
                     let ty = state
                         .add
