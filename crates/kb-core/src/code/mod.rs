@@ -58,4 +58,40 @@ impl CodeService {
     ) -> Result<String, RepinError> {
         repin::repin_entry_impl(entry_file_path, current_content, report, today_date)
     }
+
+    /// Reads code preview lines around the pinned line from the git object store.
+    pub fn get_snippet(
+        clone: &LocalClone,
+        pinned_ref: &str,
+        path: &str,
+        line: usize,
+        end_line: Option<usize>,
+        context_before: usize,
+        context_after: usize,
+        git_runner: &impl GitRunner,
+    ) -> Result<CodeSnippet, GitError> {
+        snippet::get_snippet_impl(
+            clone,
+            pinned_ref,
+            path,
+            line,
+            end_line,
+            context_before,
+            context_after,
+            git_runner,
+        )
+    }
+
+    /// Builds a permalink for GitHub, GitLab, Bitbucket, or a custom host.
+    pub fn build_permalink(
+        clone: Option<&LocalClone>,
+        repo_id: &str,
+        commit_sha: &str,
+        path: &str,
+        line: usize,
+        end_line: Option<usize>,
+        settings: &Settings,
+    ) -> Result<String, PermalinkError> {
+        permalink::build_permalink_impl(clone, repo_id, commit_sha, path, line, end_line, settings)
+    }
 }

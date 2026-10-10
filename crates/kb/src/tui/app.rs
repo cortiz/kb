@@ -207,6 +207,8 @@ pub enum Action {
         id: String,
         plan: kb_core::run::RunPlan,
     },
+    /// Open the code view (Screen 3).
+    OpenCodeView(Box<super::code_view::CodeViewState>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -232,6 +234,18 @@ pub enum Effect {
     SubmitForm(Box<Submission>),
     /// Ctrl-O: open the selected entry's primary link or console.
     OpenEntry(String),
+    /// Code view open target (web, vscode, idea).
+    OpenCodeTarget {
+        id: String,
+        target: String,
+    },
+    CopyCodeLocation(String),
+    CopyCodePermalink(String),
+    RepinCodeEntry {
+        id: String,
+        report: Box<kb_core::code::DriftReport>,
+    },
+    FetchAndRecheckCode(String),
     /// Ctrl-G: run the selected cmd entry.
     RunEntry(String),
     ExecuteRun {
@@ -297,6 +311,8 @@ pub struct AppState {
     pub add: Option<Box<AddState>>,
     /// The run confirmation/pause modal, when it is open.
     pub run_modal: Option<Box<RunModalState>>,
+    /// Screen 3: Code View, when it is open.
+    pub code_view: Option<Box<super::code_view::CodeViewState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
@@ -340,6 +356,7 @@ impl AppState {
             form_session: std::collections::BTreeMap::new(),
             add: None,
             run_modal: None,
+            code_view: None,
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
@@ -366,7 +383,7 @@ impl AppState {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
-        } else if self.form.is_some() || self.add.is_some() {
+        } else if self.form.is_some() || self.add.is_some() || self.code_view.is_some() {
             Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
@@ -503,6 +520,9 @@ impl AppState {
                 }
                 if self.form.is_some() {
                     return self.form_key(e);
+                }
+                if self.code_view.is_some() {
+                    return self.code_view_key(e, now);
                 }
                 match Key::from_event(e).and_then(|k| keys::resolve(k, self.mode())) {
                     Some(command) => self.command(command, now),
@@ -721,6 +741,10 @@ impl AppState {
                 }));
                 Vec::new()
             }
+            Action::OpenCodeView(cv) => {
+                self.code_view = Some(cv);
+                Vec::new()
+            }
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
@@ -902,6 +926,83 @@ impl AppState {
                         _ => Vec::new(),
                     }
                 }
+            }
+        }
+    }
+
+    /// A key while Screen 3 (Code View) is open.
+    fn code_view_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(cv) = self.code_view.as_mut() else {
+            return Vec::new();
+        };
+        match cv.handle_key(key) {
+            super::code_view::CodeViewEvent::None => Vec::new(),
+            super::code_view::CodeViewEvent::Close => {
+                self.code_view = None;
+                Vec::new()
+            }
+            super::code_view::CodeViewEvent::OpenDefault => {
+                let id = cv.id.clone();
+                let target = cv.default_open.clone();
+                vec![Effect::OpenCodeTarget { id, target }]
+            }
+            super::code_view::CodeViewEvent::OpenWeb => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "web".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::OpenVsCode => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "vscode".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::OpenIdea => {
+                let id = cv.id.clone();
+                vec![Effect::OpenCodeTarget {
+                    id,
+                    target: "idea".to_string(),
+                }]
+            }
+            super::code_view::CodeViewEvent::CopyLocation => {
+                let loc = if let Some(el) = cv.end_line {
+                    format!("{}:{}-{}", cv.path, cv.line, el)
+                } else {
+                    format!("{}:{}", cv.path, cv.line)
+                };
+                vec![Effect::CopyCodeLocation(loc)]
+            }
+            super::code_view::CodeViewEvent::CopyPermalink => {
+                let permalink = cv.permalink.clone().unwrap_or_default();
+                vec![Effect::CopyCodePermalink(permalink)]
+            }
+            super::code_view::CodeViewEvent::RepinPrompt => {
+                self.say("Press 'y' to confirm re-pin", MessageKind::Info, now, true);
+                Vec::new()
+            }
+            super::code_view::CodeViewEvent::RepinConfirm(report) => {
+                let id = cv.id.clone();
+                vec![Effect::RepinCodeEntry {
+                    id,
+                    report: Box::new(report),
+                }]
+            }
+            super::code_view::CodeViewEvent::FetchAndRecheck => {
+                let id = cv.id.clone();
+                vec![Effect::FetchAndRecheckCode(id)]
+            }
+            super::code_view::CodeViewEvent::EditEntry => {
+                let id = cv.id.clone();
+                vec![Effect::EditEntry(id)]
             }
         }
     }

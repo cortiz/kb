@@ -247,3 +247,62 @@ code:
     assert!(stdout.contains("re-pinned") || stdout.contains("code-moved"));
     assert!(stdout.contains("skipped") || stdout.contains("code-gone"));
 }
+
+#[test]
+fn cli_code_show_text_and_json() {
+    let (_dir, _git_repo, kb_root, home, manifest) = setup_code_test_env();
+    let pinned_commit = manifest["pinned_commit"].as_str().unwrap();
+
+    fs::write(
+        kb_root.join("code-auth.md"),
+        format!(
+            r#"---
+kb_format: 1
+type: code
+title: Auth Handler Link
+code:
+  repo: test/repo
+  path: src/AuthHandler.java
+  line: 8
+  ref: {pinned_commit}
+  branch: main
+---
+"#
+        ),
+    )
+    .unwrap();
+
+    // 1. Text mode
+    let out_text = kb_cmd(&kb_root, &home)
+        .args(["code", "show", "code-auth"])
+        .output()
+        .unwrap();
+    assert!(out_text.status.success(), "code show should exit 0");
+    let text = String::from_utf8_lossy(&out_text.stdout);
+    assert!(text.contains("Title:  Auth Handler Link"));
+    assert!(text.contains("Repo:   test/repo"));
+    assert!(text.contains("File:   src/AuthHandler.java:8"));
+    assert!(text.contains(&format!("Ref:    {pinned_commit}")));
+    assert!(text.contains("Status: current"));
+    assert!(text.contains("Link:   https://github.com/test/repo/blob/"));
+    assert!(text.contains("▶    8 |     public boolean handleRequest(String token) {"));
+
+    // 2. JSON mode
+    let out_json = kb_cmd(&kb_root, &home)
+        .args(["code", "show", "code-auth", "--json"])
+        .output()
+        .unwrap();
+    assert!(out_json.status.success(), "code show --json should exit 0");
+    let json: Value = serde_json::from_slice(&out_json.stdout).unwrap();
+    assert_eq!(json["id"], "code-auth");
+    assert_eq!(json["title"], "Auth Handler Link");
+    assert_eq!(json["repo"], "test/repo");
+    assert_eq!(json["path"], "src/AuthHandler.java");
+    assert_eq!(json["line"], 8);
+    assert_eq!(json["ref"], pinned_commit);
+    assert_eq!(json["status"], "current");
+    assert!(json["permalink"].as_str().unwrap().contains("https://github.com/test/repo/blob/"));
+    assert!(json["snippet"]["lines"].is_array());
+    assert_eq!(json["snippet"]["target_line"], 8);
+}
+

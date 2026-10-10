@@ -196,6 +196,27 @@ pub fn run(
                     dirty = true;
                 }
                 Effect::OpenEntry(id) => {
+                    let entry = ui_kb.entry(&id);
+                    if let Ok(entry) = &entry {
+                        if entry.entry_type() == Some(EntryType::Code) {
+                            match code_view::load_code_view_state(&ui_kb, &id, &settings, false) {
+                                Ok(cv) => {
+                                    pending.extend(state.update(Action::OpenCodeView(Box::new(cv)), Instant::now()));
+                                }
+                                Err(e) => {
+                                    pending.extend(state.update(
+                                        Action::CopyDone(CopyReport {
+                                            message: format!("Code view error: {e}"),
+                                            sent: false,
+                                        }),
+                                        Instant::now(),
+                                    ));
+                                }
+                            }
+                            dirty = true;
+                            continue;
+                        }
+                    }
                     let spec = FormSpec::load(&ui_kb, &id, &real_env);
                     let action = match spec {
                         Ok(Some(spec)) => Action::FormLoaded(Ok(Box::new(spec)), Then::Open),
@@ -210,6 +231,211 @@ pub fn run(
                         )),
                     };
                     pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::OpenCodeTarget { id, target } => {
+                    let now = Instant::now();
+                    if let Some(cv) = &state.code_view {
+                        let report = match target.as_str() {
+                            "web" => {
+                                if let Some(permalink) = &cv.permalink {
+                                    match opener::open_url(platform, settings.opener_command(), permalink) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in browser".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(Opened::Printed(url)) => {
+                                            let outcome = clipboard::copy(platform, &clipboard_settings, &url, Place::Ui);
+                                            if outcome.sent() {
+                                                let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            }
+                                            CopyReport {
+                                                message: "Copied URL (no display)".into(),
+                                                sent: outcome.sent(),
+                                            }
+                                        }
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No web permalink available".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            "vscode" => {
+                                if platform.env().ssh {
+                                    CopyReport {
+                                        message: "Editor launch disabled over SSH".into(),
+                                        sent: false,
+                                    }
+                                } else if let Some(clone_path) = &cv.clone_path {
+                                    let abs_path = clone_path.join(&cv.path);
+                                    let url = format!("vscode://file/{}:{}", abs_path.display(), cv.line);
+                                    match opener::open_url(platform, settings.opener_command(), &url) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in VS Code".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(_) => CopyReport {
+                                            message: "Opened in VS Code".into(),
+                                            sent: true,
+                                        },
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No local clone found".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            "idea" => {
+                                if platform.env().ssh {
+                                    CopyReport {
+                                        message: "Editor launch disabled over SSH".into(),
+                                        sent: false,
+                                    }
+                                } else if let Some(clone_path) = &cv.clone_path {
+                                    let abs_path = clone_path.join(&cv.path);
+                                    let url = format!("idea://open?file={}&line={}", abs_path.display(), cv.line);
+                                    match opener::open_url(platform, settings.opener_command(), &url) {
+                                        Ok(Opened::Launched) => {
+                                            let _ = ui_kb.record_use(&id, SystemTime::now());
+                                            CopyReport {
+                                                message: "Opened in IntelliJ".into(),
+                                                sent: true,
+                                            }
+                                        }
+                                        Ok(_) => CopyReport {
+                                            message: "Opened in IntelliJ".into(),
+                                            sent: true,
+                                        },
+                                        Err(e) => CopyReport {
+                                            message: format!("Open failed: {e}"),
+                                            sent: false,
+                                        },
+                                    }
+                                } else {
+                                    CopyReport {
+                                        message: "No local clone found".into(),
+                                        sent: false,
+                                    }
+                                }
+                            }
+                            _ => CopyReport {
+                                message: format!("Unknown open target: {target}"),
+                                sent: false,
+                            },
+                        };
+                        pending.extend(state.update(Action::CopyDone(report), now));
+                    }
+                    dirty = true;
+                }
+                Effect::CopyCodeLocation(loc) => {
+                    let outcome = clipboard::copy(platform, &clipboard_settings, &loc, Place::Ui);
+                    let report = CopyReport {
+                        message: if outcome.sent() {
+                            format!("Copied location: {loc}")
+                        } else {
+                            format!("Copy failed: {}", outcome.message_short())
+                        },
+                        sent: outcome.sent(),
+                    };
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
+                Effect::CopyCodePermalink(permalink) => {
+                    let outcome = clipboard::copy(platform, &clipboard_settings, &permalink, Place::Ui);
+                    let report = CopyReport {
+                        message: if outcome.sent() {
+                            "Copied permalink".to_string()
+                        } else {
+                            format!("Copy failed: {}", outcome.message_short())
+                        },
+                        sent: outcome.sent(),
+                    };
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
+                Effect::RepinCodeEntry { id, report } => {
+                    let now = Instant::now();
+                    let repin_res = (|| -> Result<(), String> {
+                        let entry = ui_kb.entry(&id).map_err(|e| e.to_string())?;
+                        let full_time = kb_core::author::render::rfc3339_utc(SystemTime::now());
+                        let today = if full_time.len() >= 10 {
+                            &full_time[..10]
+                        } else {
+                            "2026-10-10"
+                        };
+                        let file_path = std::path::Path::new(ui_kb.root()).join(entry.path());
+                        let content = std::fs::read_to_string(&file_path).map_err(|e| e.to_string())?;
+                        let updated = kb_core::code::CodeService::repin_entry(&file_path, &content, &report, today)
+                            .map_err(|e| e.to_string())?;
+                        std::fs::write(&file_path, updated).map_err(|e| e.to_string())?;
+                        Ok(())
+                    })();
+
+                    match repin_res {
+                        Ok(()) => {
+                            if let Ok(cv) = code_view::load_code_view_state(&ui_kb, &id, &settings, false) {
+                                pending.extend(state.update(Action::OpenCodeView(Box::new(cv)), now));
+                            }
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: "Re-pinned".to_string(),
+                                    sent: true,
+                                }),
+                                now,
+                            ));
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Re-pin failed: {e}"),
+                                    sent: false,
+                                }),
+                                now,
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::FetchAndRecheckCode(id) => {
+                    let now = Instant::now();
+                    match code_view::load_code_view_state(&ui_kb, &id, &settings, true) {
+                        Ok(cv) => {
+                            pending.extend(state.update(Action::OpenCodeView(Box::new(cv)), now));
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: "Fetched".to_string(),
+                                    sent: true,
+                                }),
+                                now,
+                            ));
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("Fetch failed: {e}"),
+                                    sent: false,
+                                }),
+                                now,
+                            ));
+                        }
+                    }
                     dirty = true;
                 }
                 Effect::RunEntry(id) => {

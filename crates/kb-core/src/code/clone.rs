@@ -111,6 +111,8 @@ pub fn normalize_remote_url(url: &str) -> (RemoteHost, String) {
         }
     } else if let Some(colon_idx) = s.find(':') {
         (&s[..colon_idx], &s[colon_idx + 1..])
+    } else if s.contains('/') && !s.split('/').next().unwrap_or("").contains('.') {
+        ("github.com", s)
     } else if let Some(slash_idx) = s.find('/') {
         (&s[..slash_idx], &s[slash_idx + 1..])
     } else {

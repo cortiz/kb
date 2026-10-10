@@ -140,17 +140,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 3
 
-- [ ] T037 [P] [US3] Write failing tests for git snippet extraction in `crates/kb-core/src/code/snippet.rs`: verify `git show <ref>:<path>` extracts lines with 3 lines context before and 8 lines after, and line range extraction when `end_line` is present.
-- [ ] T038 [P] [US3] Write failing tests for web permalink generation in `crates/kb-core/src/code/permalink.rs`: verify permalink formatting for GitHub, GitLab, Bitbucket, and custom `code.web_url` template, using full commit SHA and line/range anchors.
-- [ ] T039 [P] [US3] Write failing tests for `kb code show` CLI in `tests/cli_code.rs`: verify text snippet output and `--json` format.
-- [ ] T040 [P] [US3] Write failing PTY integration tests in `tests/tui_code_pty.rs`: verify `Ctrl-O` on code entry opens Code View (Screen 3), `Enter` triggers default open (`web`), `g` opens web permalink, `v` opens VS Code, `i` opens IntelliJ, `y` copies `path:line`, `Y` copies permalink, `u` re-pins, `F` fetches and re-checks, and `Esc` returns to list.
+- [X] T037 [P] [US3] Write failing tests for git snippet extraction in `crates/kb-core/src/code/snippet.rs`: verify `git show <ref>:<path>` extracts lines with 3 lines context before and 8 lines after, and line range extraction when `end_line` is present.
+- [X] T038 [P] [US3] Write failing tests for web permalink generation in `crates/kb-core/src/code/permalink.rs`: verify permalink formatting for GitHub, GitLab, Bitbucket, and custom `code.web_url` template, using full commit SHA and line/range anchors.
+- [X] T039 [P] [US3] Write failing tests for `kb code show` CLI in `tests/cli_code.rs`: verify text snippet output and `--json` format.
+- [X] T040 [P] [US3] Write failing PTY integration tests in `tests/tui_code_pty.rs`: verify `Ctrl-O` on code entry opens Code View (Screen 3), `Enter` triggers default open (`web`), `g` opens web permalink, `v` opens VS Code, `i` opens IntelliJ, `y` copies `path:line`, `Y` copies permalink, `u` re-pins, `F` fetches and re-checks, and `Esc` returns to list.
 
 ### Implementation for User Story 3
 
-- [ ] T041 [US3] Implement `CodeService::get_snippet` in `crates/kb-core/src/code/snippet.rs`. Makes T037 pass.
-- [ ] T042 [US3] Implement `CodeService::build_permalink` for GitHub, GitLab, Bitbucket, and custom hosts in `crates/kb-core/src/code/permalink.rs`. Makes T038 pass.
-- [ ] T043 [US3] Implement `kb code show` CLI subcommand in `crates/kb/src/commands.rs`. Makes T039 pass.
-- [ ] T044 [US3] Implement TUI Code View (Screen 3) in `crates/kb/src/tui/code_view.rs`: header metadata, syntax-highlighted code snippet box with target line marker (`▶`), drift status badge, disabled state when clone is missing, and key handling for `Enter`, `g`, `v`, `i`, `y`, `Y`, `u`, `F`, `Ctrl-E`, `Esc`. Wire into `crates/kb/src/tui/app.rs`. Makes T040 pass.
+- [X] T041 [US3] Implement `CodeService::get_snippet` in `crates/kb-core/src/code/snippet.rs`. Makes T037 pass.
+- [X] T042 [US3] Implement `CodeService::build_permalink` for GitHub, GitLab, Bitbucket, and custom hosts in `crates/kb-core/src/code/permalink.rs`. Makes T038 pass.
+- [X] T043 [US3] Implement `kb code show` CLI subcommand in `crates/kb/src/commands.rs`. Makes T039 pass.
+- [X] T044 [US3] Implement TUI Code View (Screen 3) in `crates/kb/src/tui/code_view.rs`: header metadata, syntax-highlighted code snippet box with target line marker (`▶`), drift status badge, disabled state when clone is missing, and key handling for `Enter`, `g`, `v`, `i`, `y`, `Y`, `u`, `F`, `Ctrl-E`, `Esc`. Wire into `crates/kb/src/tui/app.rs`. Makes T040 pass.
 
 **Checkpoint**: Screen 3 renders code snippet with drift status; keys open in browser or desktop editors seamlessly.
 

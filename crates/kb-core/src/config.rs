@@ -379,6 +379,12 @@ impl Settings {
         self.entries.get(key)
     }
 
+    pub fn set_text(&mut self, key: &str, value: &str) {
+        if let Some(s) = SETTINGS.iter().find(|s| s.key == key) {
+            self.put(s, value.to_string(), Source::Default, None);
+        }
+    }
+
     /// Settings in table order.
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, &Resolved<String>)> {
         SETTINGS

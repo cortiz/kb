@@ -37,6 +37,10 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
         super::run_modal::draw_run_modal(state, modal, theme, area, buf);
         return;
     }
+    if let (Screen::Ok(_), Some(cv)) = (&screen, &state.code_view) {
+        super::code_view::draw_code_view(state, cv, theme, area, buf);
+        return;
+    }
     let Screen::Ok(l) = screen else {
         let msg = "Terminal too small";
         let x = area.x + area.width.saturating_sub(width(msg) as u16) / 2;

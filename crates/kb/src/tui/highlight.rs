@@ -172,6 +172,60 @@ pub fn plain(text: &str) -> Vec<Vec<Span>> {
         .collect()
 }
 
+pub fn highlight_code_snippet(
+    lines: &[String],
+    extension: Option<&str>,
+    color: bool,
+) -> Vec<Vec<Span>> {
+    if !color {
+        return lines
+            .iter()
+            .map(|l| vec![Span::new(l.as_str(), Class::Plain)])
+            .collect();
+    }
+    let s = sets();
+    let syntax = extension
+        .and_then(|ext| s.default.find_syntax_by_extension(ext))
+        .unwrap_or_else(|| s.default.find_syntax_plain_text());
+    let mut state = ParseState::new(syntax);
+    let mut stack = ScopeStack::new();
+    let mut out = Vec::new();
+    for line in lines {
+        let with_newline = format!("{line}\n");
+        let Ok(ops) = state.parse_line(&with_newline, &s.default) else {
+            out.push(vec![Span::new(line.as_str(), Class::Plain)]);
+            continue;
+        };
+        let mut spans: Vec<Span> = Vec::new();
+        let mut at = 0;
+        let push = |from: usize, to: usize, class: Class, spans: &mut Vec<Span>| {
+            let to = to.min(line.len());
+            if from >= to {
+                return;
+            }
+            let piece = &line[from..to];
+            match spans.last_mut() {
+                Some(last) if last.class == class => last.text.push_str(piece),
+                _ => spans.push(Span::new(piece, class)),
+            }
+        };
+        let mut class = class_of(&stack);
+        for (pos, op) in ops {
+            push(at, pos, class, &mut spans);
+            at = pos.max(at);
+            let _ = stack.apply(&op);
+            class = class_of(&stack);
+        }
+        push(at, line.len(), class, &mut spans);
+        if spans.is_empty() {
+            spans.push(Span::new("", Class::Plain));
+        }
+        out.push(spans);
+    }
+    out
+}
+
+
 /// The payload as highlighted lines. `color` false skips the grammars (the `NO_COLOR` theme has
 /// no use for token classes) but still marks variables.
 pub fn highlight(lang: Lang, pieces: &[PayloadPiece], color: bool) -> Vec<Vec<Span>> {

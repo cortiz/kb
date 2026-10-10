@@ -2038,22 +2038,118 @@ pub fn run_code_repin(
 
 pub fn run_code_show(
     root: &Path,
-    _loaded: &Loaded,
+    loaded: &Loaded,
     args: &CodeShowArgs,
 ) -> Result<ExitCode, CliError> {
+    use crate::platform::SystemGitRunner;
+    use kb_core::code::{CloneCache, CodeService, DriftStatus};
+    use kb_core::entry::TypeFields;
+
     let kb = Kb::open(root).map_err(|e| CliError::new("io", e.to_string()))?;
     let entry = kb
         .entry(&args.id)
         .map_err(|e| CliError::new("not_found", format!("entry '{}' not found: {e}", args.id)))?;
 
+    let code_ref = match entry.fields() {
+        TypeFields::Code { code: Some(c) } => c,
+        _ => return Err(CliError::new("usage", format!("entry '{}' is not a code entry", args.id))),
+    };
+
+    let cache_path = root.join(".kb/clones.json");
+    let mut cache = CloneCache::load(&cache_path);
+    let git_runner = SystemGitRunner;
+
+    let clone = CodeService::find_clone(
+        &code_ref.repo,
+        &loaded.settings,
+        &mut cache,
+        &git_runner,
+    ).map_err(|e| CliError::new("io", e.to_string()))?;
+
+    let _ = cache.save(&cache_path);
+
+    let (status_str, snippet) = match &clone {
+        Some(cl) => {
+            let drift = CodeService::check_drift(&entry, cl, &git_runner)
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            let status = match &drift.status {
+                DriftStatus::Current => "current".to_string(),
+                DriftStatus::Moved { new_line, .. } => format!("moved (line {new_line})"),
+                DriftStatus::Changed { diff_summary, .. } => format!("changed ({diff_summary})"),
+                DriftStatus::Renamed { new_path, new_line, .. } => {
+                    format!("renamed ({new_path}:{new_line})")
+                }
+                DriftStatus::Gone { reason } => format!("gone ({reason})"),
+                DriftStatus::Unknown { reason } => format!("unknown ({reason})"),
+            };
+            let snip = CodeService::get_snippet(
+                cl,
+                &code_ref.git_ref,
+                &code_ref.path,
+                code_ref.line as usize,
+                code_ref.end_line.map(|l| l as usize),
+                3,
+                8,
+                &git_runner,
+            ).ok();
+            (status, snip)
+        }
+        None => ("unknown (no clone found)".to_string(), None),
+    };
+
+    let permalink = CodeService::build_permalink(
+        clone.as_ref(),
+        &code_ref.repo,
+        &code_ref.git_ref,
+        &code_ref.path,
+        code_ref.line as usize,
+        code_ref.end_line.map(|l| l as usize),
+        &loaded.settings,
+    ).ok();
+
     if args.json {
         let doc = serde_json::json!({
             "id": entry.id(),
-            "path": entry.path(),
+            "title": entry.title().unwrap_or(""),
+            "repo": code_ref.repo,
+            "path": code_ref.path,
+            "line": code_ref.line,
+            "end_line": code_ref.end_line,
+            "ref": code_ref.git_ref,
+            "branch": code_ref.branch,
+            "status": status_str,
+            "permalink": permalink,
+            "snippet": snippet,
         });
         println!("{}", serde_json::to_string_pretty(&doc).unwrap());
     } else {
-        println!("{}: {}", entry.id(), entry.title().unwrap_or(""));
+        println!("Title:  {}", entry.title().unwrap_or(""));
+        println!("Repo:   {}", code_ref.repo);
+        let loc = match code_ref.end_line {
+            Some(el) => format!("{}:{}-{}", code_ref.path, code_ref.line, el),
+            None => format!("{}:{}", code_ref.path, code_ref.line),
+        };
+        println!("File:   {}", loc);
+        println!("Ref:    {}", code_ref.git_ref);
+        println!("Status: {}", status_str);
+        if let Some(ref p) = permalink {
+            println!("Link:   {}", p);
+        }
+        println!();
+        if let Some(ref snip) = snippet {
+            let target_start = snip.target_line;
+            let target_end = snip.target_end_line.unwrap_or(target_start);
+            for (line_num, line_str) in &snip.lines {
+                let marker = if *line_num >= target_start && *line_num <= target_end {
+                    "▶"
+                } else {
+                    " "
+                };
+                println!("{} {:4} | {}", marker, line_num, line_str);
+            }
+        } else {
+            println!("(No snippet available - local clone not found)");
+        }
     }
 
     Ok(ExitCode::SUCCESS)
