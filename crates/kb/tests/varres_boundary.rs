@@ -34,6 +34,14 @@ const ALLOWED: &[(&str, &str)] = &[
         "lists the references of a new entry's body to declare them, and escapes one as a literal; never substitutes a value",
     ),
     (
+        "kb/src/tui/add.rs",
+        "colors the body of a draft in the add form",
+    ),
+    (
+        "kb/src/tui/add_view.rs",
+        "draws the variables of a draft as {{name}}",
+    ),
+    (
         "kb-core/src/author/suggest.rs",
         "turns a literal value into a reference (the opposite of resolving) and skips existing references",
     ),

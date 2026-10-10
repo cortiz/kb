@@ -344,7 +344,10 @@ printed on stderr after the UI closes.
 | `Ctrl-Y` | copy the payload and stay open |
 | `Alt-C` | copy the payload with its `{{variables}}` left in |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
-| `↓  Ctrl-N  Ctrl-J` | select the next result |
+| `Ctrl-N` | add an entry from the clipboard |
+| `Ctrl-R` | rename the entry |
+| `Ctrl-X` | delete the entry |
+| `↓  Ctrl-J` | select the next result |
 | `↑  Ctrl-P  Ctrl-K` | select the previous result |
 | `PgDn` | down one page |
 | `PgUp` | up one page |
@@ -464,6 +467,25 @@ never applied by `--yes`.
 Reading the clipboard uses `pbpaste` (macOS), `wl-paste` (Wayland), then `xclip -o` or `xsel -o`
 (X11), 2 seconds each. Over SSH it is not read at all (terminals do not give the clipboard back),
 and kb says so and starts with an empty body. `kb doctor` shows which program will be used.
+
+### The add form
+
+`Ctrl-N` in the list (or `kb add` in a terminal without `--yes`) reads the clipboard and opens the
+add form: the type chips, title, tags, the variables found in the body, where the entry will be
+saved, the body (colored, read-only here) and optional notes. The focus starts on the title; it
+starts on the type when the clipboard was empty or unreadable or kb was not sure.
+
+| Key | |
+|-----|--|
+| `Tab`, `Shift-Tab` | next / previous field (a partial tag is completed from the tags already in the KB) |
+| `←` `→` on the type | change the type |
+| `Ctrl-S` | save: the entry is checked like `kb lint` first; a likely secret is marked in the body and refused, and there is no "save anyway" in the form |
+| `Ctrl-E` | edit the body in your editor; type and variables are detected again |
+| `Ctrl-P` | preview the entry as the list will show it; `Esc` returns |
+| `Esc` | close; asks `Discard this entry? (y/N)` if anything changed |
+
+After saving, the entry is selected in the list (the search line holds its title).
+**`Ctrl-N` used to select the next result**; it now adds. `↓` and `Ctrl-J` still move down.
 
 ## Checking your setup
 

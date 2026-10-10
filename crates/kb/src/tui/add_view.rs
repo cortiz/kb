@@ -17,7 +17,7 @@ use super::theme::Theme;
 pub const KEY_BAR: &str = "^S save · ^E edit body · ^P preview · Tab next · Esc discard";
 const KEY_BAR_NO_BODY: &str = "^S save · ^P preview · Tab next · Esc discard";
 /// Where the label ends and the input begins in the left column.
-const LABEL: u16 = 9;
+const LABEL: u16 = 11;
 
 pub fn draw_add(state: &AppState, add: &AddState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     if area.height < 3 {

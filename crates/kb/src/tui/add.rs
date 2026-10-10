@@ -848,3 +848,277 @@ fn field_of(code: RuleCode) -> Field {
 pub fn kind_name(kind: kb_core::vars::VarKind) -> &'static str {
     kb_core::vars::VarKind::NAMES[kind as usize]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kb_core::author::{DraftOptions, DraftSource};
+
+    const CW: &str =
+        "fields @timestamp, @message\n| filter @message like /{{fn}}/\n| stats count() by bin(5m)";
+
+    fn open_with(text: &str, source: DraftSource, unavailable: Option<&str>) -> AddState {
+        let draft = Draft::from_text(text, source, &DraftOptions::default());
+        let tags = vec![
+            ("lambda".into(), 5),
+            ("laptop".into(), 2),
+            ("auth".into(), 1),
+        ];
+        AddState::open(
+            draft,
+            tags,
+            unavailable.map(str::to_string),
+            SystemTime::UNIX_EPOCH,
+            false,
+        )
+    }
+
+    fn press(s: &mut AddState, code: Code, mods: u8) -> AddEvent {
+        s.handle_key(Key::new(code, mods))
+    }
+
+    fn type_text(s: &mut AddState, text: &str) {
+        for c in text.chars() {
+            press(s, Code::Char(c), 0);
+        }
+    }
+
+    #[test]
+    fn initial_focus_follows_what_was_found() {
+        assert_eq!(
+            open_with(CW, DraftSource::Clipboard, None).focus,
+            Field::Title
+        );
+        assert_eq!(open_with("", DraftSource::Empty, None).focus, Field::Type);
+        assert_eq!(
+            open_with(
+                "",
+                DraftSource::Empty,
+                Some("clipboard not readable over SSH")
+            )
+            .focus,
+            Field::Type
+        );
+        assert_eq!(
+            open_with("remember the milk", DraftSource::Clipboard, None).focus,
+            Field::Type
+        );
+        let s = open_with(
+            "",
+            DraftSource::Empty,
+            Some("clipboard not readable over SSH"),
+        );
+        assert!(s.header().contains("clipboard not readable over SSH"));
+        assert!(
+            open_with(CW, DraftSource::Clipboard, None)
+                .header()
+                .contains("detected cw (high)")
+        );
+    }
+
+    #[test]
+    fn tab_and_shift_tab_walk_the_fields_in_order() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        s.focus = Field::Type;
+        let mut seen = vec![s.focus];
+        for _ in 0..5 {
+            press(&mut s, Code::Tab, 0);
+            seen.push(s.focus);
+        }
+        assert_eq!(
+            seen,
+            [
+                Field::Type,
+                Field::Title,
+                Field::Tags,
+                Field::Variables,
+                Field::Path,
+                Field::Notes
+            ]
+        );
+        press(&mut s, Code::Tab, 0);
+        assert_eq!(s.focus, Field::Type);
+        press(&mut s, Code::BackTab, 0);
+        assert_eq!(s.focus, Field::Notes);
+    }
+
+    #[test]
+    fn arrows_change_the_type_and_drop_inapplicable_fields() {
+        let mut s = open_with("https://example.com/x", DraftSource::Clipboard, None);
+        s.focus = Field::Type;
+        assert_eq!(s.draft.entry_type, EntryType::Link);
+        assert_eq!(s.type_fields.len(), 1);
+        press(&mut s, Code::Right, 0);
+        assert_eq!(s.draft.entry_type, EntryType::Code);
+        assert_eq!(s.type_fields.len(), 6);
+        press(&mut s, Code::Left, 0);
+        press(&mut s, Code::Left, 0);
+        assert_eq!(s.draft.entry_type, EntryType::Prompt);
+        assert!(s.type_fields.is_empty());
+        assert_eq!(s.focus, Field::Type);
+        assert!(s.changed);
+    }
+
+    #[test]
+    fn typing_edits_title_tags_path_and_notes() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        type_text(&mut s, "P99");
+        assert_eq!(s.draft.title, "P99");
+        press(&mut s, Code::Tab, 0);
+        type_text(&mut s, "Auth, x");
+        assert_eq!(s.draft.tags, ["auth", "x"]);
+        s.focus = Field::Path;
+        type_text(&mut s, "mine/p99");
+        assert_eq!(s.draft.path, PathChoice::Fixed("mine/p99".into()));
+        for _ in 0..8 {
+            press(&mut s, Code::Backspace, 0);
+        }
+        assert_eq!(s.draft.path, PathChoice::Auto);
+        s.focus = Field::Notes;
+        type_text(&mut s, "one");
+        press(&mut s, Code::Enter, 0);
+        type_text(&mut s, "two");
+        assert_eq!(s.draft.notes, "one\ntwo");
+    }
+
+    #[test]
+    fn tag_completion_lists_five_by_frequency_and_tab_takes_the_first() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        s.focus = Field::Tags;
+        s.tags = LineEditor::new("");
+        type_text(&mut s, "la");
+        assert_eq!(s.completions(), ["lambda", "laptop"]);
+        press(&mut s, Code::Tab, 0);
+        assert_eq!(s.tags.text(), "lambda, ");
+        assert_eq!(s.draft.tags, ["lambda"]);
+        assert_eq!(s.focus, Field::Tags, "Tab took the completion and stayed");
+        press(&mut s, Code::Tab, 0);
+        assert_eq!(s.focus, Field::Variables, "no partial tag: Tab moves on");
+        let many: Vec<(String, u32)> = (0..9).map(|i| (format!("t{i}"), 9 - i)).collect();
+        s.known_tags = many;
+        s.focus = Field::Tags;
+        s.tags = LineEditor::new("t");
+        assert_eq!(s.completions().len(), COMPLETIONS);
+    }
+
+    #[test]
+    fn invalid_tags_are_marked_and_block_saving() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        s.focus = Field::Tags;
+        type_text(&mut s, "ok, bad{{x}}");
+        assert_eq!(s.invalid_tags().len(), 1);
+        s.draft.title = "T".into();
+        assert_eq!(press(&mut s, Code::Char('s'), CTRL), AddEvent::None);
+        assert_eq!(s.focus, Field::Tags);
+        assert!(s.message.as_deref().unwrap().contains("bad"));
+    }
+
+    #[test]
+    fn escape_closes_when_unchanged_and_asks_when_changed() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        assert!(!s.changed);
+        assert_eq!(press(&mut s, Code::Esc, 0), AddEvent::Close);
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        type_text(&mut s, "x");
+        assert_eq!(press(&mut s, Code::Esc, 0), AddEvent::None);
+        assert!(s.confirm_discard);
+        assert_eq!(press(&mut s, Code::Char('n'), 0), AddEvent::None);
+        assert!(!s.confirm_discard);
+        press(&mut s, Code::Esc, 0);
+        assert_eq!(press(&mut s, Code::Char('y'), 0), AddEvent::Close);
+        // anything but y cancels
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        type_text(&mut s, "x");
+        press(&mut s, Code::Esc, 0);
+        assert_eq!(press(&mut s, Code::Enter, 0), AddEvent::None);
+        assert!(!s.confirm_discard);
+    }
+
+    #[test]
+    fn saving_needs_a_title_and_a_valid_entry_and_hands_out_the_draft() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        s.focus = Field::Notes;
+        assert_eq!(press(&mut s, Code::Char('s'), CTRL), AddEvent::None);
+        assert_eq!(
+            (s.focus, s.message.as_deref()),
+            (Field::Title, Some("a title is required"))
+        );
+        type_text(&mut s, "Fine");
+        let AddEvent::Save(draft) = press(&mut s, Code::Char('s'), CTRL) else {
+            panic!()
+        };
+        assert_eq!(draft.title, "Fine");
+        // a path no title can make
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        type_text(&mut s, "¿¿");
+        assert_eq!(press(&mut s, Code::Char('s'), CTRL), AddEvent::None);
+        assert_eq!(s.focus, Field::Path);
+    }
+
+    #[test]
+    fn a_secret_focuses_the_body_and_marks_it_with_no_way_to_save_anyway() {
+        let mut s = open_with(
+            "aws s3 ls # AKIAIOSFODNN7EXAMPLE\nkubectl get pods",
+            DraftSource::Clipboard,
+            None,
+        );
+        s.focus = Field::Title;
+        type_text(&mut s, "Leaky");
+        assert_eq!(press(&mut s, Code::Char('s'), CTRL), AddEvent::None);
+        assert_eq!(s.focus, Field::Body);
+        assert_eq!(s.secret.len(), 1);
+        assert_eq!(&s.draft.body[s.secret[0].clone()], "AKIAIOSFODNN7EXAMPLE");
+        assert!(s.message.as_deref().unwrap().starts_with("KB060"));
+        assert_eq!(
+            press(&mut s, Code::Char('s'), CTRL),
+            AddEvent::None,
+            "still refused"
+        );
+    }
+
+    #[test]
+    fn ctrl_e_asks_for_the_editor_and_a_returned_body_reruns_detection() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        let AddEvent::EditBody(text) = press(&mut s, Code::Char('e'), CTRL) else {
+            panic!()
+        };
+        assert_eq!(text, s.draft.body);
+        s.body_edited(Some("select 1 from t;".into()));
+        assert_eq!(s.draft.entry_type, EntryType::Sql);
+        assert!(s.changed && s.note.as_deref().unwrap().contains("cw to sql"));
+        let before = s.draft.body.clone();
+        s.body_edited(None);
+        assert_eq!(s.draft.body, before);
+        s.body_edited(Some("x".repeat(MAX_FILE_BYTES + 1)));
+        assert_eq!(s.draft.body, before);
+        assert!(s.message.as_deref().unwrap().contains("limited to"));
+    }
+
+    #[test]
+    fn preview_toggles_and_escape_leaves_it() {
+        let mut s = open_with(CW, DraftSource::Clipboard, None);
+        press(&mut s, Code::Char('p'), CTRL);
+        assert!(s.preview.is_some());
+        assert_eq!(press(&mut s, Code::Esc, 0), AddEvent::None);
+        assert!(s.preview.is_none());
+        press(&mut s, Code::Char('p'), CTRL);
+        press(&mut s, Code::Char('p'), CTRL);
+        assert!(s.preview.is_none());
+    }
+
+    #[test]
+    fn text_area_moves_by_line() {
+        let mut t = TextArea::new("ab\ncde\nf");
+        t.up();
+        assert_eq!(t.position(), (1, 1));
+        t.up();
+        assert_eq!(t.position(), (0, 1));
+        t.end();
+        t.down();
+        assert_eq!(t.position(), (1, 2));
+        t.home();
+        assert_eq!(t.position(), (1, 0));
+        assert!(t.backspace());
+        assert_eq!(t.text(), "abcde\nf");
+    }
+}

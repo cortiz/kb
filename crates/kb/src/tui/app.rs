@@ -1117,7 +1117,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         let k = |c, m| key(c, m);
         s.update(k(KeyCode::Down, KeyModifiers::NONE), now);
-        s.update(ctrl('n'), now);
+        s.update(k(KeyCode::Down, KeyModifiers::NONE), now);
         s.update(ctrl('j'), now);
         assert_eq!(s.selected, 3);
         s.update(ctrl('p'), now);
@@ -2135,5 +2135,102 @@ pub(crate) mod tests {
         assert!(!format!("{s:?}").contains("S3CR3T"));
         let e = s.update(key(KeyCode::Enter, KeyModifiers::NONE), Instant::now());
         assert!(!format!("{e:?}").contains("S3CR3T"));
+    }
+
+    fn clipboard(text: &str) -> Action {
+        Action::ClipboardRead {
+            outcome: ReadOutcome::Text(text.into()),
+            now: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn ctrl_n_reads_the_clipboard_and_opens_the_add_form() {
+        let mut s = loaded(&["a", "b"]);
+        let now = Instant::now();
+        let e = s.update(ctrl('n'), now);
+        assert_eq!(e, [Effect::ReadClipboard]);
+        assert!(s.add.is_none());
+        s.update(clipboard("select 1 from t;"), now);
+        let add = s.add.as_ref().unwrap();
+        assert_eq!(add.draft.entry_type, EntryType::Sql);
+        assert_eq!(s.mode(), Mode::Form);
+        // the unreadable clipboard opens an empty form that says why
+        let mut s = loaded(&["a"]);
+        s.update(
+            Action::ClipboardRead {
+                outcome: ReadOutcome::Unavailable(crate::platform::clipboard::Unavailable::OverSsh),
+                now: SystemTime::UNIX_EPOCH,
+            },
+            now,
+        );
+        assert!(s.add.as_ref().unwrap().header().contains("over SSH"));
+    }
+
+    #[test]
+    fn saving_closes_the_form_and_selects_the_new_entry() {
+        let mut s = loaded(&["a", "b"]);
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        for c in "My query".chars() {
+            s.update(ch(c), now);
+        }
+        let e = s.update(ctrl('s'), now);
+        let [Effect::SaveDraft(draft)] = e.as_slice() else {
+            panic!("{e:?}")
+        };
+        assert_eq!(draft.title, "My query");
+        // a failed save keeps the form open with the message
+        s.update(
+            Action::SaveFailed("sql/my-query already exists".into()),
+            now,
+        );
+        assert!(s.add.is_some());
+        assert_eq!(
+            s.add.as_ref().unwrap().message.as_deref(),
+            Some("sql/my-query already exists")
+        );
+        let e = s.update(Action::Saved("sql/my-query".into()), now);
+        assert!(s.add.is_none());
+        assert_eq!(s.selected_id.as_deref(), Some("sql/my-query"));
+        assert_eq!(s.message.as_ref().unwrap().text, "Saved sql/my-query");
+        assert!(e.contains(&Effect::Refresh));
+        // the next results put the selection on it
+        s.update(
+            Action::Refreshed(RefreshInfo {
+                indexed: 3,
+                skipped: 0,
+                duration: Duration::from_millis(5),
+            }),
+            now,
+        );
+        let g = s.search_gen;
+        s.update(Action::Results(g, page(&["a", "sql/my-query", "b"])), now);
+        assert_eq!(s.selected, 1);
+    }
+
+    #[test]
+    fn started_by_add_ends_the_ui_with_the_form() {
+        let mut s = state();
+        s.started_by_add = true;
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(
+            s.update(Action::Saved("sql/x".into()), now),
+            [Effect::Added("sql/x".into())]
+        );
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(
+            s.update(key(KeyCode::Esc, KeyModifiers::NONE), now),
+            [Effect::Quit(130)]
+        );
+    }
+
+    #[test]
+    fn ctrl_c_quits_from_the_add_form() {
+        let mut s = state();
+        let now = Instant::now();
+        s.update(clipboard("select 1 from t;"), now);
+        assert_eq!(s.update(ctrl('c'), now), [Effect::Quit(130)]);
     }
 }
