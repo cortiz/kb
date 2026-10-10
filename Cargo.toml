@@ -28,7 +28,7 @@ signal-hook = "0.3"
 # the same crossterm ratatui uses; the feature lets the UI read keys from /dev/tty when stdin is a pipe
 crossterm = { version = "0.29", features = ["use-dev-tty"] }
 unicode-width = "0.2"
-vt100 = "0.15"
+vt100 = "0.16"
 portable-pty = "0.9"
 rusqlite = { version = "0.37", features = ["bundled"] }
 unicode-normalization = "0.1"
