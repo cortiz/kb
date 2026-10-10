@@ -36,7 +36,9 @@ pub fn draw_action_menu(
     let title = format!(" Actions: {} ({}) ", truncate(&menu.title, 36), ty_str);
 
     let popup_w = 64.min(area.width.saturating_sub(4)).max(36);
-    let popup_h = ((menu.actions.len() as u16) + 4).min(area.height.saturating_sub(4)).max(7);
+    let popup_h = ((menu.actions.len() as u16) + 4)
+        .min(area.height.saturating_sub(4))
+        .max(7);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
     let popup = Rect::new(x, y, popup_w, popup_h);

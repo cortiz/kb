@@ -11,6 +11,7 @@ pub struct CodeSnippet {
     pub target_end_line: Option<usize>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn get_snippet_impl(
     clone: &LocalClone,
     pinned_ref: &str,
@@ -51,8 +52,8 @@ pub fn get_snippet_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use crate::code::clone::RemoteHost;
+    use std::path::Path;
 
     struct MockRunner {
         content: String,
@@ -90,17 +91,8 @@ mod tests {
         };
 
         // Pin line 10 with 3 lines context before and 8 lines after
-        let snippet = get_snippet_impl(
-            &clone,
-            "abcdef1",
-            "src/file.rs",
-            10,
-            None,
-            3,
-            8,
-            &runner,
-        )
-        .unwrap();
+        let snippet =
+            get_snippet_impl(&clone, "abcdef1", "src/file.rs", 10, None, 3, 8, &runner).unwrap();
 
         assert_eq!(snippet.target_line, 10);
         assert_eq!(snippet.target_end_line, None);
@@ -134,17 +126,8 @@ mod tests {
         };
 
         // Pin line 2 with context_before 5 (should clamp to line 1) and end_line 8 with context_after 5 (should clamp to 10)
-        let snippet = get_snippet_impl(
-            &clone,
-            "abcdef1",
-            "src/file.rs",
-            2,
-            Some(8),
-            5,
-            5,
-            &runner,
-        )
-        .unwrap();
+        let snippet =
+            get_snippet_impl(&clone, "abcdef1", "src/file.rs", 2, Some(8), 5, 5, &runner).unwrap();
 
         assert_eq!(snippet.target_line, 2);
         assert_eq!(snippet.target_end_line, Some(8));

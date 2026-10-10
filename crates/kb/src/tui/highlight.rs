@@ -225,7 +225,6 @@ pub fn highlight_code_snippet(
     out
 }
 
-
 /// The payload as highlighted lines. `color` false skips the grammars (the `NO_COLOR` theme has
 /// no use for token classes) but still marks variables.
 pub fn highlight(lang: Lang, pieces: &[PayloadPiece], color: bool) -> Vec<Vec<Span>> {

@@ -5,8 +5,7 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
-> Status: milestone M4 (entry format, `kb lint`, `kb search`, the terminal UI, clipboard, config and
-> `kb doctor`). Variables at use time and actions arrive in later milestones.
+> Status: milestone M7 (actions, URL generators, code drift detection, action menu, custom actions).
 
 ## Install
 
@@ -108,7 +107,7 @@ kb config list                      # every setting, its value and where the val
 | `editor` | a command, arguments allowed | `$VISUAL`, then `$EDITOR`, then `vi` |
 | `path_template` | text with `{type}`, `{slug}` (required) and `{tag}` | `{type}/{slug}` |
 | `theme` | `auto`, `dark`, `light` | `auto` |
-| `tui.enter` | `copy`, `print` | `copy` |
+| `tui.enter` | `copy`, `print`, `primary` | `copy` |
 | `tui.mouse` | `true`, `false` | `false` |
 | `clipboard.method` | `auto`, `native`, `osc52`, `stdout` | `auto` |
 | `clipboard.command` | a command that reads the text on stdin | none |
@@ -116,6 +115,15 @@ kb config list                      # every setting, its value and where the val
 | `clipboard.trim_trailing_newline` | `true`, `false` | `true` |
 | `opener.command` | a command that gets the URL or file | `open` (macOS), `xdg-open` (Linux) |
 | `vars.remember` | `true`, `false` | `true` |
+| `sumo.endpoint_url` | Sumo Logic base URL | none |
+| `aws.default_region` | AWS region for CloudWatch console | `$AWS_REGION`, `$AWS_DEFAULT_REGION`, else `us-east-1` |
+| `code.search_paths` | list of paths scanned for clones | `["~/src", "~/repos", "~/code", "~/projects"]` |
+| `code.cache_ttl_seconds` | clone discovery cache TTL | `86400` (24h) |
+| `code.fetch_on_check` | auto-fetch before drift check | `false` |
+| `run.dangerous_patterns` | list of regex patterns triggering confirmation | `["rm -rf", "DROP TABLE", ...]` |
+| `run.require_confirmation`| `true`, `false` | `true` |
+
+Custom actions are defined under `[[actions.<type>]]` tables (e.g. `[[actions.cmd]]`, `[[actions.sql]]`), specifying `name`, `command`, optional `key`, `input` (`"stdin"` or `"arg"`), `description`, and `confirm`. Local clone paths can be mapped explicitly via `[code.repos]` (e.g. `"org/repo" = "~/repos/repo"`).
 
 A command-line flag beats an environment variable (`KB_<SECTION>_<KEY>`, for example
 `KB_CLIPBOARD_METHOD` or `KB_ROOT`), which beats the file, which beats the default. An unknown key
@@ -340,10 +348,11 @@ printed on stderr after the UI closes.
 
 | Key | Action |
 |-----|--------|
-| `Enter` | pick: copy the entry and exit |
+| `Enter` | pick: copy the entry and exit (or primary action if `tui.enter = "primary"`) |
 | `Ctrl-Y` | copy the payload and stay open |
 | `Ctrl-O` | open the link, console or code view |
 | `Ctrl-G` | run the command safely |
+| `Alt-A  F2` | open the action menu |
 | `Alt-C` | copy the payload with its `{{variables}}` left in |
 | `Ctrl-E` | edit the entry in $VISUAL / $EDITOR |
 | `Ctrl-N` | add an entry from the clipboard |
@@ -375,11 +384,6 @@ printed on stderr after the UI closes.
 | `F1` | this help, always |
 | `Esc` | clear the query; exit when it is empty |
 | `Ctrl-C` | exit immediately |
-| `` |  |
-| `` |  |
-| `` |  |
-| `` |  |
-| `` |  |
 | typing | edit the query |
 
 Terminals that keep Shift-PgUp/PgDn or Ctrl-Home/End for themselves never send them to kb; use
@@ -422,6 +426,105 @@ for the terminal and has nowhere else to go).
 `kb show <id|words>` prints the entry as the preview shows it (colors only on a terminal);
 `--raw` prints only the payload, `--json` the entry as JSON, `--file` the path of its file, and
 `--no-color` turns colors off. It records no use.
+
+## Actions: Opening, Running, and Custom Actions
+
+kb entries support interactive execution and console deep linking via dedicated subcommands and TUI keys:
+
+```sh
+kb open <id|words>                      # open URL or console in default browser
+kb open <id> --print-url                # print generated URL without opening
+kb run <id|words>                       # run command interactively
+kb run <id> -y                          # run command without confirmation
+kb run <id> --dry-run                   # show command and environment without running
+kb actions <id|words>                   # list available actions for an entry
+kb actions <id> --json                  # machine-readable action list
+kb run <id> --action <name>             # execute a custom action
+```
+
+### Opening links and consoles (`kb open`, `Ctrl-O`)
+
+- **`link` entries**: opens `entry.url` in the default web browser (or the command configured in `opener.command`).
+- **`sumo` entries**: synthesizes a Sumo Logic search URL from `sumo.endpoint_url` (or `KB_SUMO_ENDPOINT_URL`), the query payload, and time range `range: "-15m"`.
+- **`cw` entries**: generates an AWS CloudWatch Insights query URL from the query, `log_groups`, `region`, and time range.
+- **`code` entries**: launches the interactive Code View within the TUI, showing syntax-highlighted git snippet context and drift status. Pass `--web` to open directly on the git hosting provider (GitHub, GitLab, Bitbucket), or `--editor` to open the file in `$VISUAL` / `$EDITOR`.
+
+### Running shell commands (`kb run`, `Ctrl-G`)
+
+Commands (`cmd` entries) can be executed directly with their declared `shell` (`sh`, `bash`, `zsh`, `fish`) and `cwd`.
+
+**Destructive check**: commands matching dangerous patterns (`rm -rf`, `DROP TABLE`, `mkfs`, `dd if=`, or custom patterns in `run.dangerous_patterns`) prompt for confirmation before execution. Pass `-y` / `--yes` to skip confirmation.
+
+### Action Menu (`kb actions`, `Alt-A`, `F2`)
+
+The Action Menu displays all built-in and custom actions for the selected entry, including their hotkeys, descriptions, and availability. Disabled actions explain why (e.g. missing clone or placeholder field).
+
+### Custom Actions (`[[actions.<type>]]`)
+
+Define custom actions in `config.toml` to pipe query payloads into external tools or formatters:
+
+```toml
+[[actions.cmd]]
+name = "explain"
+command = "gh copilot explain"
+key = "e"
+input = "stdin"                         # "stdin" (default) or "arg"
+description = "Explain with GitHub Copilot"
+
+[[actions.sql]]
+name = "format"
+command = "sqlfluff format -"
+key = "f"
+input = "stdin"
+description = "Format query with sqlfluff"
+```
+
+Custom actions support placeholder interpolation (`{{title}}`, `{{path}}`, `{{repo}}`, `{{url}}`, etc.). Values are safely shell-escaped.
+
+## Code entries: Drift Detection and Re-pinning
+
+`code` entries track specific functions, classes, or configuration lines within local git repositories:
+
+```sh
+kb code check                           # check all code entries for drift
+kb code check <id>                      # check specific entry
+kb code check --fetch                   # fetch remote before checking
+kb code check --json                    # output drift report as JSON
+kb code repin <id>                      # re-pin to current tracking branch tip
+kb code show <id>                       # display code preview snippet
+```
+
+### Drift statuses
+
+When comparing pinned commit SHA against the tracking branch tip:
+- `current`: commit matches tracking branch tip or code content/location has zero changes.
+- `moved`: the referenced code lines shifted due to edits elsewhere in the file.
+- `changed`: code within the pinned range was edited.
+- `renamed`: file was renamed or moved.
+- `gone`: file or ref was deleted.
+
+### Code View Controls (`Ctrl-O` in TUI)
+
+When viewing a `code` entry in the TUI:
+
+| Key | Action |
+|-----|--------|
+| `g` | open file in local git clone in editor |
+| `v` | open permalink on web host (GitHub / GitLab / Bitbucket) |
+| `i` | toggle drift diff inspector |
+| `y` | copy permalink to clipboard |
+| `Y` | copy `path:line` to clipboard |
+| `u` | repin entry to tracking branch tip |
+| `F` | fetch remote and recheck drift |
+| `Esc` | return to list |
+
+### Enter Key Customization (`tui.enter = "primary"`)
+
+Set `tui.enter = "primary"` in `config.toml` so pressing `Enter` executes the primary action:
+- `link`, `sumo`, `cw`: opens in browser.
+- `code`: opens the interactive Code View.
+- `cmd`, `sql`, `prompt`: copies the payload to the clipboard.
+- **Safety guarantee**: `Enter` never executes a command (`kb run` / `Ctrl-G` is required).
 
 ## Adding entries
 

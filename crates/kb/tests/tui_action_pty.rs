@@ -25,7 +25,7 @@ fn setup_action_pty_env() -> (tempfile::TempDir, PathBuf, PathBuf) {
 fn tui_action_menu_alt_a_and_f2_and_esc() {
     let (_dir, kb_root, home) = setup_action_pty_env();
 
-    let mut spec = Spec::new(&["5xx".into()], &home, &kb_root);
+    let mut spec = Spec::new(&["5xx"], &home, &kb_root);
     spec.size = (100, 30);
     spec.allow_clipboard = true;
 
@@ -58,7 +58,7 @@ fn tui_action_menu_alt_a_and_f2_and_esc() {
 fn tui_action_menu_on_code_opens_code_view() {
     let (_dir, kb_root, home) = setup_action_pty_env();
 
-    let mut spec = Spec::new(&["AuthorizerHandler".into()], &home, &kb_root);
+    let mut spec = Spec::new(&["AuthorizerHandler"], &home, &kb_root);
     spec.size = (100, 30);
 
     let mut s = Session::spawn(&spec);

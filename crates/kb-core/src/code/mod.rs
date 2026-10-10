@@ -7,8 +7,7 @@ pub mod repin;
 pub mod snippet;
 
 pub use clone::{
-    CachedCloneEntry, CloneCache, GitError, GitRunner, LocalClone, RemoteHost,
-    normalize_remote_url,
+    CachedCloneEntry, CloneCache, GitError, GitRunner, LocalClone, RemoteHost, normalize_remote_url,
 };
 pub use drift::{DriftConfidence, DriftReport, DriftStatus};
 pub use permalink::PermalinkError;
@@ -31,10 +30,7 @@ impl CodeService {
     }
 
     /// Fetches the latest remote commits for the clone.
-    pub fn fetch_remote(
-        clone: &LocalClone,
-        git_runner: &impl GitRunner,
-    ) -> Result<(), GitError> {
+    pub fn fetch_remote(clone: &LocalClone, git_runner: &impl GitRunner) -> Result<(), GitError> {
         git_runner.run_git(&clone.local_path, &["fetch"])?;
         Ok(())
     }
@@ -60,6 +56,7 @@ impl CodeService {
     }
 
     /// Reads code preview lines around the pinned line from the git object store.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_snippet(
         clone: &LocalClone,
         pinned_ref: &str,

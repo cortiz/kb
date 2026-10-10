@@ -11,7 +11,15 @@ use support::pty::{CTRL_C, ESC, Session, Spec};
 const CTRL_O: &[u8] = b"\x0f";
 const ENTER: &[u8] = b"\r";
 
-fn setup_code_pty_env() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf, Value) {
+fn setup_code_pty_env() -> (
+    tempfile::TempDir,
+    PathBuf,
+    PathBuf,
+    PathBuf,
+    PathBuf,
+    PathBuf,
+    Value,
+) {
     let dir = tempfile::tempdir().unwrap();
     let git_repo = dir.path().join("repo");
     let kb_root = dir.path().join("kb");
@@ -46,13 +54,17 @@ fn setup_code_pty_env() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf, PathBu
         format!(
             r#"[code.repos]
 "test/repo" = "{}"
-"#
-        , git_repo.display()),
-    ).unwrap();
+"#,
+            git_repo.display()
+        ),
+    )
+    .unwrap();
 
     let (opener_dir, opened_log) = fake_opener(dir.path());
 
-    (dir, git_repo, kb_root, home, opener_dir, opened_log, manifest)
+    (
+        dir, git_repo, kb_root, home, opener_dir, opened_log, manifest,
+    )
 }
 
 fn fake_opener(base: &Path) -> (PathBuf, PathBuf) {
@@ -98,7 +110,8 @@ code:
     .unwrap();
 
     let mut spec = Spec::new(&[], &home, &kb_root);
-    spec.env.push(("PATH".into(), path_with(&opener_dir).into_string().unwrap()));
+    spec.env
+        .push(("PATH".into(), path_with(&opener_dir).into_string().unwrap()));
     let mut s = Session::spawn(&spec);
 
     // 1. In list view, select the entry
@@ -174,7 +187,7 @@ code:
 
     // Exit cleanly
     s.send(ESC);
-    s.wait_for("Auth Handler Code");
+    s.wait_for("Enter pick");
     s.send(CTRL_C);
     assert_eq!(s.wait_exit(), 130);
 }
@@ -208,7 +221,8 @@ code:
     .unwrap();
 
     let mut spec = Spec::new(&[], &home, &kb_root);
-    spec.env.push(("PATH".into(), path_with(&opener_dir).into_string().unwrap()));
+    spec.env
+        .push(("PATH".into(), path_with(&opener_dir).into_string().unwrap()));
     let mut s = Session::spawn(&spec);
 
     s.wait_for("Remote GitHub Link");
@@ -239,8 +253,7 @@ code:
     s.wait_for("Copied location");
 
     s.send(ESC);
-    s.wait_for("Remote GitHub Link");
+    s.wait_for("Enter pick");
     s.send(CTRL_C);
     assert_eq!(s.wait_exit(), 130);
 }
-

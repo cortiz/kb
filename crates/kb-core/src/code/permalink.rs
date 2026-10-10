@@ -1,7 +1,7 @@
 //! Web permalink generation for GitHub, GitLab, Bitbucket, and custom hosts.
 
+use super::clone::{LocalClone, RemoteHost, normalize_remote_url};
 use crate::config::Settings;
-use super::clone::{normalize_remote_url, LocalClone, RemoteHost};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PermalinkError {
@@ -71,9 +71,13 @@ pub fn build_permalink_impl(
         RemoteHost::Custom(_) => {
             if let Some(tpl) = settings.code_web_url() {
                 if tpl.is_empty() {
-                    return Err(PermalinkError::MissingTemplateField("code.web_url is empty".to_string()));
+                    return Err(PermalinkError::MissingTemplateField(
+                        "code.web_url is empty".to_string(),
+                    ));
                 }
-                let end_line_str = end_line.map(|l| l.to_string()).unwrap_or_else(|| line.to_string());
+                let end_line_str = end_line
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| line.to_string());
                 let result = tpl
                     .replace("{repo}", &canonical_repo)
                     .replace("{ref}", sha)
@@ -226,6 +230,9 @@ mod tests {
             &settings,
         )
         .unwrap_err();
-        assert_eq!(err, PermalinkError::InvalidRef("not-a-valid-sha!@#".to_string()));
+        assert_eq!(
+            err,
+            PermalinkError::InvalidRef("not-a-valid-sha!@#".to_string())
+        );
     }
 }

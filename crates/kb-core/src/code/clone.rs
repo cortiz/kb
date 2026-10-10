@@ -1,8 +1,8 @@
 //! Local git clone discovery and caching.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::{Deserialize, Serialize};
 
 use crate::config::Settings;
 
@@ -52,15 +52,17 @@ impl CloneCache {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let data = serde_json::to_string_pretty(self)
-            .map_err(std::io::Error::other)?;
+        let data = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(path, data)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitError {
-    CommandFailed { exit_code: Option<i32>, stderr: String },
+    CommandFailed {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     NotFound(String),
     Io(String),
 }
@@ -82,7 +84,6 @@ impl std::error::Error for GitError {}
 pub trait GitRunner {
     fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, GitError>;
 }
-
 
 /// Normalizes a git remote URL into RemoteHost and canonical `owner/repo` (or path).
 pub fn normalize_remote_url(url: &str) -> (RemoteHost, String) {
@@ -138,10 +139,16 @@ pub fn resolve_default_tracking_branch(cwd: &Path, git_runner: &impl GitRunner) 
             return branch.to_string();
         }
     }
-    if git_runner.run_git(cwd, &["rev-parse", "--verify", "origin/main"]).is_ok() {
+    if git_runner
+        .run_git(cwd, &["rev-parse", "--verify", "origin/main"])
+        .is_ok()
+    {
         return "origin/main".to_string();
     }
-    if git_runner.run_git(cwd, &["rev-parse", "--verify", "origin/master"]).is_ok() {
+    if git_runner
+        .run_git(cwd, &["rev-parse", "--verify", "origin/master"])
+        .is_ok()
+    {
         return "origin/master".to_string();
     }
     "origin/main".to_string()
@@ -160,7 +167,10 @@ pub fn find_clone_impl(
     cache: &mut CloneCache,
     git_runner: &impl GitRunner,
 ) -> Result<Option<LocalClone>, GitError> {
-    let clean_id = repo_id.trim().trim_end_matches(".git").trim_start_matches('/');
+    let clean_id = repo_id
+        .trim()
+        .trim_end_matches(".git")
+        .trim_start_matches('/');
     let home = std::env::var_os("HOME").map(PathBuf::from);
 
     // 1. Explicit config mappings: [code.repos]
@@ -180,6 +190,15 @@ pub fn find_clone_impl(
                 let (host, _) = normalize_remote_url(&remote_url);
                 let tracking_branch = resolve_default_tracking_branch(&path, git_runner);
                 let has_local_changes = check_dirty(&path, git_runner);
+                cache.entries.insert(
+                    clean_id.to_string(),
+                    CachedCloneEntry {
+                        path: path.clone(),
+                        remote_url: remote_url.clone(),
+                        tracking_branch: tracking_branch.clone(),
+                        checked_at: 0,
+                    },
+                );
                 return Ok(Some(LocalClone {
                     repo_identifier: repo_id.to_string(),
                     local_path: path,
@@ -221,7 +240,8 @@ pub fn find_clone_impl(
                 let sub_path = entry.path();
                 if sub_path.is_dir()
                     && sub_path.join(".git").exists()
-                    && let Ok(url_out) = git_runner.run_git(&sub_path, &["remote", "get-url", "origin"])
+                    && let Ok(url_out) =
+                        git_runner.run_git(&sub_path, &["remote", "get-url", "origin"])
                 {
                     let remote_url = url_out.trim().to_string();
                     let (host, canonical) = normalize_remote_url(&remote_url);
@@ -229,7 +249,8 @@ pub fn find_clone_impl(
                         || clean_id.ends_with(&format!("/{canonical}"))
                         || canonical.ends_with(&format!("/{clean_id}"))
                     {
-                        let tracking_branch = resolve_default_tracking_branch(&sub_path, git_runner);
+                        let tracking_branch =
+                            resolve_default_tracking_branch(&sub_path, git_runner);
                         let has_local_changes = check_dirty(&sub_path, git_runner);
                         let checked_at = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -340,7 +361,9 @@ pub mod tests {
         std::fs::create_dir_all(&repo_dir).unwrap();
 
         let mut settings = Settings::default();
-        settings.code_repos_mut().insert("org/repo".to_string(), repo_dir.display().to_string());
+        settings
+            .code_repos_mut()
+            .insert("org/repo".to_string(), repo_dir.display().to_string());
 
         let mut cache = CloneCache::default();
         let runner = MockRunner {
@@ -364,7 +387,9 @@ pub mod tests {
         std::fs::create_dir_all(repo_dir.join(".git")).unwrap();
 
         let mut settings = Settings::default();
-        settings.code_search_paths_mut().push(search_dir.display().to_string());
+        settings
+            .code_search_paths_mut()
+            .push(search_dir.display().to_string());
 
         let mut cache = CloneCache::default();
         let runner = MockRunner {
@@ -380,7 +405,8 @@ pub mod tests {
 
         // 2. Cache invalidation on missing path
         std::fs::remove_dir_all(&repo_dir).unwrap();
-        let clone_after_rm = find_clone_impl("my-org/my-tool", &settings, &mut cache, &runner).unwrap();
+        let clone_after_rm =
+            find_clone_impl("my-org/my-tool", &settings, &mut cache, &runner).unwrap();
         assert!(clone_after_rm.is_none());
         assert!(!cache.entries.contains_key("my-org/my-tool"));
     }

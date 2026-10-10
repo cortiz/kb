@@ -42,16 +42,19 @@ fn setup_code_test_env() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf, Value
         format!(
             r#"[code.repos]
 "test/repo" = "{}"
-"#
-        , git_repo.display()),
-    ).unwrap();
+"#,
+            git_repo.display()
+        ),
+    )
+    .unwrap();
 
     (dir, git_repo, kb_root, home, manifest)
 }
 
 fn kb_cmd(kb_root: &Path, home: &Path) -> assert_cmd::Command {
     let mut cmd = kb_in(kb_root);
-    cmd.env("HOME", home).env("XDG_CONFIG_HOME", home.join(".config"));
+    cmd.env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"));
     cmd
 }
 
@@ -142,7 +145,11 @@ code:
         .args(["code", "check", "code-changed", "--json"])
         .output()
         .unwrap();
-    assert_eq!(out_changed.status.code(), Some(1), "check changed should exit 1");
+    assert_eq!(
+        out_changed.status.code(),
+        Some(1),
+        "check changed should exit 1"
+    );
     let json_changed: Value = serde_json::from_slice(&out_changed.stdout).unwrap();
     assert_eq!(json_changed[0]["status"], "changed");
 }
@@ -301,8 +308,12 @@ code:
     assert_eq!(json["line"], 8);
     assert_eq!(json["ref"], pinned_commit);
     assert_eq!(json["status"], "current");
-    assert!(json["permalink"].as_str().unwrap().contains("https://github.com/test/repo/blob/"));
+    assert!(
+        json["permalink"]
+            .as_str()
+            .unwrap()
+            .contains("https://github.com/test/repo/blob/")
+    );
     assert!(json["snippet"]["lines"].is_array());
     assert_eq!(json["snippet"]["target_line"], 8);
 }
-

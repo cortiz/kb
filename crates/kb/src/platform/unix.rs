@@ -106,8 +106,7 @@ pub fn run_interactive_command(
         if let Ok(tty) = open_tty()
             && let (Ok(out_f), Ok(err_f)) = (tty.try_clone(), tty.try_clone())
         {
-            cmd.stdout(Stdio::from(out_f))
-                .stderr(Stdio::from(err_f));
+            cmd.stdout(Stdio::from(out_f)).stderr(Stdio::from(err_f));
         }
 
         let mut child = cmd.spawn()?;

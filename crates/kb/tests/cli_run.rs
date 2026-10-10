@@ -389,7 +389,10 @@ SELECT 42;
     );
     assert!(out_file.exists(), "out_file should exist");
     let content = fs::read_to_string(out_file).unwrap();
-    assert!(content.contains("PAYLOAD: SELECT 42;"), "content: {content}");
+    assert!(
+        content.contains("PAYLOAD: SELECT 42;"),
+        "content: {content}"
+    );
 }
 
 #[test]
@@ -458,4 +461,3 @@ DROP TABLE events;
     );
     assert!(marker.exists(), "marker should exist with --force");
 }
-

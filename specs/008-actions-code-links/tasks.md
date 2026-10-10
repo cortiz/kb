@@ -201,10 +201,10 @@ description: "Task list for M7: Actions and Code Links"
 
 **Purpose**: Enter key customization (`tui.enter = "primary"`), performance budget validation, documentation, and final end-to-end verification.
 
-- [ ] T054 [P] Implement `tui.enter = "primary"` support in `crates/kb/src/tui/app.rs` and `crates/kb/src/tui/keys.rs`: when set to `primary`, Enter runs primary open action on `link`, `sumo`, `cw`, `code`; copies payload on `cmd`, `sql`, `prompt`. Enter MUST never run a command (FR-040). Add PTY tests in `tests/tui_pty.rs`.
-- [ ] T055 [P] Implement performance benchmark tests in `tests/perf.rs`: assert drift check on single entry completes in $\le 500$ ms on 100,000-commit repository without fetching (FR-033), and `kb code check` across 200 entries in 10 repos finishes in $\le 10$ seconds (SC-006).
-- [ ] T056 [P] Update user documentation in `README.md`: document new CLI subcommands (`kb open`, `kb run`, `kb actions`, `kb code check/repin/show`), new keybindings (`Ctrl-O`, `Ctrl-G`, `Alt-A`, `F2`), Code View controls, and `config.toml` options (`[sumo]`, `[aws]`, `[code]`, `[run]`, `[[actions.<type>]]`).
-- [ ] T057 Execute full end-to-end verification scenarios from `specs/008-actions-code-links/quickstart.md` (including manual verification of SC-001 against real Sumo and AWS consoles), and verify `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --check` are 100% clean.
+- [X] T054 [P] Implement `tui.enter = "primary"` support in `crates/kb/src/tui/app.rs` and `crates/kb/src/tui/keys.rs`: when set to `primary`, Enter runs primary open action on `link`, `sumo`, `cw`, `code`; copies payload on `cmd`, `sql`, `prompt`. Enter MUST never run a command (FR-040). Add PTY tests in `tests/tui_pty.rs`.
+- [X] T055 [P] Implement performance benchmark tests in `tests/perf.rs`: assert drift check on single entry completes in $\le 500$ ms on 100,000-commit repository without fetching (FR-033), and `kb code check` across 200 entries in 10 repos finishes in $\le 10$ seconds (SC-006).
+- [X] T056 [P] Update user documentation in `README.md`: document new CLI subcommands (`kb open`, `kb run`, `kb actions`, `kb code check/repin/show`), new keybindings (`Ctrl-O`, `Ctrl-G`, `Alt-A`, `F2`), Code View controls, and `config.toml` options (`[sumo]`, `[aws]`, `[code]`, `[run]`, `[[actions.<type>]]`).
+- [X] T057 Execute full end-to-end verification scenarios from `specs/008-actions-code-links/quickstart.md` (including manual verification of SC-001 against real Sumo and AWS consoles), and verify `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo fmt --check` are 100% clean.
 
 ---
 

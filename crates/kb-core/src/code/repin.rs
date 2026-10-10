@@ -1,9 +1,9 @@
 //! Format-preserving re-pinning of code entries.
 
-use std::path::Path;
+use super::drift::{DriftReport, DriftStatus};
 use crate::edit::FieldValue;
 use crate::entry::parse_entry;
-use super::drift::{DriftReport, DriftStatus};
+use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepinError {
@@ -16,7 +16,9 @@ pub enum RepinError {
 impl std::fmt::Display for RepinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RepinError::ConcurrentModification => write!(f, "file was modified concurrently on disk"),
+            RepinError::ConcurrentModification => {
+                write!(f, "file was modified concurrently on disk")
+            }
             RepinError::UnsupportedFormat => write!(f, "unsupported kb format"),
             RepinError::EditFailed(s) => write!(f, "edit failed: {s}"),
             RepinError::Io(s) => write!(f, "io error: {s}"),
@@ -33,8 +35,10 @@ pub fn repin_entry_impl(
     today_date: &str,
 ) -> Result<String, RepinError> {
     if entry_file_path.exists() {
-        let disk_bytes = std::fs::read(entry_file_path).map_err(|e| RepinError::Io(e.to_string()))?;
-        let disk_content = String::from_utf8(disk_bytes).map_err(|e| RepinError::Io(e.to_string()))?;
+        let disk_bytes =
+            std::fs::read(entry_file_path).map_err(|e| RepinError::Io(e.to_string()))?;
+        let disk_content =
+            String::from_utf8(disk_bytes).map_err(|e| RepinError::Io(e.to_string()))?;
         if disk_content != current_content {
             return Err(RepinError::ConcurrentModification);
         }
@@ -50,21 +54,16 @@ pub fn repin_entry_impl(
             report.pinned_line,
             report.pinned_end_line,
         ),
-        DriftStatus::Moved { new_line, new_end_line } => (
-            report.pinned_path.clone(),
-            *new_line,
-            *new_end_line,
-        ),
-        DriftStatus::Changed { new_line, .. } => (
-            report.pinned_path.clone(),
-            *new_line,
-            None,
-        ),
-        DriftStatus::Renamed { new_path, new_line, new_end_line } => (
-            new_path.clone(),
-            *new_line,
-            *new_end_line,
-        ),
+        DriftStatus::Moved {
+            new_line,
+            new_end_line,
+        } => (report.pinned_path.clone(), *new_line, *new_end_line),
+        DriftStatus::Changed { new_line, .. } => (report.pinned_path.clone(), *new_line, None),
+        DriftStatus::Renamed {
+            new_path,
+            new_line,
+            new_end_line,
+        } => (new_path.clone(), *new_line, *new_end_line),
         DriftStatus::Gone { .. } | DriftStatus::Unknown { .. } => {
             return Err(RepinError::EditFailed(
                 "cannot repin an entry with gone or unknown status".to_string(),
@@ -72,10 +71,7 @@ pub fn repin_entry_impl(
         }
     };
 
-    let new_ref = report
-        .tracking_ref
-        .as_deref()
-        .unwrap_or(&report.pinned_ref);
+    let new_ref = report.tracking_ref.as_deref().unwrap_or(&report.pinned_ref);
 
     parsed
         .set_field(&["code", "ref"], FieldValue::Str(new_ref.to_string()))
@@ -100,8 +96,8 @@ pub fn repin_entry_impl(
         .map_err(|e| RepinError::EditFailed(e.to_string()))?;
 
     let updated_bytes = parsed.to_bytes();
-    let updated_text = String::from_utf8(updated_bytes)
-        .map_err(|e| RepinError::EditFailed(e.to_string()))?;
+    let updated_text =
+        String::from_utf8(updated_bytes).map_err(|e| RepinError::EditFailed(e.to_string()))?;
 
     if let Some(parent) = entry_file_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| RepinError::Io(e.to_string()))?;

@@ -1,10 +1,10 @@
 //! Screen 3: Code View with syntax highlighting and drift status badge.
 
-use std::path::{Path, PathBuf};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::widgets::{Block, Borders, Widget};
+use std::path::{Path, PathBuf};
 
 use kb_core::code::{CloneCache, CodeService, CodeSnippet, DriftReport, DriftStatus};
 use kb_core::config::Settings;
@@ -47,7 +47,7 @@ pub enum CodeViewEvent {
     CopyLocation,
     CopyPermalink,
     RepinPrompt,
-    RepinConfirm(DriftReport),
+    RepinConfirm(Box<DriftReport>),
     FetchAndRecheck,
     EditEntry,
 }
@@ -58,7 +58,7 @@ impl CodeViewState {
             return match key.code {
                 keys::Code::Char('y' | 'Y') if key.mods == 0 => {
                     self.repin_confirm = None;
-                    CodeViewEvent::RepinConfirm(report)
+                    CodeViewEvent::RepinConfirm(Box::new(report))
                 }
                 keys::Code::Char('n' | 'N') if key.mods == 0 => {
                     self.repin_confirm = None;
@@ -161,13 +161,7 @@ pub fn load_code_view_state(
                 settings,
             )
             .ok();
-            (
-                Some(clone.local_path),
-                drift,
-                snippet,
-                false,
-                permalink,
-            )
+            (Some(clone.local_path), drift, snippet, false, permalink)
         }
         None => {
             let permalink = CodeService::build_permalink(
@@ -274,9 +268,7 @@ pub fn draw_code_view(
                 theme.warning(),
             ),
             DriftStatus::Renamed {
-                new_path,
-                new_line,
-                ..
+                new_path, new_line, ..
             } => (
                 format!(
                     "Status: renamed (now at {new_path}:{new_line} on {})",
@@ -284,14 +276,10 @@ pub fn draw_code_view(
                 ),
                 theme.warning(),
             ),
-            DriftStatus::Gone { reason } => (
-                format!("Status: gone ({reason})"),
-                theme.warning(),
-            ),
-            DriftStatus::Unknown { reason } => (
-                format!("Status: unknown ({reason})"),
-                theme.warning(),
-            ),
+            DriftStatus::Gone { reason } => (format!("Status: gone ({reason})"), theme.warning()),
+            DriftStatus::Unknown { reason } => {
+                (format!("Status: unknown ({reason})"), theme.warning())
+            }
         }
     } else {
         ("Status: unknown".to_string(), theme.muted())
@@ -315,11 +303,10 @@ pub fn draw_code_view(
         );
         buf.set_string(inner.x, y, truncate(&msg, width_u), theme.warning());
     } else if let Some(snippet) = &cv.snippet {
-        let ext = Path::new(&cv.path)
-            .extension()
-            .and_then(|s| s.to_str());
+        let ext = Path::new(&cv.path).extension().and_then(|s| s.to_str());
         let raw_lines: Vec<String> = snippet.lines.iter().map(|(_, l)| l.clone()).collect();
-        let highlighted = highlight::highlight_code_snippet(&raw_lines, ext, state.options.highlight);
+        let highlighted =
+            highlight::highlight_code_snippet(&raw_lines, ext, state.options.highlight);
 
         for (i, (line_num, _)) in snippet.lines.iter().enumerate() {
             if y >= snippet_max_y {

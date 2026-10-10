@@ -1,11 +1,11 @@
 //! Git diff hunk line mapping and drift detection.
 
-use std::path::Path;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
-use crate::entry::{CodeRef, Entry, TypeFields};
 use super::clone::{GitError, GitRunner, LocalClone};
+use crate::entry::{CodeRef, Entry, TypeFields};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DriftStatus {
@@ -61,11 +61,17 @@ pub fn resolve_tracking_branch(
         let b = b.trim();
         if !b.is_empty() {
             // Check if b resolves directly or with origin/
-            if git_runner.run_git(clone_path, &["rev-parse", "--verify", b]).is_ok() {
+            if git_runner
+                .run_git(clone_path, &["rev-parse", "--verify", b])
+                .is_ok()
+            {
                 return Ok(b.to_string());
             }
             let origin_b = format!("origin/{b}");
-            if git_runner.run_git(clone_path, &["rev-parse", "--verify", &origin_b]).is_ok() {
+            if git_runner
+                .run_git(clone_path, &["rev-parse", "--verify", &origin_b])
+                .is_ok()
+            {
                 return Ok(origin_b);
             }
             return Ok(b.to_string());
@@ -73,7 +79,9 @@ pub fn resolve_tracking_branch(
     }
 
     // 2. origin/HEAD
-    if let Ok(head_out) = git_runner.run_git(clone_path, &["rev-parse", "--abbrev-ref", "origin/HEAD"]) {
+    if let Ok(head_out) =
+        git_runner.run_git(clone_path, &["rev-parse", "--abbrev-ref", "origin/HEAD"])
+    {
         let branch = head_out.trim();
         if !branch.is_empty() && branch != "origin/HEAD" {
             return Ok(branch.to_string());
@@ -81,17 +89,26 @@ pub fn resolve_tracking_branch(
     }
 
     // 3. origin/main
-    if git_runner.run_git(clone_path, &["rev-parse", "--verify", "origin/main"]).is_ok() {
+    if git_runner
+        .run_git(clone_path, &["rev-parse", "--verify", "origin/main"])
+        .is_ok()
+    {
         return Ok("origin/main".to_string());
     }
 
     // 4. origin/master
-    if git_runner.run_git(clone_path, &["rev-parse", "--verify", "origin/master"]).is_ok() {
+    if git_runner
+        .run_git(clone_path, &["rev-parse", "--verify", "origin/master"])
+        .is_ok()
+    {
         return Ok("origin/master".to_string());
     }
 
     // 5. fallback to main or master
-    if git_runner.run_git(clone_path, &["rev-parse", "--verify", "main"]).is_ok() {
+    if git_runner
+        .run_git(clone_path, &["rev-parse", "--verify", "main"])
+        .is_ok()
+    {
         return Ok("main".to_string());
     }
 
@@ -124,7 +141,8 @@ pub fn check_drift_impl(
     };
 
     let tracking_branch = resolve_tracking_branch(&clone.local_path, code_ref, git_runner)?;
-    let tracking_sha = match git_runner.run_git(&clone.local_path, &["rev-parse", &tracking_branch]) {
+    let tracking_sha = match git_runner.run_git(&clone.local_path, &["rev-parse", &tracking_branch])
+    {
         Ok(out) => out.trim().to_string(),
         Err(_) => {
             return Ok(DriftReport {
@@ -144,7 +162,8 @@ pub fn check_drift_impl(
         }
     };
 
-    let pinned_sha = match git_runner.run_git(&clone.local_path, &["rev-parse", &code_ref.git_ref]) {
+    let pinned_sha = match git_runner.run_git(&clone.local_path, &["rev-parse", &code_ref.git_ref])
+    {
         Ok(out) => out.trim().to_string(),
         Err(_) => {
             return Ok(DriftReport {
@@ -186,7 +205,10 @@ pub fn check_drift_impl(
     // Check rename status via name-status
     let mut renamed_to: Option<String> = None;
     let mut file_deleted = false;
-    if let Ok(name_status) = git_runner.run_git(&clone.local_path, &["diff", "-M", "--name-status", &pinned_sha, &tracking_sha]) {
+    if let Ok(name_status) = git_runner.run_git(
+        &clone.local_path,
+        &["diff", "-M", "--name-status", &pinned_sha, &tracking_sha],
+    ) {
         for line in name_status.lines() {
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() >= 2 {
@@ -209,7 +231,16 @@ pub fn check_drift_impl(
     // Diff -M -U0 between pinned_sha and tracking_sha
     let diff_output = git_runner.run_git(
         &clone.local_path,
-        &["diff", "-M", "-U0", &pinned_sha, &tracking_sha, "--", target_path, &code_ref.path],
+        &[
+            "diff",
+            "-M",
+            "-U0",
+            &pinned_sha,
+            &tracking_sha,
+            "--",
+            target_path,
+            &code_ref.path,
+        ],
     )?;
 
     // Parse hunks
@@ -263,7 +294,9 @@ pub fn check_drift_impl(
     let diff_summary = format!("+{total_added} -{total_deleted} on {tracking_branch}");
 
     let mut proposed_line = ((p_line as isize) + line_delta).max(1) as usize;
-    let mut proposed_end_line = code_ref.end_line.map(|e| ((e as isize) + line_delta).max(1) as usize);
+    let mut proposed_end_line = code_ref
+        .end_line
+        .map(|e| ((e as isize) + line_delta).max(1) as usize);
     let mut confidence = DriftConfidence::DiffMapped;
 
     // Symbol fallback if changed or deleted
@@ -275,9 +308,12 @@ pub fn check_drift_impl(
         if let Ok(grep_out) = git_runner.run_git(
             &clone.local_path,
             &["grep", "-n", "-F", sym, &tracking_sha, "--", target_path],
-        ) && let Some(first_line) = grep_out.lines().next() {
+        ) && let Some(first_line) = grep_out.lines().next()
+        {
             let parts: Vec<&str> = first_line.split(':').collect();
-            if parts.len() >= 3 && let Ok(num) = parts[2].parse::<usize>() {
+            if parts.len() >= 3
+                && let Ok(num) = parts[2].parse::<usize>()
+            {
                 proposed_line = num;
                 proposed_end_line = None;
                 lines_deleted = false;
@@ -287,14 +323,14 @@ pub fn check_drift_impl(
 
         // 2. If deleted, search anywhere in tracking_sha
         if lines_deleted
-            && let Ok(grep_out) = git_runner.run_git(
-                &clone.local_path,
-                &["grep", "-n", "-F", sym, &tracking_sha],
-            )
+            && let Ok(grep_out) =
+                git_runner.run_git(&clone.local_path, &["grep", "-n", "-F", sym, &tracking_sha])
             && let Some(first_line) = grep_out.lines().next()
         {
             let parts: Vec<&str> = first_line.split(':').collect();
-            if parts.len() >= 3 && let Ok(num) = parts[2].parse::<usize>() {
+            if parts.len() >= 3
+                && let Ok(num) = parts[2].parse::<usize>()
+            {
                 let new_file = parts[1];
                 renamed_to = Some(new_file.to_string());
                 proposed_line = num;
@@ -307,7 +343,11 @@ pub fn check_drift_impl(
 
     let status = if lines_deleted {
         DriftStatus::Gone {
-            reason: if file_deleted { "file deleted".to_string() } else { "lines deleted".to_string() },
+            reason: if file_deleted {
+                "file deleted".to_string()
+            } else {
+                "lines deleted".to_string()
+            },
         }
     } else if let Some(new_path) = renamed_to {
         DriftStatus::Renamed {
@@ -346,25 +386,31 @@ pub fn check_drift_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::entry::parse_entry;
-    use crate::code::clone::{LocalClone, RemoteHost};
     use crate::code::clone::tests::SystemGitRunner;
+    use crate::code::clone::{LocalClone, RemoteHost};
+    use crate::entry::parse_entry;
     use std::path::PathBuf;
 
     fn setup_fixture_repo() -> (tempfile::TempDir, PathBuf, serde_json::Value) {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("repo");
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("tests/fixtures/git_repos/scripted_repo.sh");
-        
+
         let output = std::process::Command::new("bash")
             .arg(script)
             .arg(&target)
             .output()
             .expect("scripted_repo.sh run");
-        assert!(output.status.success(), "script failed: {}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "script failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
 
         let manifest_bytes = std::fs::read(target.join("repo_manifest.json")).expect("manifest");
         let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).expect("json");
@@ -390,7 +436,9 @@ mod tests {
         let raw_current = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: main\n---\nNotes.\n"
         );
-        let entry_current = parse_entry("auth", "auth.md", raw_current.as_bytes().to_vec()).entry.unwrap();
+        let entry_current = parse_entry("auth", "auth.md", raw_current.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_current = check_drift_impl(&entry_current, &clone_main, &runner).unwrap();
         assert_eq!(report_current.status, DriftStatus::Current);
         assert_eq!(report_current.confidence, DriftConfidence::DiffMapped);
@@ -399,7 +447,9 @@ mod tests {
         let raw_moved = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: branch-moved\n---\nNotes.\n"
         );
-        let entry_moved = parse_entry("auth", "auth.md", raw_moved.as_bytes().to_vec()).entry.unwrap();
+        let entry_moved = parse_entry("auth", "auth.md", raw_moved.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_moved = check_drift_impl(&entry_moved, &clone_main, &runner).unwrap();
         assert_eq!(
             report_moved.status,
@@ -414,7 +464,9 @@ mod tests {
         let raw_changed = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: branch-changed\n---\nNotes.\n"
         );
-        let entry_changed = parse_entry("auth", "auth.md", raw_changed.as_bytes().to_vec()).entry.unwrap();
+        let entry_changed = parse_entry("auth", "auth.md", raw_changed.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_changed = check_drift_impl(&entry_changed, &clone_main, &runner).unwrap();
         match report_changed.status {
             DriftStatus::Changed { new_line, .. } => assert_eq!(new_line, 8),
@@ -426,7 +478,9 @@ mod tests {
         let raw_renamed = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: branch-renamed\n---\nNotes.\n"
         );
-        let entry_renamed = parse_entry("auth", "auth.md", raw_renamed.as_bytes().to_vec()).entry.unwrap();
+        let entry_renamed = parse_entry("auth", "auth.md", raw_renamed.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_renamed = check_drift_impl(&entry_renamed, &clone_main, &runner).unwrap();
         assert_eq!(
             report_renamed.status,
@@ -442,7 +496,9 @@ mod tests {
         let raw_gone = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: branch-gone\n---\nNotes.\n"
         );
-        let entry_gone = parse_entry("auth", "auth.md", raw_gone.as_bytes().to_vec()).entry.unwrap();
+        let entry_gone = parse_entry("auth", "auth.md", raw_gone.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_gone = check_drift_impl(&entry_gone, &clone_main, &runner).unwrap();
         match report_gone.status {
             DriftStatus::Gone { .. } => {}
@@ -453,7 +509,9 @@ mod tests {
         let raw_symbol = format!(
             "---\nkb_format: 1\ntype: code\ntitle: AuthHandler\ncode:\n  repo: org/repo\n  path: src/AuthHandler.java\n  line: 8\n  end_line: 13\n  ref: {pinned_commit}\n  branch: branch-symbol\n  symbol: handleRequest\n---\nNotes.\n"
         );
-        let entry_symbol = parse_entry("auth", "auth.md", raw_symbol.as_bytes().to_vec()).entry.unwrap();
+        let entry_symbol = parse_entry("auth", "auth.md", raw_symbol.as_bytes().to_vec())
+            .entry
+            .unwrap();
         let report_symbol = check_drift_impl(&entry_symbol, &clone_main, &runner).unwrap();
         match report_symbol.status {
             DriftStatus::Changed { new_line, .. } => assert_eq!(new_line, 9),

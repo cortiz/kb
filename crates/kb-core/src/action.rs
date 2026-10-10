@@ -36,6 +36,7 @@ pub struct Action {
 }
 
 impl Action {
+    #[allow(clippy::too_many_arguments)]
     pub fn builtin(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -77,11 +78,7 @@ impl Action {
     }
 }
 
-pub fn entry_field_value(
-    entry: &Entry,
-    values: Option<&Values>,
-    field: &str,
-) -> Option<String> {
+pub fn entry_field_value(entry: &Entry, values: Option<&Values>, field: &str) -> Option<String> {
     match field {
         "id" => Some(entry.id().to_string()),
         "path" => Some(entry.path().to_string()),
@@ -102,7 +99,11 @@ pub fn entry_field_value(
                     "range" => range.clone(),
                     _ => None,
                 },
-                TypeFields::Cw { log_groups, range, region } => match field {
+                TypeFields::Cw {
+                    log_groups,
+                    range,
+                    region,
+                } => match field {
                     "region" => region.clone(),
                     "range" => range.clone(),
                     "log_groups" => (!log_groups.is_empty()).then(|| log_groups.join(" ")),
@@ -166,33 +167,220 @@ impl ActionService {
 
         match entry.entry_type {
             Some(EntryType::Link) => {
-                actions.push(Action::builtin("copy", "Copy URL", 'c', "Copy URL to clipboard", ActionKind::CopyPayload, false, false, false, false, false));
-                actions.push(Action::builtin("open-link", "Open Link", 'o', "Open link in default browser", ActionKind::OpenUrl, true, true, false, false, true));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy URL",
+                    'c',
+                    "Copy URL to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "open-link",
+                    "Open Link",
+                    'o',
+                    "Open link in default browser",
+                    ActionKind::OpenUrl,
+                    true,
+                    true,
+                    false,
+                    false,
+                    true,
+                ));
             }
             Some(EntryType::Sumo) => {
-                actions.push(Action::builtin("copy", "Copy Query", 'c', "Copy Sumo query to clipboard", ActionKind::CopyPayload, false, false, false, false, false));
-                actions.push(Action::builtin("open-sumo", "Open in Sumo", 'o', "Open deep link in Sumo Logic", ActionKind::OpenUrl, true, true, false, false, true));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Query",
+                    'c',
+                    "Copy Sumo query to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "open-sumo",
+                    "Open in Sumo",
+                    'o',
+                    "Open deep link in Sumo Logic",
+                    ActionKind::OpenUrl,
+                    true,
+                    true,
+                    false,
+                    false,
+                    true,
+                ));
             }
             Some(EntryType::Cw) => {
-                actions.push(Action::builtin("copy", "Copy Query", 'c', "Copy CloudWatch query to clipboard", ActionKind::CopyPayload, false, false, false, false, false));
-                actions.push(Action::builtin("open-cw", "Open in CloudWatch", 'o', "Open deep link in CloudWatch Logs Insights", ActionKind::OpenUrl, true, true, false, false, true));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Query",
+                    'c',
+                    "Copy CloudWatch query to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "open-cw",
+                    "Open in CloudWatch",
+                    'o',
+                    "Open deep link in CloudWatch Logs Insights",
+                    ActionKind::OpenUrl,
+                    true,
+                    true,
+                    false,
+                    false,
+                    true,
+                ));
             }
             Some(EntryType::Cmd) => {
-                actions.push(Action::builtin("copy", "Copy Command", 'c', "Copy command to clipboard", ActionKind::CopyPayload, false, false, false, false, false));
-                actions.push(Action::builtin("run", "Run Command", 'r', "Run command safely in terminal", ActionKind::RunCommand, false, true, true, false, false));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Command",
+                    'c',
+                    "Copy command to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "run",
+                    "Run Command",
+                    'r',
+                    "Run command safely in terminal",
+                    ActionKind::RunCommand,
+                    false,
+                    true,
+                    true,
+                    false,
+                    false,
+                ));
             }
             Some(EntryType::Code) => {
-                actions.push(Action::builtin("copy", "Copy Location", 'y', "Copy path:line to clipboard", ActionKind::CopyCodeLocation, false, false, false, false, false));
-                actions.push(Action::builtin("copy-permalink", "Copy Permalink", 'Y', "Copy web permalink to clipboard", ActionKind::CopyWebPermalink, false, false, false, false, false));
-                actions.push(Action::builtin("code-view", "Code View", 'o', "Open code preview with drift status", ActionKind::CodeView, true, false, false, false, false));
-                actions.push(Action::builtin("open-web", "Open in Browser", 'g', "Open web permalink in browser", ActionKind::OpenUrl, false, false, false, false, true));
-                actions.push(Action::builtin("open-vscode", "Open in VS Code", 'v', "Open file at line in VS Code", ActionKind::OpenEditor, false, false, false, true, true));
-                actions.push(Action::builtin("open-idea", "Open in IntelliJ", 'i', "Open file at line in IntelliJ IDEA", ActionKind::OpenEditor, false, false, false, true, true));
-                actions.push(Action::builtin("repin", "Re-pin", 'u', "Update pinned ref and line to tracking branch tip", ActionKind::RepinCode, false, false, true, true, false));
-                actions.push(Action::builtin("fetch", "Fetch & Check", 'F', "Fetch remote tracking branch and re-check drift", ActionKind::FetchAndCheck, false, false, false, true, false));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Location",
+                    'y',
+                    "Copy path:line to clipboard",
+                    ActionKind::CopyCodeLocation,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "copy-permalink",
+                    "Copy Permalink",
+                    'Y',
+                    "Copy web permalink to clipboard",
+                    ActionKind::CopyWebPermalink,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "code-view",
+                    "Code View",
+                    'o',
+                    "Open code preview with drift status",
+                    ActionKind::CodeView,
+                    true,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "open-web",
+                    "Open in Browser",
+                    'g',
+                    "Open web permalink in browser",
+                    ActionKind::OpenUrl,
+                    false,
+                    false,
+                    false,
+                    false,
+                    true,
+                ));
+                actions.push(Action::builtin(
+                    "open-vscode",
+                    "Open in VS Code",
+                    'v',
+                    "Open file at line in VS Code",
+                    ActionKind::OpenEditor,
+                    false,
+                    false,
+                    false,
+                    true,
+                    true,
+                ));
+                actions.push(Action::builtin(
+                    "open-idea",
+                    "Open in IntelliJ",
+                    'i',
+                    "Open file at line in IntelliJ IDEA",
+                    ActionKind::OpenEditor,
+                    false,
+                    false,
+                    false,
+                    true,
+                    true,
+                ));
+                actions.push(Action::builtin(
+                    "repin",
+                    "Re-pin",
+                    'u',
+                    "Update pinned ref and line to tracking branch tip",
+                    ActionKind::RepinCode,
+                    false,
+                    false,
+                    true,
+                    true,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "fetch",
+                    "Fetch & Check",
+                    'F',
+                    "Fetch remote tracking branch and re-check drift",
+                    ActionKind::FetchAndCheck,
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
+                ));
             }
             Some(EntryType::Sql) | Some(EntryType::Prompt) | None => {
-                actions.push(Action::builtin("copy", "Copy Payload", 'c', "Copy content to clipboard", ActionKind::CopyPayload, false, false, false, false, false));
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Payload",
+                    'c',
+                    "Copy content to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
             }
         }
 
@@ -207,7 +395,9 @@ impl ActionService {
                     .find(|w| w.entry_type == custom.entry_type && w.name == custom.name)
                 {
                     disabled_reason = Some(warn.message.clone());
-                } else if let Err(missing) = Self::check_custom_action_placeholders(&custom.command, entry) {
+                } else if let Err(missing) =
+                    Self::check_custom_action_placeholders(&custom.command, entry)
+                {
                     disabled_reason = Some(format!("missing field '{missing}'"));
                 }
 
@@ -268,11 +458,10 @@ impl ActionService {
             let mut payload = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
             if let Some(vals) = values {
                 let plan = crate::varres::plan_vars(entry);
-                for p in &plan.vars {
-                    let var_placeholder = format!("{{{{{}}}}}", p.var.name);
-                    if let Some(v) = vals.get(&p.var.name) {
-                        payload = payload.replace(&var_placeholder, v.reveal());
-                    }
+                if let Ok(res) = crate::varres::resolve(&plan, vals)
+                    && let Some(out) = res.get(&crate::varres::Target::Payload)
+                {
+                    payload = out.text.clone();
                 }
             }
             resolved.push(' ');
@@ -405,11 +594,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cfg = dir.path().join("config.toml");
         std::fs::write(&cfg, toml).unwrap();
-        let loaded = crate::config::load(
-            &[cfg],
-            &|_| None,
-            &crate::config::Flags::default(),
-        );
+        let loaded = crate::config::load(&[cfg], &|_| None, &crate::config::Flags::default());
         loaded.settings
     }
 
@@ -489,11 +674,21 @@ command = "psql -d {{database}}"
         let settings = load_settings_from_toml(toml);
 
         let actions = ActionService::list_actions(&entry, &settings, None);
-        let psql_act = actions.iter().find(|a| a.id == "psql").expect("psql custom action present");
-        assert!(!psql_act.is_available(false, false), "action should be disabled");
+        let psql_act = actions
+            .iter()
+            .find(|a| a.id == "psql")
+            .expect("psql custom action present");
+        assert!(
+            !psql_act.is_available(false, false),
+            "action should be disabled"
+        );
         assert!(psql_act.disabled_reason.is_some());
         assert!(
-            psql_act.disabled_reason.as_ref().unwrap().contains("database"),
+            psql_act
+                .disabled_reason
+                .as_ref()
+                .unwrap()
+                .contains("database"),
             "reason: {:?}",
             psql_act.disabled_reason
         );
@@ -528,9 +723,14 @@ command = "echo {{database}}"
         assert!(warnings[0].message.contains("reserved shortcut key 'c'"));
 
         let actions = ActionService::list_actions(&entry, &settings, None);
-        let clash_act = actions.iter().find(|a| a.id == "clash").expect("clash action present");
-        assert!(!clash_act.is_available(false, false), "clashing action should be disabled");
+        let clash_act = actions
+            .iter()
+            .find(|a| a.id == "clash")
+            .expect("clash action present");
+        assert!(
+            !clash_act.is_available(false, false),
+            "clashing action should be disabled"
+        );
         assert!(clash_act.disabled_reason.is_some());
     }
 }
-

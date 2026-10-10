@@ -751,19 +751,17 @@ pub fn key_bar(kind: BarKind, width: usize) -> String {
                     }
                     items
                 }
-                None => {
-                    from_table(Mode::Search, &|c| {
-                        matches!(
-                            c,
-                            Command::Down
-                                | Command::Pick
-                                | Command::TypeNext
-                                | Command::Copy
-                                | Command::Edit
-                                | Command::HelpKey
-                        ) || (preview_scrolls && c == Command::ScrollDown)
-                    })
-                }
+                None => from_table(Mode::Search, &|c| {
+                    matches!(
+                        c,
+                        Command::Down
+                            | Command::Pick
+                            | Command::TypeNext
+                            | Command::Copy
+                            | Command::Edit
+                            | Command::HelpKey
+                    ) || (preview_scrolls && c == Command::ScrollDown)
+                }),
             };
             items.push(esc(text_empty, 8));
             items
@@ -1111,6 +1109,7 @@ mod tests {
         let r = |text_empty, preview_scrolls| BarKind::Results {
             text_empty,
             preview_scrolls,
+            entry_type: None,
         };
         assert_eq!(
             key_bar(r(false, false), 200),
@@ -1148,6 +1147,7 @@ mod tests {
                 BarKind::Results {
                     text_empty: false,
                     preview_scrolls: true,
+                    entry_type: None,
                 },
                 w,
             );
@@ -1157,6 +1157,7 @@ mod tests {
             BarKind::Results {
                 text_empty: false,
                 preview_scrolls: false,
+                entry_type: None,
             },
             40,
         );

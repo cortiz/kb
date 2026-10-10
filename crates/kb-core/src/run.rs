@@ -228,15 +228,22 @@ impl RunService {
             }
         }
 
+        let resolved = crate::varres::resolve(&plan, values).map_err(|errs| {
+            let msg = errs
+                .into_iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            RunPlanError::VarResolution(msg)
+        })?;
+
         // Resolve cwd if given
-        let cwd = if let Some(c) = raw_cwd {
-            let mut resolved_cwd = c;
-            for p in &plan.vars {
-                if let Some(v) = values.get(&p.var.name) {
-                    resolved_cwd =
-                        resolved_cwd.replace(&format!("{{{{{}}}}}", p.var.name), v.reveal());
-                }
-            }
+        let cwd = if raw_cwd.is_some() {
+            let resolved_cwd = resolved
+                .get(&crate::varres::Target::Cwd)
+                .map(|o| o.text.clone())
+                .or(raw_cwd)
+                .unwrap_or_default();
             let home = std::env::var_os("HOME").map(PathBuf::from);
             let path =
                 crate::root::expand_tilde(std::path::Path::new(&resolved_cwd), home.as_deref());
@@ -258,7 +265,10 @@ impl RunService {
                 action.input,
             )
             .map_err(|e| {
-                if let Some(f) = e.strip_prefix("missing field '").and_then(|s| s.strip_suffix('\'')) {
+                if let Some(f) = e
+                    .strip_prefix("missing field '")
+                    .and_then(|s| s.strip_suffix('\''))
+                {
                     RunPlanError::MissingPlaceholderField(f.to_string())
                 } else {
                     RunPlanError::VarResolution(e)
@@ -266,33 +276,43 @@ impl RunService {
             })?;
 
             if action.input == crate::config::CustomActionInput::Stdin {
-                let mut resolved_payload = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
-                for p in &plan.vars {
-                    let var_placeholder = format!("{{{{{}}}}}", p.var.name);
-                    if let Some(v) = values.get(&p.var.name) {
-                        resolved_payload = resolved_payload.replace(&var_placeholder, v.reveal());
-                    }
-                }
+                let resolved_payload = resolved
+                    .get(&crate::varres::Target::Payload)
+                    .map(|o| o.text.clone())
+                    .or_else(|| entry.payload().map(|p| p.text.clone()))
+                    .unwrap_or_default();
                 stdin_payload = Some(resolved_payload);
             }
 
             cmd
         } else {
-            // For cmd entries, replace variables in payload
-            let raw_text = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
-            let mut cmd = raw_text;
-
-            for p in &plan.vars {
-                let var_placeholder = format!("{{{{{}}}}}", p.var.name);
-                if secret_names.contains(&p.var.name) {
+            let mut cmd_plan = plan.clone();
+            let mut values_for_cmd = values.clone();
+            for p in &mut cmd_plan.vars {
+                if p.var.kind == crate::vars::VarKind::Secret {
                     let env_key =
                         format!("KB_SECRET_{}", p.var.name.to_uppercase().replace('-', "_"));
-                    cmd = cmd.replace(&var_placeholder, &format!("${env_key}"));
-                } else if let Some(v) = values.get(&p.var.name) {
-                    cmd = cmd.replace(&var_placeholder, v.reveal());
+                    p.var.escape = crate::vars::Escape::None;
+                    values_for_cmd.insert(
+                        p.var.name.clone(),
+                        crate::varres::Value::new(format!("${env_key}"), false),
+                    );
                 }
             }
-            cmd.trim_end_matches('\n').to_string()
+            let cmd_resolved =
+                crate::varres::resolve(&cmd_plan, &values_for_cmd).map_err(|errs| {
+                    let msg = errs
+                        .into_iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    RunPlanError::VarResolution(msg)
+                })?;
+            let cmd_text = cmd_resolved
+                .get(&crate::varres::Target::Payload)
+                .map(|o| o.text.clone())
+                .unwrap_or_default();
+            cmd_text.trim_end_matches('\n').to_string()
         };
 
         let destructive_warnings =

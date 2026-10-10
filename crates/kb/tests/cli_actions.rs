@@ -92,7 +92,8 @@ code:
 
 fn kb_cmd(kb_root: &Path, home: &Path) -> assert_cmd::Command {
     let mut cmd = kb_in(kb_root);
-    cmd.env("HOME", home).env("XDG_CONFIG_HOME", home.join(".config"));
+    cmd.env("HOME", home)
+        .env("XDG_CONFIG_HOME", home.join(".config"));
     cmd
 }
 
@@ -143,7 +144,11 @@ fn cli_actions_sumo_and_cw_json() {
     let sumo_json: Value = serde_json::from_slice(&out_sumo.stdout).unwrap();
     assert_eq!(sumo_json["primary_action"], "open-sumo");
     let actions = sumo_json["actions"].as_array().unwrap();
-    assert!(actions.iter().any(|a| a["id"] == "open-sumo" && a["key"] == "o"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "open-sumo" && a["key"] == "o")
+    );
 
     // CloudWatch JSON
     let out_cw = kb_cmd(&kb_root, &home)
@@ -154,7 +159,11 @@ fn cli_actions_sumo_and_cw_json() {
     let cw_json: Value = serde_json::from_slice(&out_cw.stdout).unwrap();
     assert_eq!(cw_json["primary_action"], "open-cw");
     let actions = cw_json["actions"].as_array().unwrap();
-    assert!(actions.iter().any(|a| a["id"] == "open-cw" && a["key"] == "o"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "open-cw" && a["key"] == "o")
+    );
 }
 
 #[test]
@@ -169,7 +178,11 @@ fn cli_actions_cmd_and_code() {
     assert_eq!(out_cmd.status.code(), Some(0));
     let cmd_json: Value = serde_json::from_slice(&out_cmd.stdout).unwrap();
     let actions = cmd_json["actions"].as_array().unwrap();
-    assert!(actions.iter().any(|a| a["id"] == "run" && a["key"] == "r" && a["needs_confirm"] == true));
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "run" && a["key"] == "r" && a["needs_confirm"] == true)
+    );
 
     // Code JSON
     let out_code = kb_cmd(&kb_root, &home)
@@ -180,14 +193,42 @@ fn cli_actions_cmd_and_code() {
     let code_json: Value = serde_json::from_slice(&out_code.stdout).unwrap();
     assert_eq!(code_json["primary_action"], "code-view");
     let actions = code_json["actions"].as_array().unwrap();
-    assert!(actions.iter().any(|a| a["id"] == "code-view" && a["key"] == "o"));
-    assert!(actions.iter().any(|a| a["id"] == "open-web" && a["key"] == "g"));
-    assert!(actions.iter().any(|a| a["id"] == "open-vscode" && a["key"] == "v"));
-    assert!(actions.iter().any(|a| a["id"] == "open-idea" && a["key"] == "i"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "code-view" && a["key"] == "o")
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "open-web" && a["key"] == "g")
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "open-vscode" && a["key"] == "v")
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "open-idea" && a["key"] == "i")
+    );
     assert!(actions.iter().any(|a| a["id"] == "copy" && a["key"] == "y"));
-    assert!(actions.iter().any(|a| a["id"] == "copy-permalink" && a["key"] == "Y"));
-    assert!(actions.iter().any(|a| a["id"] == "repin" && a["key"] == "u"));
-    assert!(actions.iter().any(|a| a["id"] == "fetch" && a["key"] == "F"));
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "copy-permalink" && a["key"] == "Y")
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "repin" && a["key"] == "u")
+    );
+    assert!(
+        actions
+            .iter()
+            .any(|a| a["id"] == "fetch" && a["key"] == "F")
+    );
 }
 
 #[test]

@@ -395,7 +395,11 @@ impl AppState {
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
         if layout::layout(area, false) == Screen::TooSmall {
             Mode::TooSmall
-        } else if self.form.is_some() || self.add.is_some() || self.code_view.is_some() || self.action_menu.is_some() {
+        } else if self.form.is_some()
+            || self.add.is_some()
+            || self.code_view.is_some()
+            || self.action_menu.is_some()
+        {
             Mode::Form
         } else if self.overlay == Overlay::Help {
             Mode::Help
@@ -1010,10 +1014,7 @@ impl AppState {
             }
             super::code_view::CodeViewEvent::RepinConfirm(report) => {
                 let id = cv.id.clone();
-                vec![Effect::RepinCodeEntry {
-                    id,
-                    report: Box::new(report),
-                }]
+                vec![Effect::RepinCodeEntry { id, report }]
             }
             super::code_view::CodeViewEvent::FetchAndRecheck => {
                 let id = cv.id.clone();
@@ -1059,13 +1060,23 @@ impl AppState {
                     kb_core::action::ActionKind::OpenUrl => vec![Effect::OpenEntry(id)],
                     kb_core::action::ActionKind::RunCommand => vec![Effect::RunEntry(id)],
                     kb_core::action::ActionKind::CodeView => vec![Effect::OpenEntry(id)],
-                    kb_core::action::ActionKind::CopyCodeLocation => vec![Effect::CopyCodeLocation(id)],
-                    kb_core::action::ActionKind::CopyWebPermalink => vec![Effect::CopyCodePermalink(id)],
+                    kb_core::action::ActionKind::CopyCodeLocation => {
+                        vec![Effect::CopyCodeLocation(id)]
+                    }
+                    kb_core::action::ActionKind::CopyWebPermalink => {
+                        vec![Effect::CopyCodePermalink(id)]
+                    }
                     kb_core::action::ActionKind::OpenEditor => {
                         if action_id == "open-vscode" {
-                            vec![Effect::OpenCodeTarget { id, target: "vscode".into() }]
+                            vec![Effect::OpenCodeTarget {
+                                id,
+                                target: "vscode".into(),
+                            }]
                         } else if action_id == "open-idea" {
-                            vec![Effect::OpenCodeTarget { id, target: "idea".into() }]
+                            vec![Effect::OpenCodeTarget {
+                                id,
+                                target: "idea".into(),
+                            }]
                         } else {
                             vec![Effect::OpenEntry(id)]
                         }
@@ -1073,7 +1084,10 @@ impl AppState {
                     kb_core::action::ActionKind::RepinCode => vec![Effect::OpenEntry(id)],
                     kb_core::action::ActionKind::FetchAndCheck => vec![Effect::OpenEntry(id)],
                     kb_core::action::ActionKind::CustomCommand => {
-                        vec![Effect::RunCustomAction { id, action_name: action_id }]
+                        vec![Effect::RunCustomAction {
+                            id,
+                            action_name: action_id,
+                        }]
                     }
                 };
             }
@@ -2201,7 +2215,7 @@ pub(crate) mod tests {
         let now = Instant::now();
         assert_eq!(
             key_bar_text(&s, 200),
-            "↑↓ select · Enter pick · Tab type · ^Y copy · ^E edit · ? help · Esc quit"
+            "↑↓ select · Enter pick · ^Y copy · ^E edit · Alt-A actions · ? help · Esc quit"
         );
         s.update(ch('x'), now);
         assert!(key_bar_text(&s, 200).ends_with("Esc clear"));
