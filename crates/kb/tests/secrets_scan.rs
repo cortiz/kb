@@ -60,7 +60,13 @@ fn a_secret_leaves_no_trace_but_the_clipboard() {
     );
     // on the command line, with the history warning
     let out = run(
-        &["use", "cmd/curl-token", "--var", &format!("token={MARKER}")],
+        &[
+            "use",
+            "cmd/curl-token",
+            "-y",
+            "--var",
+            &format!("token={MARKER}"),
+        ],
         false,
     );
     assert_eq!(out.status.code(), Some(0));

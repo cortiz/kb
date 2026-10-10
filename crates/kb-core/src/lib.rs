@@ -1,8 +1,11 @@
 //! Core library for kb: the entry file format, its lossless parser, validation, and search.
 
+pub mod action;
 pub mod author;
 pub mod body;
+pub mod code;
 pub mod config;
+pub mod console;
 pub mod edit;
 pub mod entry;
 pub mod entry_json;
@@ -15,6 +18,7 @@ pub mod payload;
 pub mod query;
 pub mod resolve;
 pub mod root;
+pub mod run;
 pub mod search;
 pub mod source;
 pub mod usage;

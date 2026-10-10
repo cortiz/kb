@@ -1,8 +1,10 @@
 //! The full-screen terminal UI.
 
+pub mod action_view;
 pub mod add;
 pub mod add_view;
 pub mod app;
+pub mod code_view;
 pub mod form;
 pub mod form_view;
 pub mod highlight;
@@ -11,6 +13,7 @@ pub mod keys;
 pub mod layout;
 pub mod markdown;
 pub mod preview;
+pub mod run_modal;
 pub mod terminal;
 pub mod theme;
 pub mod view;
@@ -19,7 +22,9 @@ pub mod worker;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
-use kb_core::entry::EntryType;
+use kb_core::config::Settings;
+use kb_core::console::{ConsoleService, OsEnv};
+use kb_core::entry::{EntryType, TypeFields};
 use kb_core::entry_json::PrintMode;
 use kb_core::search::Kb;
 use kb_core::varres::{self, Source, Value};
@@ -28,7 +33,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event};
 use ratatui::crossterm::terminal::size;
 
-use crate::platform::Platform;
+use crate::platform::{Opened, Platform, opener};
 use crate::platform::clipboard::{self, ClipboardSettings, Place};
 use app::{Action, AppState, CopyReport, Effect, Options, RefreshInfo};
 use form::{FormSpec, Submission, Then};
@@ -89,6 +94,7 @@ pub fn run(
     let mouse = options.mouse;
     let editor = options.editor.clone();
     let clipboard_settings = options.clipboard.clone();
+    let settings = options.settings.clone();
     let mut guard = TerminalGuard::enter(tty, mouse).map_err(|e| e.to_string())?;
     let signals = Signals::register();
     let backend = CrosstermBackend::new(guard.writer().map_err(|e| e.to_string())?);
@@ -188,6 +194,23 @@ pub fn run(
                     pending.extend(state.update(Action::CopyDone(report), Instant::now()));
                     dirty = true;
                 }
+                Effect::OpenEntry(id) => {
+                    let spec = FormSpec::load(&ui_kb, &id, &real_env);
+                    let action = match spec {
+                        Ok(Some(spec)) => Action::FormLoaded(Ok(Box::new(spec)), Then::Open),
+                        Err(e) => Action::FormLoaded(Err(e), Then::Open),
+                        _ => Action::CopyDone(open_selected(
+                            platform,
+                            &settings,
+                            &clipboard_settings,
+                            &ui_kb,
+                            &id,
+                            state.options.remember_vars,
+                        )),
+                    };
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
                 Effect::SubmitForm(sub) => {
                     let now = Instant::now();
                     match recheck(&ui_kb, &sub) {
@@ -198,6 +221,19 @@ pub fn run(
                             Then::Stay => {
                                 let report = copy_resolved(
                                     platform,
+                                    &clipboard_settings,
+                                    &ui_kb,
+                                    &sub,
+                                    state.options.remember_vars,
+                                );
+                                pending.extend(state.update(Action::CopyDone(report), now));
+                                pending.extend(state.update(Action::FormDone, now));
+                            }
+                            Then::Open if sub.print => resolved = Some(*sub),
+                            Then::Open => {
+                                let report = open_resolved(
+                                    platform,
+                                    &settings,
                                     &clipboard_settings,
                                     &ui_kb,
                                     &sub,
@@ -499,6 +535,345 @@ fn copy_selected(
     CopyReport {
         message: outcome.message_short(),
         sent: outcome.sent(),
+    }
+}
+
+fn open_selected(
+    platform: &impl Platform,
+    settings: &Settings,
+    clipboard_settings: &ClipboardSettings,
+    kb: &Kb,
+    id: &str,
+    _remember: bool,
+) -> CopyReport {
+    open_in_tui(platform, settings, clipboard_settings, kb, id, None, &[])
+}
+
+fn open_resolved(
+    platform: &impl Platform,
+    settings: &Settings,
+    clipboard_settings: &ClipboardSettings,
+    kb: &Kb,
+    sub: &Submission,
+    remember: bool,
+) -> CopyReport {
+    let failed = |m: String| CopyReport {
+        message: m,
+        sent: false,
+    };
+    let entry = match kb.entry(&sub.id) {
+        Ok(e) => e,
+        Err(e) => return failed(format!("Open failed: {e}")),
+    };
+    let plan = varres::plan_vars(&entry);
+    let values: varres::Values = sub
+        .values
+        .iter()
+        .map(|(n, v, _)| (n.clone(), v.clone()))
+        .collect();
+    let resolved = match varres::resolve(&plan, &values) {
+        Ok(r) => r,
+        Err(errors) => {
+            let first = errors.first().map(ToString::to_string).unwrap_or_default();
+            return failed(format!("Open failed: {first}"));
+        }
+    };
+    let pairs: Vec<(String, String)> = if remember {
+        sub.values
+            .iter()
+            .filter(|(_, v, _)| !v.is_secret())
+            .map(|(n, v, _)| (n.clone(), v.reveal().to_string()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    open_in_tui(
+        platform,
+        settings,
+        clipboard_settings,
+        kb,
+        &sub.id,
+        Some(resolved),
+        &pairs,
+    )
+}
+
+fn open_in_tui(
+    platform: &impl Platform,
+    settings: &Settings,
+    clipboard_settings: &ClipboardSettings,
+    kb: &Kb,
+    id: &str,
+    resolved_result: Option<varres::Resolved>,
+    pairs: &[(String, String)],
+) -> CopyReport {
+    let entry = match kb.entry(id) {
+        Ok(e) => e,
+        Err(e) => {
+            return CopyReport {
+                message: format!("Open failed: {e}"),
+                sent: false,
+            };
+        }
+    };
+    let ty = match entry.entry_type() {
+        Some(t) => t,
+        None => {
+            return CopyReport {
+                message: format!("{id}: missing or unknown type"),
+                sent: false,
+            };
+        }
+    };
+
+    match ty {
+        EntryType::Link => {
+            let url = if let Some(resolved) = &resolved_result {
+                resolved
+                    .get(&varres::Target::Url)
+                    .map(|o| o.text.clone())
+                    .or_else(|| {
+                        if let TypeFields::Link { url: Some(u) } = entry.fields() {
+                            Some(u.clone())
+                        } else {
+                            None
+                        }
+                    })
+            } else if let TypeFields::Link { url: Some(u) } = entry.fields() {
+                Some(u.clone())
+            } else {
+                None
+            };
+            let Some(url) = url else {
+                return CopyReport {
+                    message: format!("{id}: link has no URL"),
+                    sent: false,
+                };
+            };
+            match opener::open_url(platform, settings.opener_command(), &url) {
+                Ok(Opened::Launched) => {
+                    let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    CopyReport {
+                        message: "Opened in browser".into(),
+                        sent: true,
+                    }
+                }
+                Ok(Opened::Printed(url)) => {
+                    let outcome = clipboard::copy(platform, clipboard_settings, &url, Place::Ui);
+                    if outcome.sent() {
+                        let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    }
+                    CopyReport {
+                        message: "Copied URL (no display)".into(),
+                        sent: outcome.sent(),
+                    }
+                }
+                Err(e) => CopyReport {
+                    message: format!("Open failed: {e}"),
+                    sent: false,
+                },
+            }
+        }
+        EntryType::Sumo => {
+            let query = if let Some(resolved) = &resolved_result {
+                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+            } else {
+                match kb.pick(id, PrintMode::Payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return CopyReport {
+                            message: format!("Open failed: {e}"),
+                            sent: false,
+                        };
+                    }
+                }
+            };
+            let range = if let Some(resolved) = &resolved_result {
+                resolved
+                    .get(&varres::Target::Range)
+                    .map(|o| o.text.clone())
+                    .or_else(|| {
+                        if let TypeFields::Sumo { range } = entry.fields() {
+                            range.clone()
+                        } else {
+                            None
+                        }
+                    })
+            } else if let TypeFields::Sumo { range } = entry.fields() {
+                range.clone()
+            } else {
+                None
+            };
+
+            let Some(base_url) = settings.sumo_base_url().filter(|u| !u.trim().is_empty()) else {
+                let outcome = clipboard::copy(platform, clipboard_settings, &query, Place::Ui);
+                if outcome.sent() {
+                    let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                }
+                return CopyReport {
+                    message: "Sumo URL not configured; copied query to clipboard".into(),
+                    sent: outcome.sent(),
+                };
+            };
+
+            let link = match ConsoleService::build_sumo_link(
+                base_url,
+                &query,
+                range.as_deref(),
+            ) {
+                Ok(l) => l,
+                Err(e) => {
+                    return CopyReport {
+                        message: format!("Open failed: {e}"),
+                        sent: false,
+                    };
+                }
+            };
+
+            if !link.query_included {
+                let _ = clipboard::copy(platform, clipboard_settings, &query, Place::Ui);
+            }
+
+            match opener::open_url(platform, settings.opener_command(), &link.url) {
+                Ok(Opened::Launched) => {
+                    let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    let msg = if !link.query_included {
+                        "URL exceeds limit; copied query & opened console".into()
+                    } else {
+                        "Opened Sumo Logic search console".into()
+                    };
+                    CopyReport {
+                        message: msg,
+                        sent: true,
+                    }
+                }
+                Ok(Opened::Printed(url)) => {
+                    let outcome = clipboard::copy(platform, clipboard_settings, &url, Place::Ui);
+                    if outcome.sent() {
+                        let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    }
+                    CopyReport {
+                        message: "Copied URL (no display)".into(),
+                        sent: outcome.sent(),
+                    }
+                }
+                Err(e) => CopyReport {
+                    message: format!("Open failed: {e}"),
+                    sent: false,
+                },
+            }
+        }
+        EntryType::Cw => {
+            let region = match ConsoleService::resolve_aws_region(&entry, settings, &OsEnv) {
+                Ok(r) => r,
+                Err(e) => {
+                    return CopyReport {
+                        message: format!("Open failed: {e}"),
+                        sent: false,
+                    };
+                }
+            };
+
+            let query = if let Some(resolved) = &resolved_result {
+                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+            } else {
+                match kb.pick(id, PrintMode::Payload) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return CopyReport {
+                            message: format!("Open failed: {e}"),
+                            sent: false,
+                        };
+                    }
+                }
+            };
+            let range = if let Some(resolved) = &resolved_result {
+                resolved
+                    .get(&varres::Target::Range)
+                    .map(|o| o.text.clone())
+                    .or_else(|| {
+                        if let TypeFields::Cw { range, .. } = entry.fields() {
+                            range.clone()
+                        } else {
+                            None
+                        }
+                    })
+            } else if let TypeFields::Cw { range, .. } = entry.fields() {
+                range.clone()
+            } else {
+                None
+            };
+
+            let mut resolved_log_groups = Vec::new();
+            if let TypeFields::Cw { log_groups, .. } = entry.fields() {
+                for (i, lg) in log_groups.iter().enumerate() {
+                    if let Some(r) = resolved_result
+                        .as_ref()
+                        .and_then(|res| res.get(&varres::Target::LogGroup(i)))
+                    {
+                        resolved_log_groups.push(r.text.clone());
+                    } else {
+                        resolved_log_groups.push(lg.clone());
+                    }
+                }
+            }
+
+            let link = match ConsoleService::build_cw_link(
+                &region,
+                &resolved_log_groups,
+                &query,
+                range.as_deref(),
+            ) {
+                Ok(l) => l,
+                Err(e) => {
+                    return CopyReport {
+                        message: format!("Open failed: {e}"),
+                        sent: false,
+                    };
+                }
+            };
+
+            if !link.query_included {
+                let _ = clipboard::copy(platform, clipboard_settings, &query, Place::Ui);
+            }
+
+            match opener::open_url(platform, settings.opener_command(), &link.url) {
+                Ok(Opened::Launched) => {
+                    let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    let msg = if !link.query_included {
+                        "URL exceeds limit; copied query & opened console".into()
+                    } else {
+                        "Opened CloudWatch console".into()
+                    };
+                    CopyReport {
+                        message: msg,
+                        sent: true,
+                    }
+                }
+                Ok(Opened::Printed(url)) => {
+                    let outcome = clipboard::copy(platform, clipboard_settings, &url, Place::Ui);
+                    if outcome.sent() {
+                        let _ = kb.record_resolved_use(id, SystemTime::now(), pairs);
+                    }
+                    CopyReport {
+                        message: "Copied URL (no display)".into(),
+                        sent: outcome.sent(),
+                    }
+                }
+                Err(e) => CopyReport {
+                    message: format!("Open failed: {e}"),
+                    sent: false,
+                },
+            }
+        }
+        EntryType::Code => CopyReport {
+            message: "Code open is not implemented in this phase".into(),
+            sent: false,
+        },
+        _ => CopyReport {
+            message: format!("{} entries do not have an open action", ty.name()),
+            sent: false,
+        },
     }
 }
 

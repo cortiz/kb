@@ -172,7 +172,7 @@ fn list_shows_every_setting_with_its_value_and_where_it_came_from() {
             "{want}\n{listing}"
         );
     }
-    assert_eq!(listing.lines().count(), 12, "{listing}");
+    assert_eq!(listing.lines().count(), 17, "{listing}");
     // a flag is a source too
     let (_d, root) = search_kb();
     let out = h.kb(&["--root", root.to_str().unwrap(), "config", "list"]);
@@ -189,7 +189,7 @@ fn list_json_has_a_row_per_setting() {
     h.write("theme = \"dark\"\n");
     let doc: Value = serde_json::from_slice(&h.kb(&["config", "list", "--json"]).stdout).unwrap();
     let rows = doc.as_array().unwrap();
-    assert_eq!(rows.len(), 12);
+    assert_eq!(rows.len(), 17);
     let theme = rows.iter().find(|r| r["key"] == "theme").unwrap();
     assert_eq!(theme["value"], "dark");
     assert_eq!(theme["source"], "file");

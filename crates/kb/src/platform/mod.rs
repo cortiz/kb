@@ -24,6 +24,7 @@ pub mod osc52;
 mod unix;
 
 pub use env::{Display, Environment, Os};
+pub use kb_core::run::RunResult;
 
 /// A clipboard program: its name, its arguments and what to tell the user to install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +263,15 @@ pub trait Platform {
         tty: &File,
         interrupt: &dyn Fn() -> bool,
     ) -> io::Result<Option<ExitStatus>>;
+
+    /// Runs a command interactively in the terminal.
+    fn run_interactive_command(
+        &self,
+        shell: &str,
+        command: &str,
+        cwd: Option<&Path>,
+        env_vars: &[(String, String)],
+    ) -> io::Result<RunResult>;
 }
 
 /// The platform kb is running on.

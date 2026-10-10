@@ -44,6 +44,21 @@ pub fn open_path(
     open_target(platform, opener_override, &path.to_string_lossy())
 }
 
+/// Formats a VS Code URL scheme for opening a file at a specific line.
+pub fn vscode_url(path: &Path, line: usize) -> String {
+    let p = path.to_string_lossy();
+    if p.starts_with('/') {
+        format!("vscode://file{}:{}", p, line)
+    } else {
+        format!("vscode://file/{}:{}", p, line)
+    }
+}
+
+/// Formats an IntelliJ IDEA URL scheme for opening a file at a specific line.
+pub fn idea_url(path: &Path, line: usize) -> String {
+    format!("idea://open?file={}&line={}", path.display(), line)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,6 +138,32 @@ mod tests {
         assert!(p.calls().contains(&Call::Open {
             target: "/Users/u/kb".into(),
             opener: "open".into()
+        }));
+    }
+
+    #[test]
+    fn desktop_editor_url_schemes_dispatch() {
+        let mac = FakePlatform::new(mac_env(&[])).with_tool("open", FakeTool::Ok);
+        let vscode_target = vscode_url(Path::new("/abs/path/File.java"), 147);
+        assert_eq!(vscode_target, "vscode://file/abs/path/File.java:147");
+        assert_eq!(
+            open_url(&mac, None, &vscode_target).unwrap(),
+            Opened::Launched
+        );
+        assert!(mac.calls().contains(&Call::Open {
+            target: vscode_target,
+            opener: "open".into(),
+        }));
+
+        let idea_target = idea_url(Path::new("/abs/path/File.java"), 147);
+        assert_eq!(idea_target, "idea://open?file=/abs/path/File.java&line=147");
+        assert_eq!(
+            open_url(&mac, None, &idea_target).unwrap(),
+            Opened::Launched
+        );
+        assert!(mac.calls().contains(&Call::Open {
+            target: idea_target,
+            opener: "open".into(),
         }));
     }
 }

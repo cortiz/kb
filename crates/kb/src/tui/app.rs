@@ -31,6 +31,8 @@ pub struct Options {
     pub clipboard: ClipboardSettings,
     /// The `editor` setting; `None` falls back to `$VISUAL`, `$EDITOR`, `vi`.
     pub editor: Option<String>,
+    /// Global loaded settings.
+    pub settings: kb_core::config::Settings,
     /// Turned off in timing tests so the refresh timer does not add noise.
     pub refresh_timer: bool,
     /// Problems found in the config file or environment, shown as a warning in the header.
@@ -93,6 +95,7 @@ impl Default for Options {
             theme: ThemeChoice::Auto,
             clipboard: ClipboardSettings::default(),
             editor: None,
+            settings: kb_core::config::Settings::default(),
             refresh_timer: true,
         }
     }
@@ -221,6 +224,8 @@ pub enum Effect {
     CopyTemplate,
     /// The form passed validation: check the entry did not change, then use it.
     SubmitForm(Box<Submission>),
+    /// Ctrl-O: open the selected entry's primary link or console.
+    OpenEntry(String),
     EditEntry(String),
     /// Ctrl-N: read the clipboard (and ask for the tags in use) to open the add form.
     ReadClipboard,
@@ -919,6 +924,13 @@ impl AppState {
             }
             Command::Edit => match self.selected_result() {
                 Some(r) => vec![Effect::EditEntry(r.id.clone())],
+                None => {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            },
+            Command::Open => match self.selected_result() {
+                Some(r) => vec![Effect::OpenEntry(r.id.clone())],
                 None => {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()

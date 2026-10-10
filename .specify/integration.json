@@ -1,9 +1,10 @@
 {
-  "version": "1.1.3.dev0",
+  "version": "1.1.3",
   "integration_state_schema": 1,
   "installed_integrations": [
     "claude",
-    "gemini"
+    "gemini",
+    "agy"
   ],
   "integration_settings": {
     "claude": {
@@ -13,6 +14,10 @@
     "gemini": {
       "script": "sh",
       "invoke_separator": "."
+    },
+    "agy": {
+      "script": "sh",
+      "invoke_separator": "-"
     }
   },
   "integration": "claude",

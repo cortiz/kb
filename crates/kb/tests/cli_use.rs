@@ -102,7 +102,7 @@ fn yes_takes_the_prefilled_values_and_remembered_ones_come_next_time() {
     let (out, _) = run(
         d.path(),
         &root,
-        &["use", FIVE_XX, "--var", "env=dev", "--print"],
+        &["use", FIVE_XX, "--var", "env=dev", "-y", "--print"],
     );
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let (out, _) = run(d.path(), &root, &["use", FIVE_XX, "-y", "--print"]);

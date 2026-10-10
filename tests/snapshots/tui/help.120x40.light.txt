@@ -8,8 +8,9 @@
 │        #deploy #prod                         ││                                                                      │
 │ cmd    Tail pod logs                         ││ ── payload ───────────────────────────────────────────────────────── │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Shift-PgDn         preview page                          │ │
-│ │ Ctrl-Y             copy payload                         Shift-PgUp         preview page                          │ │
+│ │ Enter              pick and exit                        Shift-↑            scroll preview                        │ │
+│ │ Ctrl-Y             copy payload                         Shift-PgDn         preview page                          │ │
+│ │ Ctrl-O             open                                 Shift-PgUp         preview page                          │ │
 │ │ Alt-C              copy template                        Alt-P              zoom preview                          │ │
 │ │ Ctrl-E             edit entry                           ←                  cursor left                           │ │
 │ │ Ctrl-N             add entry                            →                  cursor right                          │ │
@@ -24,7 +25,6 @@
 │ │ Tab                next type                            F1                 help                                  │ │
 │ │ Shift-Tab          previous type                        Esc                clear / quit                          │ │
 │ │ Shift-↓            scroll preview                       Ctrl-C             exit                                  │ │
-│ │ Shift-↑            scroll preview                                                                                │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │

@@ -18,6 +18,8 @@ pub enum Then {
     Exit,
     /// Copy and stay in the UI (Ctrl-Y).
     Stay,
+    /// Open the primary link or console and stay in the UI (Ctrl-O).
+    Open,
 }
 
 /// Everything the form needs, read from the entry and the saved state. Built outside `update`.

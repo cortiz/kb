@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The twelve settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The seventeen settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -75,10 +75,10 @@ pub const SETTINGS: &[Setting] = &[
     },
     Setting {
         key: "tui.enter",
-        kind: Kind::Choice(&["copy", "print"]),
+        kind: Kind::Choice(&["copy", "print", "primary"]),
         default: "copy",
         env: "KB_TUI_ENTER",
-        doc: "What Enter does in the UI: copy the payload, or print it to stdout.",
+        doc: "What Enter does in the UI: copy the payload, print it to stdout, or execute primary open action.",
     },
     Setting {
         key: "tui.mouse",
@@ -128,6 +128,41 @@ pub const SETTINGS: &[Setting] = &[
         default: "true",
         env: "KB_VARS_REMEMBER",
         doc: "Remember the values you use for variables (never secrets), to pre-fill them next time.",
+    },
+    Setting {
+        key: "sumo.base_url",
+        kind: Kind::Text,
+        default: "",
+        env: "KB_SUMO_BASE_URL",
+        doc: "Sumo Logic web deployment base URL, e.g. https://service.us2.sumologic.com.",
+    },
+    Setting {
+        key: "aws.default_region",
+        kind: Kind::Text,
+        default: "",
+        env: "KB_AWS_DEFAULT_REGION",
+        doc: "Default AWS region for CloudWatch console links when entry.region is unset.",
+    },
+    Setting {
+        key: "code.default_open",
+        kind: Kind::Choice(&["web", "vscode", "idea"]),
+        default: "web",
+        env: "KB_CODE_DEFAULT_OPEN",
+        doc: "Default target when opening code: web | vscode | idea.",
+    },
+    Setting {
+        key: "code.web_url",
+        kind: Kind::Text,
+        default: "",
+        env: "KB_CODE_WEB_URL",
+        doc: "Custom web permalink template for non-GitHub/GitLab/Bitbucket hosts.",
+    },
+    Setting {
+        key: "run.pause_after",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_RUN_PAUSE_AFTER",
+        doc: "Whether to pause and show exit code and duration after running a command.",
     },
 ];
 
@@ -225,6 +260,23 @@ impl<T> Resolved<T> {
 pub enum EnterAction {
     Copy,
     Print,
+    Primary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CustomActionInput {
+    #[default]
+    Stdin,
+    Arg,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CustomActionConfig {
+    pub entry_type: String,
+    pub name: String,
+    pub key: char,
+    pub command: String,
+    pub input: CustomActionInput,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,6 +291,10 @@ pub enum ClipboardChoice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     entries: BTreeMap<&'static str, Resolved<String>>,
+    code_search_paths: Vec<String>,
+    code_repos: BTreeMap<String, String>,
+    run_destructive_patterns: Vec<String>,
+    custom_actions: Vec<CustomActionConfig>,
 }
 
 /// Values given on the command line that map to settings.
@@ -293,8 +349,21 @@ impl Settings {
                     )
                 })
                 .collect(),
+            code_search_paths: Vec::new(),
+            code_repos: BTreeMap::new(),
+            run_destructive_patterns: Vec::new(),
+            custom_actions: Vec::new(),
         }
     }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self::defaults()
+    }
+}
+
+impl Settings {
 
     fn put(&mut self, s: &'static Setting, value: String, source: Source, line: Option<usize>) {
         self.entries.insert(
@@ -349,6 +418,7 @@ impl Settings {
     pub fn tui_enter(&self) -> EnterAction {
         match self.text("tui.enter") {
             "print" => EnterAction::Print,
+            "primary" => EnterAction::Primary,
             _ => EnterAction::Copy,
         }
     }
@@ -386,6 +456,42 @@ impl Settings {
 
     pub fn opener_command(&self) -> Option<&str> {
         self.optional("opener.command")
+    }
+
+    pub fn sumo_base_url(&self) -> Option<&str> {
+        self.optional("sumo.base_url")
+    }
+
+    pub fn aws_default_region(&self) -> Option<&str> {
+        self.optional("aws.default_region")
+    }
+
+    pub fn code_default_open(&self) -> &str {
+        self.text("code.default_open")
+    }
+
+    pub fn code_web_url(&self) -> Option<&str> {
+        self.optional("code.web_url")
+    }
+
+    pub fn run_pause_after(&self) -> bool {
+        self.flag("run.pause_after")
+    }
+
+    pub fn code_search_paths(&self) -> &[String] {
+        &self.code_search_paths
+    }
+
+    pub fn code_repos(&self) -> &BTreeMap<String, String> {
+        &self.code_repos
+    }
+
+    pub fn run_destructive_patterns(&self) -> &[String] {
+        &self.run_destructive_patterns
+    }
+
+    pub fn custom_actions(&self) -> &[CustomActionConfig] {
+        &self.custom_actions
     }
 
     /// The template for new entry IDs; the default when unset (an invalid value was already
@@ -517,6 +623,15 @@ fn collect(table: &dyn toml_edit::TableLike, prefix: &str, text: &str, out: &mut
         } else {
             format!("{prefix}.{name}")
         };
+        if key == "code.search_paths"
+            || key == "code.repos"
+            || key.starts_with("code.repos.")
+            || key == "run.destructive_patterns"
+            || key == "actions"
+            || key.starts_with("actions.")
+        {
+            continue;
+        }
         match item {
             Item::Table(t) => collect(t, &key, text, out),
             Item::Value(Value::InlineTable(t)) => collect(t, &key, text, out),
@@ -585,6 +700,7 @@ impl Loader {
     }
 
     fn toml_file(&mut self, path: &Path, text: &str) {
+        use toml_edit::Item;
         let doc = match toml_edit::Document::parse(text) {
             Ok(d) => d,
             Err(e) => {
@@ -597,6 +713,154 @@ impl Loader {
                 return;
             }
         };
+
+        // 1. code.search_paths
+        if let Some(code_item) = doc.get("code")
+            && let Some(code_tbl) = code_item.as_table_like()
+        {
+            if let Some(sp_item) = code_tbl.get("search_paths") {
+                if let Some(arr) = sp_item.as_array() {
+                    for val in arr.iter() {
+                        if let Some(s) = val.as_str() {
+                            self.settings.code_search_paths.push(s.to_string());
+                        } else {
+                            let line = val.span().map(|r| line_of(text, r.start));
+                            self.warn(
+                                Some(path),
+                                line,
+                                "code.search_paths: expected string elements".into(),
+                            );
+                        }
+                    }
+                } else {
+                    let line = sp_item.span().map(|r| line_of(text, r.start));
+                    self.warn(
+                        Some(path),
+                        line,
+                        "code.search_paths: expected an array of strings".into(),
+                    );
+                }
+            }
+
+            if let Some(repos_item) = code_tbl.get("repos") {
+                if let Some(repos_tbl) = repos_item.as_table_like() {
+                    for (repo_name, val_item) in repos_tbl.iter() {
+                        if let Some(val_str) = val_item.as_str() {
+                            self.settings
+                                .code_repos
+                                .insert(repo_name.to_string(), val_str.to_string());
+                        } else {
+                            let line = val_item.span().map(|r| line_of(text, r.start));
+                            self.warn(
+                                Some(path),
+                                line,
+                                format!("code.repos.{repo_name}: expected a string path"),
+                            );
+                        }
+                    }
+                } else {
+                    let line = repos_item.span().map(|r| line_of(text, r.start));
+                    self.warn(Some(path), line, "code.repos: expected a table".into());
+                }
+            }
+        }
+
+        // 2. run.destructive_patterns
+        if let Some(run_item) = doc.get("run")
+            && let Some(run_tbl) = run_item.as_table_like()
+            && let Some(dp_item) = run_tbl.get("destructive_patterns")
+        {
+            if let Some(arr) = dp_item.as_array() {
+                for val in arr.iter() {
+                    if let Some(s) = val.as_str() {
+                        self.settings.run_destructive_patterns.push(s.to_string());
+                    } else {
+                        let line = val.span().map(|r| line_of(text, r.start));
+                        self.warn(
+                            Some(path),
+                            line,
+                            "run.destructive_patterns: expected string elements".into(),
+                        );
+                    }
+                }
+            } else {
+                let line = dp_item.span().map(|r| line_of(text, r.start));
+                self.warn(
+                    Some(path),
+                    line,
+                    "run.destructive_patterns: expected an array of strings".into(),
+                );
+            }
+        }
+
+        // 3. [[actions.<type>]]
+        if let Some(actions_item) = doc.get("actions")
+            && let Some(actions_tbl) = actions_item.as_table_like()
+        {
+            for (entry_type, type_item) in actions_tbl.iter() {
+                if let Item::ArrayOfTables(arr) = type_item {
+                    for table in arr.iter() {
+                        let line = table.span().map(|r| line_of(text, r.start));
+                        let name = table.get("name").and_then(|v| v.as_str());
+                        let key = table.get("key").and_then(|v| v.as_str());
+                        let command = table.get("command").and_then(|v| v.as_str());
+                        let input_str = table.get("input").and_then(|v| v.as_str()).unwrap_or("stdin");
+
+                        if name.is_none() || key.is_none() || command.is_none() {
+                            self.warn(
+                                Some(path),
+                                line,
+                                format!(
+                                    "actions.{entry_type}: custom action requires name, key, and command"
+                                ),
+                            );
+                            continue;
+                        }
+                        let key_chars: Vec<char> = key.unwrap().chars().collect();
+                        if key_chars.len() != 1 {
+                            self.warn(
+                                Some(path),
+                                line,
+                                format!(
+                                    "actions.{entry_type}: key must be a single character, got {:?}",
+                                    key.unwrap()
+                                ),
+                            );
+                            continue;
+                        }
+                        let input = match input_str {
+                            "arg" => CustomActionInput::Arg,
+                            "stdin" => CustomActionInput::Stdin,
+                            other => {
+                                self.warn(
+                                    Some(path),
+                                    line,
+                                    format!(
+                                        "actions.{entry_type}: invalid input {other:?}, expected stdin or arg"
+                                    ),
+                                );
+                                CustomActionInput::Stdin
+                            }
+                        };
+                        self.settings.custom_actions.push(CustomActionConfig {
+                            entry_type: entry_type.to_string(),
+                            name: name.unwrap().to_string(),
+                            key: key_chars[0],
+                            command: command.unwrap().to_string(),
+                            input,
+                        });
+                    }
+                } else {
+                    let line = type_item.span().map(|r| line_of(text, r.start));
+                    self.warn(
+                        Some(path),
+                        line,
+                        format!("actions.{entry_type}: expected an array of tables"),
+                    );
+                }
+            }
+        }
+
         let mut leaves = Vec::new();
         collect(doc.as_table(), "", text, &mut leaves);
         for leaf in leaves {
@@ -901,7 +1165,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 12, "twelve settings, no duplicates");
+        assert_eq!(keys.len(), 17, "seventeen settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -928,7 +1192,12 @@ mod settings_tests {
             assert_eq!(r.source, Source::Default, "{key}");
         }
         assert!(s.vars_remember());
-        assert_eq!(s.iter().count(), 12);
+        assert_eq!(s.sumo_base_url(), None);
+        assert_eq!(s.aws_default_region(), None);
+        assert_eq!(s.code_default_open(), "web");
+        assert_eq!(s.code_web_url(), None);
+        assert!(s.run_pause_after());
+        assert_eq!(s.iter().count(), 17);
         assert_eq!(s.path_template(), PathTemplate::default());
     }
 
@@ -1350,7 +1619,11 @@ mod edit_tests {
         let original = good();
         for (key, value, wanted) in [
             ("theme", "blue", "expected one of auto, dark, light"),
-            ("tui.enter", "maybe", "expected one of copy, print"),
+            (
+                "tui.enter",
+                "maybe",
+                "expected one of copy, print, primary",
+            ),
             ("tui.mouse", "perhaps", "expected true or false"),
             ("clipboard.osc52_max_bytes", "0", "at least 1"),
             ("clipboard.osc52_max_bytes", "lots", "at least 1"),
@@ -1527,5 +1800,91 @@ mod edit_tests {
         assert!(l.warnings[0].message.contains("{slug}"));
         assert_eq!(l.settings.path_template(), PathTemplate::default());
         assert!(setting("path_template").is_some());
+    }
+
+    #[test]
+    fn actions_and_code_links_config_additions() {
+        let toml = r#"
+[tui]
+enter = "primary"
+
+[sumo]
+base_url = "https://service.us2.sumologic.com"
+
+[aws]
+default_region = "us-east-1"
+
+[code]
+default_open = "vscode"
+search_paths = ["~/repos", "~/code"]
+web_url = "https://source.corp.internal/{repo}/blob/{ref}/{path}#L{line}"
+
+[code.repos]
+"auth0/auth0-java" = "~/repos/auth0-java"
+"cortiz/kb" = "~/repos/jmpeax/kb"
+
+[run]
+pause_after = false
+destructive_patterns = [
+    "ansible-playbook.*--extra-vars.*prod",
+    "prisma migrate reset",
+]
+
+[[actions.sql]]
+name = "psql"
+key = "p"
+command = "psql -d {{database}} -h {{host}}"
+input = "stdin"
+
+[[actions.cmd]]
+name = "dry-run"
+key = "d"
+command = "echo [DRY RUN]: {{payload}}"
+input = "arg"
+"#;
+        let l = load_text(toml);
+        assert!(l.warnings.is_empty(), "warnings: {:?}", l.warnings);
+        assert_eq!(l.settings.tui_enter(), EnterAction::Primary);
+        assert_eq!(
+            l.settings.sumo_base_url(),
+            Some("https://service.us2.sumologic.com")
+        );
+        assert_eq!(l.settings.aws_default_region(), Some("us-east-1"));
+        assert_eq!(l.settings.code_default_open(), "vscode");
+        assert_eq!(l.settings.code_search_paths(), &["~/repos", "~/code"]);
+        assert_eq!(
+            l.settings.code_web_url(),
+            Some("https://source.corp.internal/{repo}/blob/{ref}/{path}#L{line}")
+        );
+        assert_eq!(
+            l.settings.code_repos().get("auth0/auth0-java").map(|s| s.as_str()),
+            Some("~/repos/auth0-java")
+        );
+        assert_eq!(
+            l.settings.code_repos().get("cortiz/kb").map(|s| s.as_str()),
+            Some("~/repos/jmpeax/kb")
+        );
+        assert!(!l.settings.run_pause_after());
+        assert_eq!(
+            l.settings.run_destructive_patterns(),
+            &[
+                "ansible-playbook.*--extra-vars.*prod",
+                "prisma migrate reset"
+            ]
+        );
+        assert_eq!(l.settings.custom_actions().len(), 2);
+        let sql_act = &l.settings.custom_actions()[0];
+        assert_eq!(sql_act.entry_type, "sql");
+        assert_eq!(sql_act.name, "psql");
+        assert_eq!(sql_act.key, 'p');
+        assert_eq!(sql_act.command, "psql -d {{database}} -h {{host}}");
+        assert_eq!(sql_act.input, CustomActionInput::Stdin);
+
+        let cmd_act = &l.settings.custom_actions()[1];
+        assert_eq!(cmd_act.entry_type, "cmd");
+        assert_eq!(cmd_act.name, "dry-run");
+        assert_eq!(cmd_act.key, 'd');
+        assert_eq!(cmd_act.command, "echo [DRY RUN]: {{payload}}");
+        assert_eq!(cmd_act.input, CustomActionInput::Arg);
     }
 }

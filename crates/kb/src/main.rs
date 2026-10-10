@@ -77,6 +77,21 @@ struct CopyArgs {
 }
 
 #[derive(Args)]
+struct OpenArgs {
+    /// An entry ID, or words to search for.
+    #[arg(required = true, num_args = 1..)]
+    query: Vec<String>,
+    /// Override default open target: web, vscode, idea, console.
+    #[arg(long = "with", value_name = "TARGET")]
+    with: Option<String>,
+    #[command(flatten)]
+    vars: VarArgs,
+    /// `-tag:x` on the command line arrives here (see `rewrite_not_tag`).
+    #[arg(long = "not-tag", hide = true, value_name = "TAG")]
+    not_tags: Vec<String>,
+}
+
+#[derive(Args)]
 struct UseArgs {
     /// An entry ID, or words to search for.
     #[arg(required = true, num_args = 1..)]
@@ -315,6 +330,8 @@ enum Command {
     Tui(TuiArgs),
     /// Copy an entry's payload to the clipboard, asking for its variables first.
     Copy(CopyArgs),
+    /// Open an entry's primary link, console deep link, or code target.
+    Open(OpenArgs),
     /// Fill in an entry's variables and copy (or print) the result.
     Use(UseArgs),
     /// List an entry's variables and the values that would be pre-filled.
@@ -470,6 +487,7 @@ fn main() -> ExitCode {
         Command::Reindex(a) => a.json,
         Command::Index(IndexCommand::Status(a)) => a.json,
         Command::Copy(a) => a.json,
+        Command::Open(_) => false,
         Command::Use(a) => a.json,
         Command::Vars(a) => a.json,
         Command::Show(a) => a.json,
@@ -537,6 +555,14 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
                 let opts = args.vars.into_opts(args.json)?;
                 commands::run_use(&platform, &root, &loaded, &query, &opts)
             }
+        }
+        Command::Open(args) => {
+            let query = join_query(&args.query, &args.not_tags);
+            let opts = kb_cli::commands::OpenOpts {
+                with_target: args.with,
+                use_opts: args.vars.into_opts(false)?,
+            };
+            commands::run_open(&platform, &root, &loaded, &query, &opts)
         }
         Command::Use(args) => {
             let query = join_query(&args.query, &args.not_tags);
