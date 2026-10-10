@@ -150,6 +150,8 @@ pub enum Command {
     Copy,
     /// Ctrl-O: open the link, console deep link, or code view.
     Open,
+    /// Ctrl-G: run the command safely with confirmation.
+    Run,
     /// Alt-C: copy the payload with its `{{variables}}` left in.
     CopyTemplate,
     Edit,
@@ -286,6 +288,15 @@ pub const BINDINGS: &[Binding] = &[
         display: "Ctrl-O",
         label: "open the link, console or code view",
         bar: bar(6, 6, "^O open"),
+    },
+    Binding {
+        keys: &[ctrl('g')],
+        modes: SF,
+        command: Command::Run,
+        group: Group::Pick,
+        display: "Ctrl-G",
+        label: "run the command safely",
+        bar: bar(6, 6, "^G run"),
     },
     Binding {
         keys: &[Key::new(Code::Char('c'), ALT)],
@@ -722,6 +733,7 @@ pub fn short_label(c: Command) -> &'static str {
         Command::Copy => "copy payload",
         Command::CopyTemplate => "copy template",
         Command::Open => "open",
+        Command::Run => "run",
         Command::Edit => "edit entry",
         Command::AddEntry => "add entry",
         Command::RenameEntry => "rename entry",

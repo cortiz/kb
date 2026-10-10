@@ -17,6 +17,7 @@ use crate::doctor::{self, Check, Status};
 use crate::output::CliError;
 use crate::platform::Platform;
 use crate::platform::clipboard::{self, ClipboardSettings, CopyOutcome, Method, Place};
+use crate::platform::{Opened, opener};
 use crate::show;
 use crate::tui::app::Options;
 use crate::tui::theme::{Theme, ThemeEnv};
@@ -24,7 +25,6 @@ use crate::tui::{self, Outcome};
 use crate::varcli::{self, Ask, Collected, TtyAsk, UseOpts};
 use kb_core::entry::{EntryType, TypeFields};
 use kb_core::varres;
-use crate::platform::{Opened, opener};
 
 fn io_error(e: impl std::fmt::Display) -> CliError {
     CliError::new("io", e.to_string())
@@ -65,12 +65,23 @@ pub enum PostPick {
     Raw,
     /// Open the entry's primary link or console deep link (`kb open`).
     Open(OpenOpts),
+    /// Run a cmd entry or custom action (`kb run`).
+    Run(RunOpts),
 }
 
 /// Options for `kb open`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OpenOpts {
     pub with_target: Option<String>,
+    pub use_opts: UseOpts,
+}
+
+/// Options for `kb run`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RunOpts {
+    pub yes: bool,
+    pub force: bool,
+    pub action: Option<String>,
     pub use_opts: UseOpts,
 }
 
@@ -399,6 +410,7 @@ pub fn run_pick(
         ),
         PostPick::Use(opts) => deliver(platform, &kb, &loaded.settings, id, opts),
         PostPick::Open(opts) => deliver_open(platform, &kb, &loaded.settings, id, opts),
+        PostPick::Run(opts) => deliver_run(platform, &kb, &loaded.settings, id, opts),
         PostPick::Raw => {
             let outcome = copy_entry(platform, &kb, &loaded.settings, id)?;
             Ok(report_copy(&outcome, id, false, None))
@@ -704,7 +716,10 @@ pub fn deliver_open_resolved(
                 if target != "console" {
                     return Err(CliError::new(
                         "usage",
-                        format!("--with {target}: valid target for {} entries is 'console'", ty.name()),
+                        format!(
+                            "--with {target}: valid target for {} entries is 'console'",
+                            ty.name()
+                        ),
                     ));
                 }
             }
@@ -712,7 +727,9 @@ pub fn deliver_open_resolved(
                 if target != "web" && target != "vscode" && target != "idea" {
                     return Err(CliError::new(
                         "usage",
-                        format!("--with {target}: valid targets for code entries are 'web', 'vscode', 'idea'"),
+                        format!(
+                            "--with {target}: valid targets for code entries are 'web', 'vscode', 'idea'"
+                        ),
                     ));
                 }
             }
@@ -749,7 +766,10 @@ pub fn deliver_open_resolved(
         }
         EntryType::Sumo => {
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 kb.pick(id, PrintMode::Payload).map_err(io_error)?
             };
@@ -771,7 +791,9 @@ pub fn deliver_open_resolved(
             };
 
             let Some(base_url) = settings.sumo_base_url().filter(|u| !u.trim().is_empty()) else {
-                eprintln!("kb: Sumo deployment URL is not configured. Set `sumo.base_url` in config or via `kb config set sumo.base_url <url>`. Copying query to clipboard instead.");
+                eprintln!(
+                    "kb: Sumo deployment URL is not configured. Set `sumo.base_url` in config or via `kb config set sumo.base_url <url>`. Copying query to clipboard instead."
+                );
                 let outcome = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -792,7 +814,9 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             if !link.query_included {
-                eprintln!("kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening search console without query");
+                eprintln!(
+                    "kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening search console without query"
+                );
                 let _ = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -812,7 +836,10 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 kb.pick(id, PrintMode::Payload).map_err(io_error)?
             };
@@ -836,7 +863,10 @@ pub fn deliver_open_resolved(
             let mut resolved_log_groups = Vec::new();
             if let TypeFields::Cw { log_groups, .. } = entry.fields() {
                 for (i, lg) in log_groups.iter().enumerate() {
-                    if let Some(r) = resolved_result.as_ref().and_then(|res| res.get(&varres::Target::LogGroup(i))) {
+                    if let Some(r) = resolved_result
+                        .as_ref()
+                        .and_then(|res| res.get(&varres::Target::LogGroup(i)))
+                    {
                         resolved_log_groups.push(r.text.clone());
                     } else {
                         resolved_log_groups.push(lg.clone());
@@ -853,7 +883,9 @@ pub fn deliver_open_resolved(
             .map_err(|e| CliError::new("usage", e.to_string()))?;
 
             if !link.query_included {
-                eprintln!("kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening CloudWatch console without query");
+                eprintln!(
+                    "kb: warning: URL exceeds 8,000 characters; copying query to clipboard and opening CloudWatch console without query"
+                );
                 let _ = clipboard::copy(
                     platform,
                     &ClipboardSettings::from_settings(settings),
@@ -905,6 +937,230 @@ fn execute_open_url(
             Ok(ExitCode::from(1))
         }
     }
+}
+
+/// `kb run <id|query>`.
+pub fn run_run(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    text: &str,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let mut kb = Kb::open(root).map_err(io_error)?;
+    match resolve_or_report(platform, &mut kb, text, opts.use_opts.json)? {
+        Next::Entry(id) => deliver_run(platform, &kb, &loaded.settings, &id, opts),
+        Next::Choose => {
+            if !opts.use_opts.flags.is_empty() || opts.yes {
+                eprintln!("kb: --var and --yes are ignored when you choose in the UI");
+            }
+            let post = PostPick::Run(RunOpts {
+                action: opts.action.clone(),
+                yes: false,
+                force: opts.force,
+                use_opts: UseOpts {
+                    flags: Vec::new(),
+                    yes: false,
+                    ..opts.use_opts.clone()
+                },
+            });
+            run_ui(platform, root, loaded, text, &post, false)
+        }
+        Next::Done(code) => Ok(code),
+    }
+}
+
+pub fn deliver_run(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    varcli::check_flag_names(&plan, &opts.use_opts.flags)?;
+
+    let (values, used) = if plan.is_empty() {
+        (varres::Values::new(), Vec::new())
+    } else {
+        let (memory, _) = kb.remembered(id);
+        let mut tty = if opts.yes || !platform.has_terminal() {
+            None
+        } else {
+            TtyAsk::open(platform)
+        };
+        let ask = tty.as_mut().map(|t| t as &mut dyn Ask);
+        let env = |name: &str| std::env::var(name).ok();
+        match varcli::collect(&plan, &opts.use_opts.flags, &env, Some(&memory), ask)? {
+            Collected::Stop(code) => return Ok(code),
+            Collected::Ready(values, report) => (values, report),
+        }
+    };
+
+    deliver_run_values_map(platform, kb, settings, id, &values, &used, opts)
+}
+
+fn deliver_run_values(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    values: Vec<(String, kb_core::varres::Value, kb_core::varres::Source)>,
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+    let plan = varres::plan_vars(&entry);
+    let mut map = varres::Values::new();
+    let mut used = Vec::new();
+    for (name, value, source) in values {
+        if let Some(p) = plan.var(&name) {
+            used.push(varcli::Used {
+                name: name.clone(),
+                kind: p.var.kind,
+                source,
+                text: (!value.is_secret()).then(|| value.reveal().to_string()),
+            });
+            map.insert(name, value);
+        }
+    }
+    deliver_run_values_map(platform, kb, settings, id, &map, &used, opts)
+}
+
+fn deliver_run_values_map(
+    platform: &impl Platform,
+    kb: &Kb,
+    settings: &Settings,
+    id: &str,
+    values: &varres::Values,
+    used: &[varcli::Used],
+    opts: &RunOpts,
+) -> Result<ExitCode, CliError> {
+    let entry = kb.entry(id).map_err(io_error)?;
+
+    let custom_action = if let Some(ref action_name) = opts.action {
+        let ty = entry.entry_type().map(|t| t.name()).unwrap_or("");
+        let action = settings
+            .custom_actions()
+            .iter()
+            .find(|a| a.entry_type == ty && a.name == *action_name)
+            .ok_or_else(|| {
+                CliError::new(
+                    "usage",
+                    format!("action '{action_name}' not found for type '{ty}'"),
+                )
+            })?;
+        Some(action)
+    } else {
+        if entry.entry_type() != Some(EntryType::Cmd) {
+            let ty_name = entry.entry_type().map(|t| t.name()).unwrap_or("unknown");
+            return Err(CliError::new(
+                "usage",
+                format!("cannot run entry '{id}' of type '{ty_name}' (expected cmd)"),
+            ));
+        }
+        None
+    };
+
+    let run_plan = kb_core::run::RunService::build_run_plan(
+        &entry,
+        values,
+        custom_action,
+        settings.run_destructive_patterns(),
+    )
+    .map_err(|e| match e {
+        kb_core::run::RunPlanError::MissingCwd(path) => CliError::new(
+            "usage",
+            format!("working directory does not exist: {}", path.display()),
+        ),
+        kb_core::run::RunPlanError::MissingPlaceholderField(f) => {
+            CliError::new("usage", format!("missing field in template: {{{{{f}}}}}"))
+        }
+        kb_core::run::RunPlanError::VarResolution(msg) => CliError::new("usage", msg),
+    })?;
+
+    if opts.yes {
+        if run_plan.requires_typed_run && !opts.force {
+            return Err(CliError::new(
+                "usage",
+                "command matches destructive patterns; use --yes --force to execute non-interactively",
+            ));
+        }
+        eprintln!("kb: running: {}", run_plan.resolved_command);
+    } else {
+        if !platform.has_terminal() {
+            return Err(CliError::new(
+                "usage",
+                "cannot prompt for confirmation without a terminal; use --yes to run non-interactively",
+            ));
+        }
+
+        eprintln!("Command: {}", run_plan.resolved_command);
+        eprintln!("Shell:   {}", run_plan.shell);
+        if let Some(ref cwd) = run_plan.cwd {
+            eprintln!("Cwd:     {}", cwd.display());
+        }
+        if !run_plan.secret_env_vars.is_empty() {
+            let secret_names: Vec<_> = run_plan
+                .secret_env_vars
+                .iter()
+                .map(|s| s.env_key.as_str())
+                .collect();
+            eprintln!("Secrets: {}", secret_names.join(", "));
+        }
+        for warn in &run_plan.destructive_warnings {
+            eprintln!("WARNING: Destructive pattern matched: {}", warn.description);
+        }
+
+        let mut tty =
+            TtyAsk::open(platform).ok_or_else(|| CliError::new("io", "cannot open terminal"))?;
+
+        if run_plan.requires_typed_run {
+            let answer = tty
+                .line("This command matched destructive patterns. Type 'run' to execute: ")
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            match answer {
+                Some(ans) if ans.trim() == "run" => {}
+                _ => {
+                    eprintln!("kb: run cancelled");
+                    return Ok(ExitCode::from(130));
+                }
+            }
+        } else {
+            let answer = tty
+                .line("Run this command? [y/N]: ")
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            match answer {
+                Some(ans)
+                    if ans.trim().eq_ignore_ascii_case("y")
+                        || ans.trim().eq_ignore_ascii_case("yes") => {}
+                _ => {
+                    eprintln!("kb: run cancelled");
+                    return Ok(ExitCode::from(130));
+                }
+            }
+        }
+    }
+
+    let env_tuples: Vec<(String, String)> = run_plan
+        .secret_env_vars
+        .into_iter()
+        .map(|s| (s.env_key, s.secret_value))
+        .collect();
+
+    let res = platform
+        .run_interactive_command(
+            &run_plan.shell,
+            &run_plan.resolved_command,
+            run_plan.cwd.as_deref(),
+            &env_tuples,
+        )
+        .map_err(|e| CliError::new("io", format!("failed to run command: {e}")))?;
+
+    finish_use(kb, settings, id, used, opts.use_opts.remember);
+
+    let code = u8::try_from(res.exit_code).unwrap_or(1);
+    Ok(ExitCode::from(code))
 }
 
 /// `kb copy --raw <id|query>`: the payload as it is in the file, placeholders included.
@@ -1007,7 +1263,11 @@ pub fn run_ui(
         config_problems: loaded.warnings.len(),
         fill_variables: matches!(
             post,
-            PostPick::Copy | PostPick::Print(PrintMode::Payload) | PostPick::Use(_) | PostPick::Open(_)
+            PostPick::Copy
+                | PostPick::Print(PrintMode::Payload)
+                | PostPick::Use(_)
+                | PostPick::Open(_)
+                | PostPick::Run(_)
         ),
         remember_vars: loaded.settings.vars_remember()
             && !matches!(post, PostPick::Use(o) if !o.remember),
@@ -1028,7 +1288,18 @@ pub fn run_ui(
         Outcome::Resolved { id, values, print } => {
             if let PostPick::Open(open_opts) = post {
                 let kb = Kb::open(root).map_err(io_error)?;
-                return deliver_open_values(platform, &kb, &loaded.settings, &id, values, open_opts);
+                return deliver_open_values(
+                    platform,
+                    &kb,
+                    &loaded.settings,
+                    &id,
+                    values,
+                    open_opts,
+                );
+            }
+            if let PostPick::Run(run_opts) = post {
+                let kb = Kb::open(root).map_err(io_error)?;
+                return deliver_run_values(platform, &kb, &loaded.settings, &id, values, run_opts);
             }
             let mut opts = match post {
                 PostPick::Use(o) => o.clone(),

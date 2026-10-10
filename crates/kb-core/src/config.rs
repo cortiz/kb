@@ -364,7 +364,6 @@ impl Default for Settings {
 }
 
 impl Settings {
-
     fn put(&mut self, s: &'static Setting, value: String, source: Source, line: Option<usize>) {
         self.entries.insert(
             s.key,
@@ -804,7 +803,10 @@ impl Loader {
                         let name = table.get("name").and_then(|v| v.as_str());
                         let key = table.get("key").and_then(|v| v.as_str());
                         let command = table.get("command").and_then(|v| v.as_str());
-                        let input_str = table.get("input").and_then(|v| v.as_str()).unwrap_or("stdin");
+                        let input_str = table
+                            .get("input")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("stdin");
 
                         if name.is_none() || key.is_none() || command.is_none() {
                             self.warn(
@@ -1619,11 +1621,7 @@ mod edit_tests {
         let original = good();
         for (key, value, wanted) in [
             ("theme", "blue", "expected one of auto, dark, light"),
-            (
-                "tui.enter",
-                "maybe",
-                "expected one of copy, print, primary",
-            ),
+            ("tui.enter", "maybe", "expected one of copy, print, primary"),
             ("tui.mouse", "perhaps", "expected true or false"),
             ("clipboard.osc52_max_bytes", "0", "at least 1"),
             ("clipboard.osc52_max_bytes", "lots", "at least 1"),
@@ -1857,7 +1855,10 @@ input = "arg"
             Some("https://source.corp.internal/{repo}/blob/{ref}/{path}#L{line}")
         );
         assert_eq!(
-            l.settings.code_repos().get("auth0/auth0-java").map(|s| s.as_str()),
+            l.settings
+                .code_repos()
+                .get("auth0/auth0-java")
+                .map(|s| s.as_str()),
             Some("~/repos/auth0-java")
         );
         assert_eq!(

@@ -92,17 +92,17 @@ description: "Task list for M7: Actions and Code Links"
 
 ### Tests for User Story 2
 
-- [ ] T021 [P] [US2] Write failing tests for destructive pattern scanner in `crates/kb-core/src/run.rs`: verify all 30 hostile commands in `hostile_commands.txt` are detected as destructive, non-destructive commands pass, and user patterns from config are additive.
-- [ ] T022 [P] [US2] Write failing tests for `RunPlan` builder and secret isolation in `crates/kb-core/src/run.rs`: verify `secret` variables are substituted with `"$KB_SECRET_<NAME>"`, mapped to `secret_env_vars`, secrets never appear in `resolved_command`, non-existent `cwd` returns `MissingCwd` error, and shell defaults to entry's `shell` or `sh`.
-- [ ] T023 [P] [US2] Write failing integration tests for `kb run` CLI in `tests/cli_run.rs`: verify interactive confirmation (`y` to run), destructive confirmation (requires typing `run`), `--yes` without prompt, `--yes` on destructive command rejected without `--force`, exit code forwarding, and signal exit code (`128 + signal`).
-- [ ] T024 [P] [US2] Write failing PTY integration tests in `tests/tui_run_pty.rs`: verify `Ctrl-G` opens confirmation modal, running suspends TUI, terminal input/output works for interactive commands, post-run pause screen shows exit code and duration, and raw mode is restored cleanly.
+- [X] T021 [P] [US2] Write failing tests for destructive pattern scanner in `crates/kb-core/src/run.rs`: verify all 30 hostile commands in `hostile_commands.txt` are detected as destructive, non-destructive commands pass, and user patterns from config are additive.
+- [X] T022 [P] [US2] Write failing tests for `RunPlan` builder and secret isolation in `crates/kb-core/src/run.rs`: verify `secret` variables are substituted with `"$KB_SECRET_<NAME>"`, mapped to `secret_env_vars`, secrets never appear in `resolved_command`, non-existent `cwd` returns `MissingCwd` error, and shell defaults to entry's `shell` or `sh`.
+- [X] T023 [P] [US2] Write failing integration tests for `kb run` CLI in `tests/cli_run.rs`: verify interactive confirmation (`y` to run), destructive confirmation (requires typing `run`), `--yes` without prompt, `--yes` on destructive command rejected without `--force`, exit code forwarding, and signal exit code (`128 + signal`).
+- [X] T024 [P] [US2] Write failing PTY integration tests in `tests/tui_run_pty.rs`: verify `Ctrl-G` opens confirmation modal, running suspends TUI, terminal input/output works for interactive commands, post-run pause screen shows exit code and duration, and raw mode is restored cleanly.
 
 ### Implementation for User Story 2
 
-- [ ] T025 [US2] Implement `RunService::check_destructive` with built-in compiled regexes in `crates/kb-core/src/run.rs`. Makes T021 pass.
-- [ ] T026 [US2] Implement `RunService::build_run_plan` with secret env var extraction and shell quotation in `crates/kb-core/src/run.rs`. Makes T022 pass.
-- [ ] T027 [US2] Implement `kb run` CLI subcommand in `crates/kb/src/commands.rs` supporting `--yes`, `--force`, `--var`, and exit code forwarding. Makes T023 pass.
-- [ ] T028 [US2] Implement TUI Run Modal (`run_modal.rs`) and execution handler in `crates/kb/src/tui/app.rs`: render confirmation details, prompt for `run` on destructive commands, invoke `Platform::run_interactive_command`, display pause banner, and bind `Ctrl-G` in `crates/kb/src/tui/keys.rs`. Makes T024 pass.
+- [X] T025 [US2] Implement `RunService::check_destructive` with built-in compiled regexes in `crates/kb-core/src/run.rs`. Makes T021 pass.
+- [X] T026 [US2] Implement `RunService::build_run_plan` with secret env var extraction and shell quotation in `crates/kb-core/src/run.rs`. Makes T022 pass.
+- [X] T027 [US2] Implement `kb run` CLI subcommand in `crates/kb/src/commands.rs` supporting `--yes`, `--force`, `--var`, and exit code forwarding. Makes T023 pass.
+- [X] T028 [US2] Implement TUI Run Modal (`run_modal.rs`) and execution handler in `crates/kb/src/tui/app.rs`: render confirmation details, prompt for `run` on destructive commands, invoke `Platform::run_interactive_command`, display pause banner, and bind `Ctrl-G` in `crates/kb/src/tui/keys.rs`. Makes T024 pass.
 
 **Checkpoint**: All 30 destructive commands require typed `run` confirmation; secrets never appear in process listings; terminal restores cleanly after runs.
 

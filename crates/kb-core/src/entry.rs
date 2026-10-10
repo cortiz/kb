@@ -132,6 +132,16 @@ impl Shell {
             _ => None,
         }
     }
+
+    /// The name of the shell as a string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Shell::Sh => "sh",
+            Shell::Bash => "bash",
+            Shell::Zsh => "zsh",
+            Shell::Fish => "fish",
+        }
+    }
 }
 
 /// Where a `code` entry points.

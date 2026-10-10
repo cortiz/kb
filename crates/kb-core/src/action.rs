@@ -20,16 +20,16 @@ pub enum ActionKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Action {
-    pub id: String,                 // stable identifier e.g. "open-sumo", "run", "psql"
-    pub name: String,               // short user-visible name e.g. "Open in Sumo"
-    pub key: char,                  // single-letter keyboard shortcut
-    pub label: String,              // detailed description for menus
+    pub id: String,    // stable identifier e.g. "open-sumo", "run", "psql"
+    pub name: String,  // short user-visible name e.g. "Open in Sumo"
+    pub key: char,     // single-letter keyboard shortcut
+    pub label: String, // detailed description for menus
     pub kind: ActionKind,
-    pub is_primary: bool,           // whether this is the entry type's default open action
-    pub needs_vars: bool,           // requires M5 variable resolution prior to execution
-    pub needs_confirm: bool,        // requires confirmation prompt before execution
+    pub is_primary: bool, // whether this is the entry type's default open action
+    pub needs_vars: bool, // requires M5 variable resolution prior to execution
+    pub needs_confirm: bool, // requires confirmation prompt before execution
     pub requires_local_clone: bool, // disabled if no local git clone is discovered
-    pub requires_display: bool,     // disabled over SSH without GUI display
+    pub requires_display: bool, // disabled over SSH without GUI display
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,7 +350,8 @@ mod tests {
         let cmd_entry = load_entry("tests/fixtures/actions/entries/cmd-tail.md");
         let code_entry = load_entry("tests/fixtures/actions/entries/code-authorizer.md");
 
-        let empty_settings = crate::config::load(&[], &|_| None, &crate::config::Flags::default()).settings;
+        let empty_settings =
+            crate::config::load(&[], &|_| None, &crate::config::Flags::default()).settings;
 
         // Verify primary actions
         let link_primary = ActionService::primary_action(&link_entry, &empty_settings, None);
@@ -379,18 +380,27 @@ mod tests {
         // Verify list_actions
         let cmd_actions = ActionService::list_actions(&cmd_entry, &empty_settings, None);
         assert!(cmd_actions.iter().any(|a| a.id == "copy"));
-        let run_act = cmd_actions.iter().find(|a| a.id == "run").expect("cmd has run action");
+        let run_act = cmd_actions
+            .iter()
+            .find(|a| a.id == "run")
+            .expect("cmd has run action");
         assert_eq!(run_act.key, 'r');
         assert!(run_act.needs_confirm);
         assert!(run_act.needs_vars);
         assert!(!run_act.requires_display);
 
         let code_actions = ActionService::list_actions(&code_entry, &empty_settings, None);
-        let vscode_act = code_actions.iter().find(|a| a.id == "open-vscode").expect("code has vscode action");
+        let vscode_act = code_actions
+            .iter()
+            .find(|a| a.id == "open-vscode")
+            .expect("code has vscode action");
         assert!(vscode_act.requires_local_clone);
         assert!(vscode_act.requires_display);
 
-        let copy_act = code_actions.iter().find(|a| a.id == "copy").expect("code has copy action");
+        let copy_act = code_actions
+            .iter()
+            .find(|a| a.id == "copy")
+            .expect("code has copy action");
         assert!(!copy_act.needs_confirm);
         assert!(!copy_act.needs_vars);
         assert!(!copy_act.requires_local_clone);

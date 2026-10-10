@@ -45,15 +45,30 @@ type EditEffect = Box<dyn Fn(&Path)>;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Call {
     FindTool(String),
-    RunCopyTool { tool: String, text: String },
+    RunCopyTool {
+        tool: String,
+        text: String,
+    },
     WriteTty(Vec<u8>),
-    Open { target: String, opener: String },
+    Open {
+        target: String,
+        opener: String,
+    },
     TmuxPassthrough,
     ResolveEditor,
-    RunEditor { command: String, path: PathBuf },
-    RunReadTool { tool: String },
-    RunGit { args: Vec<String> },
-    PrivateTempFile { extension: String },
+    RunEditor {
+        command: String,
+        path: PathBuf,
+    },
+    RunReadTool {
+        tool: String,
+    },
+    RunGit {
+        args: Vec<String>,
+    },
+    PrivateTempFile {
+        extension: String,
+    },
     RunInteractiveCommand {
         shell: String,
         command: String,
@@ -476,7 +491,9 @@ mod tests {
         let path = temp.path().to_path_buf();
         drop(temp);
         assert!(!path.exists(), "dropped temp files are deleted");
-        let res = p.run_interactive_command("sh", "echo ok", None, &[]).unwrap();
+        let res = p
+            .run_interactive_command("sh", "echo ok", None, &[])
+            .unwrap();
         assert_eq!(res.exit_code, 0);
         assert!(p.calls().contains(&Call::RunInteractiveCommand {
             shell: "sh".into(),

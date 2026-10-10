@@ -15,6 +15,7 @@ use super::input::{Change, LineEditor, SearchInput};
 use super::keys::{self, Command, Key, Mode};
 use super::layout::{self, Screen};
 use super::preview::PreviewModel;
+use super::run_modal::RunModalState;
 
 /// Results asked for at first; doubled when the selection nears the end.
 pub const PAGE: usize = 60;
@@ -201,6 +202,11 @@ pub enum Action {
     /// The new entry was written.
     Saved(String),
     SaveFailed(String),
+    /// Open the run confirmation modal.
+    OpenRunModal {
+        id: String,
+        plan: kb_core::run::RunPlan,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,6 +232,12 @@ pub enum Effect {
     SubmitForm(Box<Submission>),
     /// Ctrl-O: open the selected entry's primary link or console.
     OpenEntry(String),
+    /// Ctrl-G: run the selected cmd entry.
+    RunEntry(String),
+    ExecuteRun {
+        id: String,
+        plan: kb_core::run::RunPlan,
+    },
     EditEntry(String),
     /// Ctrl-N: read the clipboard (and ask for the tags in use) to open the add form.
     ReadClipboard,
@@ -283,6 +295,8 @@ pub struct AppState {
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
     /// The add form, when it is open.
     pub add: Option<Box<AddState>>,
+    /// The run confirmation/pause modal, when it is open.
+    pub run_modal: Option<Box<RunModalState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
@@ -325,6 +339,7 @@ impl AppState {
             form: None,
             form_session: std::collections::BTreeMap::new(),
             add: None,
+            run_modal: None,
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
@@ -479,6 +494,9 @@ impl AppState {
                 }
                 if self.add.is_some() {
                     return self.add_key(e);
+                }
+                if self.run_modal.is_some() {
+                    return self.run_modal_key(e);
                 }
                 if self.prompt.is_some() {
                     return self.prompt_key(e, now);
@@ -694,6 +712,15 @@ impl AppState {
                 }
                 Vec::new()
             }
+            Action::OpenRunModal { id, plan } => {
+                self.run_modal = Some(Box::new(RunModalState::Confirming {
+                    id,
+                    plan,
+                    input: String::new(),
+                    error: None,
+                }));
+                Vec::new()
+            }
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
@@ -802,6 +829,79 @@ impl AppState {
             }
             FormEvent::Submit { print } => {
                 vec![Effect::SubmitForm(Box::new(form.submission(print)))]
+            }
+        }
+    }
+
+    /// A key while the run confirmation / pause modal is open.
+    fn run_modal_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        let Some(key) = Key::from_event(e) else {
+            return Vec::new();
+        };
+        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(modal) = self.run_modal.as_mut() else {
+            return Vec::new();
+        };
+        match modal.as_mut() {
+            RunModalState::Paused { .. } => {
+                self.run_modal = None;
+                Vec::new()
+            }
+            RunModalState::Confirming {
+                id,
+                plan,
+                input,
+                error,
+            } => {
+                if key.same(Key::new(keys::Code::Esc, 0)) {
+                    self.run_modal = None;
+                    return Vec::new();
+                }
+                if plan.requires_typed_run {
+                    match key.code {
+                        keys::Code::Char(c) if key.mods == 0 => {
+                            input.push(c);
+                            *error = None;
+                            Vec::new()
+                        }
+                        keys::Code::Backspace => {
+                            input.pop();
+                            *error = None;
+                            Vec::new()
+                        }
+                        keys::Code::Enter => {
+                            if input.trim() == "run" {
+                                let id = id.clone();
+                                let plan = plan.clone();
+                                vec![Effect::ExecuteRun { id, plan }]
+                            } else {
+                                *error = Some("Type 'run' to execute".to_string());
+                                Vec::new()
+                            }
+                        }
+                        _ => Vec::new(),
+                    }
+                } else {
+                    match key.code {
+                        keys::Code::Enter => {
+                            let id = id.clone();
+                            let plan = plan.clone();
+                            vec![Effect::ExecuteRun { id, plan }]
+                        }
+                        keys::Code::Char('y' | 'Y') if key.mods == 0 => {
+                            let id = id.clone();
+                            let plan = plan.clone();
+                            vec![Effect::ExecuteRun { id, plan }]
+                        }
+                        keys::Code::Char('n' | 'N') if key.mods == 0 => {
+                            self.run_modal = None;
+                            Vec::new()
+                        }
+                        _ => Vec::new(),
+                    }
+                }
             }
         }
     }
@@ -931,6 +1031,13 @@ impl AppState {
             },
             Command::Open => match self.selected_result() {
                 Some(r) => vec![Effect::OpenEntry(r.id.clone())],
+                None => {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    Vec::new()
+                }
+            },
+            Command::Run => match self.selected_result() {
+                Some(r) => vec![Effect::RunEntry(r.id.clone())],
                 None => {
                     self.say("Nothing to pick", MessageKind::Info, now, true);
                     Vec::new()

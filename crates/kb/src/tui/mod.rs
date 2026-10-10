@@ -33,10 +33,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{self, Event};
 use ratatui::crossterm::terminal::size;
 
-use crate::platform::{Opened, Platform, opener};
 use crate::platform::clipboard::{self, ClipboardSettings, Place};
+use crate::platform::{Opened, Platform, opener};
 use app::{Action, AppState, CopyReport, Effect, Options, RefreshInfo};
 use form::{FormSpec, Submission, Then};
+use run_modal::RunModalState;
 use terminal::{Signals, TerminalGuard, exit_code_for_signal};
 use theme::{Theme, ThemeEnv};
 use worker::{Reply, Request, Worker};
@@ -211,6 +212,99 @@ pub fn run(
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
+                Effect::RunEntry(id) => {
+                    let entry = ui_kb.entry(&id);
+                    match entry {
+                        Ok(entry) => {
+                            if entry.entry_type() != Some(EntryType::Cmd) {
+                                pending.extend(state.update(
+                                    Action::CopyDone(CopyReport {
+                                        message: format!("cannot run entry '{id}': expected cmd"),
+                                        sent: false,
+                                    }),
+                                    Instant::now(),
+                                ));
+                            } else {
+                                let spec = FormSpec::load(&ui_kb, &id, &real_env);
+                                let action = match spec {
+                                    Ok(Some(spec)) => {
+                                        Action::FormLoaded(Ok(Box::new(spec)), Then::Run)
+                                    }
+                                    Err(e) => Action::FormLoaded(Err(e), Then::Run),
+                                    _ => {
+                                        let values = kb_core::varres::Values::new();
+                                        match kb_core::run::RunService::build_run_plan(
+                                            &entry,
+                                            &values,
+                                            None,
+                                            settings.run_destructive_patterns(),
+                                        ) {
+                                            Ok(plan) => Action::OpenRunModal { id, plan },
+                                            Err(e) => Action::CopyDone(CopyReport {
+                                                message: format!("cannot run: {e}"),
+                                                sent: false,
+                                            }),
+                                        }
+                                    }
+                                };
+                                pending.extend(state.update(action, Instant::now()));
+                            }
+                        }
+                        Err(e) => {
+                            pending.extend(state.update(
+                                Action::CopyDone(CopyReport {
+                                    message: format!("cannot load entry: {e}"),
+                                    sent: false,
+                                }),
+                                Instant::now(),
+                            ));
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::ExecuteRun { id, plan } => {
+                    guard.suspend();
+                    let env_tuples: Vec<(String, String)> = plan
+                        .secret_env_vars
+                        .iter()
+                        .map(|s| (s.env_key.clone(), s.secret_value.clone()))
+                        .collect();
+                    let res = platform.run_interactive_command(
+                        &plan.shell,
+                        &plan.resolved_command,
+                        plan.cwd.as_deref(),
+                        &env_tuples,
+                    );
+                    let _ = guard.resume();
+                    if let Ok(sz) = terminal.size() {
+                        let _ =
+                            terminal.resize(ratatui::layout::Rect::new(0, 0, sz.width, sz.height));
+                    }
+                    let res = res.unwrap_or(kb_core::run::RunResult {
+                        exit_code: 1,
+                        duration: Duration::ZERO,
+                        killed_by_signal: None,
+                    });
+                    let _ = ui_kb.record_use(&id, SystemTime::now());
+                    let now = Instant::now();
+                    if res.exit_code == 0 && !settings.run_pause_after() {
+                        state.run_modal = None;
+                        pending.extend(state.update(
+                            Action::CopyDone(CopyReport {
+                                message: format!("Command completed in {:?}", res.duration),
+                                sent: false,
+                            }),
+                            now,
+                        ));
+                    } else {
+                        state.run_modal = Some(Box::new(RunModalState::Paused {
+                            id,
+                            exit_code: res.exit_code,
+                            duration: res.duration,
+                        }));
+                    }
+                    dirty = true;
+                }
                 Effect::SubmitForm(sub) => {
                     let now = Instant::now();
                     match recheck(&ui_kb, &sub) {
@@ -241,6 +335,38 @@ pub fn run(
                                 );
                                 pending.extend(state.update(Action::CopyDone(report), now));
                                 pending.extend(state.update(Action::FormDone, now));
+                            }
+                            Then::Run => {
+                                let entry = ui_kb.entry(&sub.id).unwrap();
+                                let mut map = kb_core::varres::Values::new();
+                                for (name, val, _source) in &sub.values {
+                                    map.insert(name.clone(), val.clone());
+                                }
+                                match kb_core::run::RunService::build_run_plan(
+                                    &entry,
+                                    &map,
+                                    None,
+                                    settings.run_destructive_patterns(),
+                                ) {
+                                    Ok(plan) => {
+                                        pending.extend(state.update(Action::FormDone, now));
+                                        pending.extend(state.update(
+                                            Action::OpenRunModal {
+                                                id: sub.id.clone(),
+                                                plan,
+                                            },
+                                            now,
+                                        ));
+                                    }
+                                    Err(e) => {
+                                        let report = CopyReport {
+                                            message: format!("cannot run: {e}"),
+                                            sent: false,
+                                        };
+                                        pending.extend(state.update(Action::CopyDone(report), now));
+                                        pending.extend(state.update(Action::FormDone, now));
+                                    }
+                                }
                             }
                         },
                         Recheck::Changed(spec) => {
@@ -676,7 +802,10 @@ fn open_in_tui(
         }
         EntryType::Sumo => {
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 match kb.pick(id, PrintMode::Payload) {
                     Ok(p) => p,
@@ -716,11 +845,7 @@ fn open_in_tui(
                 };
             };
 
-            let link = match ConsoleService::build_sumo_link(
-                base_url,
-                &query,
-                range.as_deref(),
-            ) {
+            let link = match ConsoleService::build_sumo_link(base_url, &query, range.as_deref()) {
                 Ok(l) => l,
                 Err(e) => {
                     return CopyReport {
@@ -775,7 +900,10 @@ fn open_in_tui(
             };
 
             let query = if let Some(resolved) = &resolved_result {
-                resolved.primary().map(|o| o.text.clone()).unwrap_or_default()
+                resolved
+                    .primary()
+                    .map(|o| o.text.clone())
+                    .unwrap_or_default()
             } else {
                 match kb.pick(id, PrintMode::Payload) {
                     Ok(p) => p,
