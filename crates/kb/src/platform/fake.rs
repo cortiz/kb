@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use super::{
     ConfigPaths, CopyTool, Editor, Environment, GitOutput, MAX_READ_BYTES, NativeTool, Opened,
-    OpenerCommand, Os, Platform, TempFile, ToolError, clipboard, config_paths,
+    OpenerCommand, Os, Platform, RunResult, TempFile, ToolError, clipboard, config_paths,
 };
 
 /// How a fake clipboard program behaves. A program that is not in the table is not installed.
@@ -54,6 +54,12 @@ pub enum Call {
     RunReadTool { tool: String },
     RunGit { args: Vec<String> },
     PrivateTempFile { extension: String },
+    RunInteractiveCommand {
+        shell: String,
+        command: String,
+        cwd: Option<PathBuf>,
+        env_vars: Vec<(String, String)>,
+    },
 }
 
 pub struct FakePlatform {
@@ -72,6 +78,7 @@ pub struct FakePlatform {
     edit: Option<EditEffect>,
     /// The editor's exit status.
     pub editor_exit: i32,
+    pub interactive_result: RefCell<Option<RunResult>>,
     calls: RefCell<Vec<Call>>,
 }
 
@@ -110,8 +117,14 @@ impl FakePlatform {
             git: None,
             edit: None,
             editor_exit: 0,
+            interactive_result: RefCell::new(None),
             calls: RefCell::new(Vec::new()),
         }
+    }
+
+    pub fn with_interactive_result(self, result: RunResult) -> FakePlatform {
+        *self.interactive_result.borrow_mut() = Some(result);
+        self
     }
 
     pub fn with_tool(mut self, name: &str, behaviour: FakeTool) -> FakePlatform {
@@ -353,6 +366,29 @@ impl Platform for FakePlatform {
         }
         Ok(Some(ExitStatus::from_raw(self.editor_exit << 8)))
     }
+
+    fn run_interactive_command(
+        &self,
+        shell: &str,
+        command: &str,
+        cwd: Option<&Path>,
+        env_vars: &[(String, String)],
+    ) -> io::Result<RunResult> {
+        self.record(Call::RunInteractiveCommand {
+            shell: shell.to_string(),
+            command: command.to_string(),
+            cwd: cwd.map(Path::to_path_buf),
+            env_vars: env_vars.to_vec(),
+        });
+        if let Some(res) = self.interactive_result.borrow().as_ref() {
+            return Ok(res.clone());
+        }
+        Ok(RunResult {
+            exit_code: 0,
+            duration: Duration::from_millis(5),
+            killed_by_signal: None,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -440,6 +476,14 @@ mod tests {
         let path = temp.path().to_path_buf();
         drop(temp);
         assert!(!path.exists(), "dropped temp files are deleted");
+        let res = p.run_interactive_command("sh", "echo ok", None, &[]).unwrap();
+        assert_eq!(res.exit_code, 0);
+        assert!(p.calls().contains(&Call::RunInteractiveCommand {
+            shell: "sh".into(),
+            command: "echo ok".into(),
+            cwd: None,
+            env_vars: Vec::new(),
+        }));
     }
 
     #[test]

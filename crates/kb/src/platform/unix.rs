@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use super::{
     CopyTool, Display, Editor, Environment, GitOutput, MAX_READ_BYTES, NativeTool, Opened,
-    OpenerCommand, TempFile, ToolError, pick_editor,
+    OpenerCommand, RunResult, TempFile, ToolError, pick_editor,
 };
 
 /// Whether the TUI can talk to a user: stdin is a terminal, or the controlling terminal opens.
@@ -79,6 +79,53 @@ fn wait_unless_interrupted(
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
+}
+
+/// Runs an interactive command in the terminal, capturing exit code / signal termination and timing.
+pub fn run_interactive_command(
+    shell: &str,
+    command: &str,
+    cwd: Option<&Path>,
+    env_vars: &[(String, String)],
+) -> io::Result<RunResult> {
+    use std::os::unix::process::ExitStatusExt;
+
+    let start = Instant::now();
+    let mut cmd = Command::new(shell);
+    cmd.arg("-c").arg(command);
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    for (k, v) in env_vars {
+        cmd.env(k, v);
+    }
+
+    if let Ok(tty) = open_tty()
+        && let (Ok(in_f), Ok(out_f), Ok(err_f)) =
+            (tty.try_clone(), tty.try_clone(), tty.try_clone())
+    {
+        cmd.stdin(Stdio::from(in_f))
+            .stdout(Stdio::from(out_f))
+            .stderr(Stdio::from(err_f));
+    }
+
+    let mut child = cmd.spawn()?;
+    let status = child.wait()?;
+    let duration = start.elapsed();
+
+    let (exit_code, killed_by_signal) = match status.code() {
+        Some(code) => (code, None),
+        None => {
+            let sig = status.signal().unwrap_or(0);
+            (128 + sig, Some(sig))
+        }
+    };
+
+    Ok(RunResult {
+        exit_code,
+        duration,
+        killed_by_signal,
+    })
 }
 
 // ---- programs on PATH ----
@@ -747,5 +794,34 @@ mod tests {
         assert_eq!(inside.stdout.trim(), "true");
         let bad = run_git(d.path(), &["no-such-subcommand"], Duration::from_secs(10)).unwrap();
         assert!(!bad.success() && !bad.stderr.is_empty());
+    }
+
+    #[test]
+    fn run_interactive_command_execution_and_signal_mapping() {
+        let res = run_interactive_command("sh", "exit 42", None, &[]).unwrap();
+        assert_eq!(res.exit_code, 42);
+        assert!(res.killed_by_signal.is_none());
+        assert!(res.duration.as_millis() < 5000);
+
+        let res_sig = run_interactive_command("sh", "kill -TERM $$", None, &[]).unwrap();
+        assert_eq!(res_sig.exit_code, 128 + 15);
+        assert_eq!(res_sig.killed_by_signal, Some(15));
+
+        let d = tempfile::tempdir().unwrap();
+        let res_env = run_interactive_command(
+            "sh",
+            "test -f marker && test \"$MY_VAR\" = 'special'",
+            Some(d.path()),
+            &[("MY_VAR".to_string(), "special".to_string())],
+        );
+        assert_eq!(res_env.unwrap().exit_code, 1);
+        std::fs::write(d.path().join("marker"), "ok").unwrap();
+        let res_env2 = run_interactive_command(
+            "sh",
+            "test -f marker && test \"$MY_VAR\" = 'special'",
+            Some(d.path()),
+            &[("MY_VAR".to_string(), "special".to_string())],
+        );
+        assert_eq!(res_env2.unwrap().exit_code, 0);
     }
 }

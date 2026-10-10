@@ -134,4 +134,14 @@ impl Platform for MacOs {
     ) -> std::io::Result<Option<std::process::ExitStatus>> {
         super::unix::run_editor(editor, path, tty, interrupt)
     }
+
+    fn run_interactive_command(
+        &self,
+        shell: &str,
+        command: &str,
+        cwd: Option<&Path>,
+        env_vars: &[(String, String)],
+    ) -> std::io::Result<super::RunResult> {
+        super::unix::run_interactive_command(shell, command, cwd, env_vars)
+    }
 }

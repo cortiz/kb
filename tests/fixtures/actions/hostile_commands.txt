@@ -1,0 +1,31 @@
+# 30 hostile and destructive commands for testing FR-019 and SC-002
+rm -rf /
+rm -r /tmp/old_data
+rm -f -r /var/log/*
+rm -rf ./target
+kubectl delete namespace prod
+kubectl delete pod -l app=api
+kubectl delete deployment/authorizer
+terraform destroy
+terraform destroy -auto-approve
+terraform apply -auto-approve
+helm uninstall auth-service
+helm uninstall ingress -n ingress-nginx
+aws ec2 terminate-instances --instance-ids i-1234567890
+aws s3 rm s3://prod-backups --recursive
+aws rds delete-db-instance --db-instance-identifier prod-db
+aws lambda delete-function --function-name auth0-authorizer
+aws dynamodb delete-table --table-name sessions
+git push --force origin main
+git push -f origin master
+git push origin +feature/x:main
+git reset --hard HEAD~1
+git reset --hard origin/main
+DROP DATABASE production;
+DROP TABLE users;
+DROP SCHEMA public CASCADE;
+TRUNCATE TABLE audit_logs;
+TRUNCATE events;
+DELETE FROM accounts;
+cat image.iso > /dev/sda
+dd if=/dev/zero of=/dev/nvme0n1

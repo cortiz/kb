@@ -73,7 +73,9 @@ impl Environment {
         let var = |name: &str| get(name).filter(|v| !v.is_empty());
         let set = |name: &str| var(name).is_some();
         let tmux = set("TMUX");
+        let ssh = set("SSH_CONNECTION") || set("SSH_TTY") || set("SSH_CLIENT");
         let display = match os {
+            Os::MacOs if ssh => Display::None,
             Os::MacOs => Display::Quartz,
             Os::Linux if set("WAYLAND_DISPLAY") => Display::Wayland,
             Os::Linux if set("DISPLAY") => Display::X11,
@@ -84,7 +86,7 @@ impl Environment {
             arch: arch.to_string(),
             display,
             x11: os == Os::Linux && set("DISPLAY"),
-            ssh: set("SSH_CONNECTION") || set("SSH_TTY") || set("SSH_CLIENT"),
+            ssh,
             tmux,
             screen: set("STY") && !tmux,
             true_color: var("COLORTERM")
@@ -179,6 +181,14 @@ mod tests {
         assert_eq!(
             detect(Os::MacOs, &[("DISPLAY", ":0")]).display,
             Display::Quartz
+        );
+    }
+
+    #[test]
+    fn macos_over_ssh_has_no_display() {
+        assert_eq!(
+            detect(Os::MacOs, &[("SSH_CONNECTION", "1.2.3.4 22")]).display,
+            Display::None
         );
     }
 

@@ -148,6 +148,8 @@ impl Mode {
 pub enum Command {
     Pick,
     Copy,
+    /// Ctrl-O: open the link, console deep link, or code view.
+    Open,
     /// Alt-C: copy the payload with its `{{variables}}` left in.
     CopyTemplate,
     Edit,
@@ -275,6 +277,15 @@ pub const BINDINGS: &[Binding] = &[
         display: "Ctrl-Y",
         label: "copy the payload and stay open",
         bar: bar(4, 4, "^Y copy"),
+    },
+    Binding {
+        keys: &[ctrl('o')],
+        modes: SF,
+        command: Command::Open,
+        group: Group::Pick,
+        display: "Ctrl-O",
+        label: "open the link, console or code view",
+        bar: bar(6, 6, "^O open"),
     },
     Binding {
         keys: &[Key::new(Code::Char('c'), ALT)],
@@ -710,6 +721,7 @@ pub fn short_label(c: Command) -> &'static str {
         Command::Pick => "pick and exit",
         Command::Copy => "copy payload",
         Command::CopyTemplate => "copy template",
+        Command::Open => "open",
         Command::Edit => "edit entry",
         Command::AddEntry => "add entry",
         Command::RenameEntry => "rename entry",
