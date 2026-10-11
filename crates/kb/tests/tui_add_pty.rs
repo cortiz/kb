@@ -85,7 +85,7 @@ fn an_empty_clipboard_opens_the_form_on_the_type() {
     s.wait_for("entries");
     s.send(CTRL_N);
     s.wait_for("New entry · empty");
-    assert!(s.screen().contains("▸Type"), "{}", s.screen());
+    s.wait_for("▸Type");
     s.send(CTRL_C);
 }
 

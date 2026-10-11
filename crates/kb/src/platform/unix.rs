@@ -444,6 +444,93 @@ pub fn tmux_allows_passthrough(env: &Environment) -> Option<bool> {
     })
 }
 
+pub fn parse_tmux_version(s: &str) -> Option<(u32, u32)> {
+    let text = s.trim().strip_prefix("tmux")?.trim();
+    let text = text.strip_prefix("next-").unwrap_or(text);
+    let mut parts = text.split('.');
+    let maj = parts.next()?.parse::<u32>().ok()?;
+    let min_part = parts.next()?;
+    let min_digits: String = min_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let min = min_digits.parse::<u32>().ok()?;
+    Some((maj, min))
+}
+
+pub fn is_tmux_popup_supported(env: &Environment) -> bool {
+    if !env.tmux {
+        return false;
+    }
+    let output = Command::new("tmux").arg("-V").output().ok();
+    let Some(output) = output else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let ver_str = String::from_utf8_lossy(&output.stdout);
+    parse_tmux_version(&ver_str).map_or(false, |(maj, min)| {
+        maj > 3 || (maj == 3 && min >= 2)
+    })
+}
+
+pub fn run_tmux_popup(
+    title: &str,
+    width: &str,
+    height: &str,
+    command: &str,
+) -> io::Result<(Option<i32>, String)> {
+    let tmp_dir = std::env::temp_dir();
+    let pid = std::process::id();
+    let rand: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let temp_file = tmp_dir.join(format!("kb-pick-{pid}-{rand}.out"));
+    let temp_status = tmp_dir.join(format!("kb-pick-{pid}-{rand}.status"));
+
+    let shell_cmd = format!(
+        "{} > \"{}\"; echo $? > \"{}\"",
+        command,
+        temp_file.display(),
+        temp_status.display(),
+    );
+
+    let mut cmd = Command::new("tmux");
+    cmd.args([
+        "display-popup",
+        "-E",
+        "-w",
+        width,
+        "-h",
+        height,
+        "-T",
+        title,
+        "sh",
+        "-c",
+        &shell_cmd,
+    ]);
+
+    let _ = cmd.status()?;
+
+    let exit_code = if temp_status.exists() {
+        std::fs::read_to_string(&temp_status)
+            .ok()
+            .and_then(|s| s.trim().parse::<i32>().ok())
+    } else {
+        None
+    };
+
+    let output = if temp_file.exists() {
+        std::fs::read_to_string(&temp_file).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let _ = std::fs::remove_file(&temp_file);
+    let _ = std::fs::remove_file(&temp_status);
+
+    Ok((exit_code, output))
+}
+
 // ---- opening ----
 
 /// Over SSH with no display there is nothing to open a browser on.
@@ -892,4 +979,15 @@ mod tests {
             "piped content from stdin"
         );
     }
+
+    #[test]
+    fn test_parse_tmux_version() {
+        assert_eq!(parse_tmux_version("tmux 3.2"), Some((3, 2)));
+        assert_eq!(parse_tmux_version("tmux 3.2a"), Some((3, 2)));
+        assert_eq!(parse_tmux_version("tmux next-3.4"), Some((3, 4)));
+        assert_eq!(parse_tmux_version("tmux 2.9"), Some((2, 9)));
+        assert_eq!(parse_tmux_version("tmux 10.1"), Some((10, 1)));
+        assert_eq!(parse_tmux_version("invalid"), None);
+    }
 }
+

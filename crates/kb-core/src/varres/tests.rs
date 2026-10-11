@@ -553,3 +553,45 @@ fn a_preview_keeps_placeholders_for_missing_or_invalid_values() {
     assert_eq!(marked, vec!["'b c'", "••••"]);
     assert!(resolve(&p, &v).is_err());
 }
+
+#[test]
+fn test_shell_widget_secret_with_env_resolves_to_env_var_ref() {
+    let e = cmd(
+        "vars:\n  token: { kind: secret, env: SUMO_TOKEN }\n  env: { kind: text }\n",
+        "curl -H \"Authorization: Bearer {{token}}\" https://api.sumo.com/{{env}}",
+    );
+    let p = plan(&e);
+    let v = values(&[("env", "prod")]);
+    let r = resolve_for_target(&p, &v, ResolutionTarget::ShellWidget(ShellDialect::Zsh)).unwrap();
+    assert_eq!(
+        r.primary().unwrap().text,
+        "curl -H \"Authorization: Bearer $SUMO_TOKEN\" https://api.sumo.com/prod\n"
+    );
+
+    // Unquoted secret gets quoted in shell widget mode
+    let e2 = cmd(
+        "vars:\n  token: { kind: secret, env: SUMO_TOKEN }\n",
+        "mycli --token {{token}}",
+    );
+    let p2 = plan(&e2);
+    let r2 = resolve_for_target(&p2, &Values::new(), ResolutionTarget::ShellWidget(ShellDialect::Bash)).unwrap();
+    assert_eq!(
+        r2.primary().unwrap().text,
+        "mycli --token \"$SUMO_TOKEN\"\n"
+    );
+}
+
+#[test]
+fn test_shell_widget_secret_without_env_returns_error() {
+    let e = cmd(
+        "vars:\n  secret_no_env: { kind: secret }\n",
+        "mycli --pass {{secret_no_env}}",
+    );
+    let p = plan(&e);
+    let errs = resolve_for_target(&p, &Values::new(), ResolutionTarget::ShellWidget(ShellDialect::Zsh)).unwrap_err();
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0].name, "secret_no_env");
+    assert!(errs[0].message.contains("no environment variable source"));
+    assert!(errs[0].message.contains("use kb run"));
+}
+

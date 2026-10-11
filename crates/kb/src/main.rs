@@ -13,6 +13,7 @@ use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
 use kb_cli::commands::{self, CodeCommand, ShowMode, ShowOptions};
+use kb_cli::commands::pick::PickArgs;
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
 use kb_cli::varcli::VarArgs;
@@ -389,6 +390,16 @@ enum Command {
     /// Check, re-pin or inspect code links.
     #[command(subcommand)]
     Code(CodeCommand),
+    /// Pick an entry interactively or from scripts.
+    Pick(PickArgs),
+    /// Setup, install, or inspect shell integration.
+    #[command(subcommand)]
+    Shell(commands::shell::ShellCommand),
+    /// Print shell completions.
+    Completions(commands::shell::CompletionsArgs),
+    /// Hidden dynamic completion helper for shell completion scripts.
+    #[command(name = "__complete", hide = true)]
+    Complete(commands::complete::CompleteArgs),
 }
 
 #[derive(Subcommand)]
@@ -547,6 +558,10 @@ fn main() -> ExitCode {
             CodeCommand::Repin(_) => false,
             CodeCommand::Show(a) => a.json,
         },
+        Command::Pick(a) => a.widget,
+        Command::Shell(_) => false,
+        Command::Completions(_) => false,
+        Command::Complete(_) => false,
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -583,7 +598,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         ..RootInputs::default()
     };
     let root = resolve_root(&inputs).map_err(|e| CliError::new("config", e.to_string()))?;
-    if !matches!(cli.command, Command::Tui(_)) {
+    if !matches!(cli.command, Command::Tui(_) | Command::Pick(_)) {
         print_config_warnings(&loaded);
     }
     match cli.command {
@@ -671,6 +686,12 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             ConfigCommand::List(a) => commands::config_list(&loaded, a.json),
         },
         Command::Code(args) => commands::run_code(&platform, &root, &loaded, &args),
+        Command::Pick(args) => commands::pick::run_pick(&platform, &root, &loaded, &args),
+        Command::Shell(args) => commands::shell::run_shell(&platform, &loaded, &args),
+        Command::Completions(args) => {
+            commands::shell::run_completions(&args, &mut <Cli as clap::CommandFactory>::command())
+        }
+        Command::Complete(args) => commands::complete::run_complete(&platform, &root, &args),
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }

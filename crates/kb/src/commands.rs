@@ -1,6 +1,9 @@
 pub mod clone;
+pub mod complete;
 pub mod history;
 pub mod hooks;
+pub mod pick;
+pub mod shell;
 pub mod sync;
 
 use std::io::{IsTerminal, Write};

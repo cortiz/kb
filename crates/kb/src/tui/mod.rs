@@ -10,6 +10,8 @@ pub mod form;
 pub mod form_view;
 pub mod highlight;
 pub mod history_view;
+pub mod inline_form;
+pub mod inline_picker;
 pub mod input;
 pub mod keys;
 pub mod layout;

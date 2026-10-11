@@ -64,6 +64,20 @@ impl Platform for Linux {
         super::unix::tmux_allows_passthrough(&self.env())
     }
 
+    fn is_tmux_popup_supported(&self) -> bool {
+        super::unix::is_tmux_popup_supported(&self.env())
+    }
+
+    fn run_tmux_popup(
+        &self,
+        title: &str,
+        width: &str,
+        height: &str,
+        command: &str,
+    ) -> std::io::Result<(Option<i32>, String)> {
+        super::unix::run_tmux_popup(title, width, height, command)
+    }
+
     fn write_tty(&self, bytes: &[u8]) -> std::io::Result<()> {
         super::unix::write_tty(bytes)
     }

@@ -441,33 +441,84 @@ fn escape_value(
     }
 }
 
-/// Validates `values` and substitutes them, in one pass over each string. Returns every problem
-/// found, not just the first, and nothing partially resolved.
-pub fn resolve(plan: &VarPlan, values: &Values) -> Result<Resolved, Vec<VarError>> {
-    let errors: Vec<VarError> = plan
-        .vars
-        .iter()
-        .filter_map(|p| match values.get(&p.var.name) {
-            Some(v) => validate(&p.var, v).err(),
-            None => Some(VarError {
-                name: p.var.name.clone(),
-                message: "a value is required".into(),
-            }),
-        })
-        .collect();
+use crate::shell::ShellDialect;
+
+/// Where resolved output is destined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolutionTarget {
+    Standard,
+    ShellWidget(ShellDialect),
+}
+
+/// Resolves variables with target destination rules.
+pub fn resolve_for_target(
+    plan: &VarPlan,
+    values: &Values,
+    target: ResolutionTarget,
+) -> Result<Resolved, Vec<VarError>> {
+    let mut errors = Vec::new();
+    for p in &plan.vars {
+        if p.var.kind == VarKind::Secret {
+            if let ResolutionTarget::ShellWidget(_) = target {
+                if p.var.env.is_none() {
+                    errors.push(VarError {
+                        name: p.var.name.clone(),
+                        message: format!(
+                            "secret variable '{}' has no environment variable source; command line insertion refused (use kb run)",
+                            p.var.name
+                        ),
+                    });
+                }
+                continue;
+            }
+        }
+        match values.get(&p.var.name) {
+            Some(v) => {
+                if let Err(e) = validate(&p.var, v) {
+                    errors.push(e);
+                }
+            }
+            None => {
+                errors.push(VarError {
+                    name: p.var.name.clone(),
+                    message: "a value is required".into(),
+                });
+            }
+        }
+    }
     if !errors.is_empty() {
         return Err(errors);
     }
-    Ok(substitute(plan, values, false))
+    Ok(substitute_target(plan, values, false, target))
+}
+
+/// Validates `values` and substitutes them, in one pass over each string. Returns every problem
+/// found, not just the first, and nothing partially resolved.
+pub fn resolve(plan: &VarPlan, values: &Values) -> Result<Resolved, Vec<VarError>> {
+    resolve_for_target(plan, values, ResolutionTarget::Standard)
 }
 
 /// The same substitution for a live preview: a variable without a valid value keeps its
 /// `{{name}}` placeholder instead of failing.
 pub fn preview(plan: &VarPlan, values: &Values) -> Resolved {
-    substitute(plan, values, true)
+    preview_for_target(plan, values, ResolutionTarget::Standard)
 }
 
-fn substitute(plan: &VarPlan, values: &Values, lenient: bool) -> Resolved {
+/// Live preview with a specific resolution target.
+pub fn preview_for_target(
+    plan: &VarPlan,
+    values: &Values,
+    target: ResolutionTarget,
+) -> Resolved {
+    substitute_target(plan, values, true, target)
+}
+
+fn substitute_target(
+    plan: &VarPlan,
+    values: &Values,
+    lenient: bool,
+    target: ResolutionTarget,
+) -> Resolved {
     let mut outputs = Vec::new();
     let mut has_secret = false;
     for t in &plan.templates {
@@ -482,6 +533,26 @@ fn substitute(plan: &VarPlan, values: &Values, lenient: bool) -> Resolved {
                 }
                 Piece::Ref(name) => {
                     let p = plan.var(name).expect("planned");
+                    if p.var.kind == VarKind::Secret {
+                        if let ResolutionTarget::ShellWidget(dialect) = target {
+                            if let Some(env_name) = &p.var.env {
+                                let start = text.len();
+                                let ref_str = match state {
+                                    Quote::Double => format!("${env_name}"),
+                                    Quote::None | Quote::Single => dialect.env_var_ref(env_name),
+                                };
+                                text.push_str(&ref_str);
+                                has_secret = true;
+                                spans.push(Span {
+                                    range: start..text.len(),
+                                    name: name.clone(),
+                                    secret: true,
+                                });
+                                state = escape::advance(state, &ref_str);
+                                continue;
+                            }
+                        }
+                    }
                     let value = values
                         .get(name)
                         .filter(|v| !lenient || validate(&p.var, v).is_ok());
