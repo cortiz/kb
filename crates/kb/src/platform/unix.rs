@@ -316,6 +316,25 @@ pub fn run_git(root: &Path, args: &[&str], timeout: Duration) -> Result<GitOutpu
     })
 }
 
+/// `git -C <root> <args>` run interactively with the controlling terminal connected.
+pub fn run_git_interactive(root: &Path, args: &[&str]) -> Result<ExitStatus, ToolError> {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C").arg(root).args(args);
+    if let Ok(tty) = open_tty() {
+        if let (Ok(in_f), Ok(out_f), Ok(err_f)) = (tty.try_clone(), tty.try_clone(), tty.try_clone()) {
+            cmd.stdin(Stdio::from(in_f))
+                .stdout(Stdio::from(out_f))
+                .stderr(Stdio::from(err_f));
+        }
+    }
+    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => ToolError::NotFound,
+        _ => ToolError::Io(e.to_string()),
+    })?;
+    let status = child.wait().map_err(|e| ToolError::Io(e.to_string()))?;
+    Ok(status)
+}
+
 /// `kb-<pid>-<random>.<extension>` in the system temp directory, created new with mode `0600`.
 pub fn private_temp_file(extension: &str, contents: &[u8]) -> io::Result<TempFile> {
     use std::os::unix::fs::OpenOptionsExt;

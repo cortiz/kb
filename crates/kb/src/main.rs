@@ -654,10 +654,10 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             args.json,
         ),
         Command::Mv(args) => {
-            kb_cli::author::run_mv(&platform, &root, &args.id, &args.new_id, args.json)
+            kb_cli::author::run_mv(&platform, &root, &loaded, &args.id, &args.new_id, args.json)
         }
         Command::Rm(args) => {
-            kb_cli::author::run_rm(&platform, &root, &args.id, args.yes, args.json)
+            kb_cli::author::run_rm(&platform, &root, &loaded, &args.id, args.yes, args.json)
         }
         Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
         Command::Doctor(a) => commands::run_doctor(&platform, &root, &loaded, a.copy_test, a.json),

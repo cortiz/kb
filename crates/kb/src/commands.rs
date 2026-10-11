@@ -1,4 +1,7 @@
-//! Commands that do what a TUI action does, so every TUI action is scriptable.
+pub mod clone;
+pub mod history;
+pub mod hooks;
+pub mod sync;
 
 use std::io::{IsTerminal, Write};
 use std::path::Path;
@@ -2154,6 +2157,19 @@ pub fn run_code_repin(
         CodeService::repin_entry(&entry_path, &current_content, report, today).map_err(|e| {
             CliError::new("repin_failed", format!("cannot repin {}: {e}", entry.id()))
         })?;
+
+        let rel = std::path::PathBuf::from(entry.path());
+        let outcome = kb_core::git::commit::auto_commit_operation(
+            root,
+            &crate::platform::SystemGitRunner,
+            &loaded.settings,
+            kb_core::git::commit::AutoCommitAction::Repin,
+            entry.id(),
+            &[rel],
+        );
+        if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+            eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+        }
 
         println!("re-pinned {}", entry.id());
     }

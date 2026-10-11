@@ -241,6 +241,8 @@ pub trait Platform {
         args: &[&str],
         timeout: Duration,
     ) -> Result<GitOutput, ToolError>;
+    /// `git -C <root> <args>` with terminal connected for interactive prompts (passphrases/auth).
+    fn run_git_interactive(&self, root: &Path, args: &[&str]) -> Result<ExitStatus, ToolError>;
     /// A new private file (`kb-<pid>-<random>.<extension>`, mode `0600`) in the system temp
     /// directory holding `contents`.
     fn private_temp_file(&self, extension: &str, contents: &[u8]) -> io::Result<TempFile>;
@@ -349,22 +351,45 @@ fn xdg_or(xdg: Option<&str>, home: Option<&Path>, fallback: &str) -> Option<Path
         .map(|base| base.join("kb"))
 }
 
-/// A [`kb_core::code::GitRunner`] using system git directly within the platform layer.
+/// A [`kb_core::git::GitRunner`] using system git directly within the platform layer.
 #[derive(Debug, Clone, Default)]
 pub struct SystemGitRunner;
 
-impl kb_core::code::GitRunner for SystemGitRunner {
-    fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, kb_core::code::GitError> {
-        let output = unix::run_git(cwd, args, Duration::from_secs(10))
-            .map_err(|e| kb_core::code::GitError::Io(e.to_string()))?;
+impl kb_core::git::GitRunner for SystemGitRunner {
+    fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, kb_core::git::GitError> {
+        let output = unix::run_git(cwd, args, Duration::from_secs(30))
+            .map_err(|e| match e {
+                ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
+                ToolError::TimedOut => kb_core::git::GitError::TimedOut,
+                _ => kb_core::git::GitError::Io(e.to_string()),
+            })?;
         if output.success() {
             Ok(output.stdout)
         } else {
-            Err(kb_core::code::GitError::CommandFailed {
+            Err(kb_core::git::GitError::CommandFailed {
                 exit_code: output.code,
                 stderr: output.stderr,
             })
         }
+    }
+
+    fn run_git_status(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<kb_core::git::GitCommandResult, kb_core::git::GitError> {
+        let output = unix::run_git(cwd, args, timeout)
+            .map_err(|e| match e {
+                ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
+                ToolError::TimedOut => kb_core::git::GitError::TimedOut,
+                _ => kb_core::git::GitError::Io(e.to_string()),
+            })?;
+        Ok(kb_core::git::GitCommandResult {
+            exit_code: output.code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
     }
 }
 

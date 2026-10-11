@@ -66,6 +66,9 @@ pub enum Call {
     RunGit {
         args: Vec<String>,
     },
+    RunGitInteractive {
+        args: Vec<String>,
+    },
     PrivateTempFile {
         extension: String,
     },
@@ -325,6 +328,20 @@ impl Platform for FakePlatform {
         match &self.git {
             Some(script) => script(&args),
             None => Err(ToolError::NotFound),
+        }
+    }
+
+    fn run_git_interactive(&self, _root: &Path, args: &[&str]) -> Result<ExitStatus, ToolError> {
+        use std::os::unix::process::ExitStatusExt;
+        let args: Vec<String> = args.iter().map(|a| (*a).to_string()).collect();
+        self.record(Call::RunGitInteractive { args: args.clone() });
+        match &self.git {
+            Some(script) => {
+                let out = script(&args)?;
+                let code = out.code.unwrap_or(0);
+                Ok(ExitStatus::from_raw(code << 8))
+            }
+            None => Ok(ExitStatus::from_raw(0)),
         }
     }
 

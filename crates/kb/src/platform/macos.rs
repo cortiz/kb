@@ -3,7 +3,7 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::path::{Path, PathBuf};
-
+use std::process::ExitStatus;
 use std::time::Duration;
 
 use super::{
@@ -88,6 +88,10 @@ impl Platform for MacOs {
         timeout: Duration,
     ) -> Result<super::GitOutput, ToolError> {
         super::unix::run_git(root, args, timeout)
+    }
+
+    fn run_git_interactive(&self, root: &Path, args: &[&str]) -> Result<ExitStatus, ToolError> {
+        super::unix::run_git_interactive(root, args)
     }
 
     fn private_temp_file(

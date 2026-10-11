@@ -57,33 +57,7 @@ impl CloneCache {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GitError {
-    CommandFailed {
-        exit_code: Option<i32>,
-        stderr: String,
-    },
-    NotFound(String),
-    Io(String),
-}
-
-impl std::fmt::Display for GitError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            GitError::CommandFailed { exit_code, stderr } => {
-                write!(f, "git command failed ({:?}): {}", exit_code, stderr)
-            }
-            GitError::NotFound(s) => write!(f, "not found: {s}"),
-            GitError::Io(s) => write!(f, "io error: {s}"),
-        }
-    }
-}
-
-impl std::error::Error for GitError {}
-
-pub trait GitRunner {
-    fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, GitError>;
-}
+pub use crate::git::{GitCommandResult, GitError, GitRunner};
 
 /// Normalizes a git remote URL into RemoteHost and canonical `owner/repo` (or path).
 pub fn normalize_remote_url(url: &str) -> (RemoteHost, String) {

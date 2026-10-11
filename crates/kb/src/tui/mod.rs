@@ -5,9 +5,11 @@ pub mod add;
 pub mod add_view;
 pub mod app;
 pub mod code_view;
+pub mod conflict_view;
 pub mod form;
 pub mod form_view;
 pub mod highlight;
+pub mod history_view;
 pub mod input;
 pub mod keys;
 pub mod layout;
@@ -510,6 +512,31 @@ pub fn run(
 
                     match repin_res {
                         Ok(()) => {
+                            let rel = std::path::PathBuf::from(format!("{id}.md"));
+                            let is_signing = kb_core::git::commit::is_signing_configured(
+                                ui_kb.root(),
+                                &crate::platform::SystemGitRunner,
+                            );
+                            if is_signing {
+                                guard.suspend();
+                            }
+                            let outcome = kb_core::git::commit::auto_commit_operation(
+                                ui_kb.root(),
+                                &crate::platform::SystemGitRunner,
+                                &state.options.settings,
+                                kb_core::git::commit::AutoCommitAction::Repin,
+                                &id,
+                                &[rel],
+                            );
+                            if is_signing {
+                                let _ = guard.resume();
+                                if let Ok(size) = terminal.size() {
+                                    let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                                }
+                            }
+                            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+                                state.say("Git identity unset: commit skipped", crate::tui::app::MessageKind::Warning, Instant::now(), true);
+                            }
                             if let Ok(cv) =
                                 code_view::load_code_view_state(&ui_kb, &id, &settings, false)
                             {
@@ -749,7 +776,34 @@ pub fn run(
                 Effect::SaveDraft(draft) => {
                     let clock = crate::author::clock();
                     let action = match crate::author::save_new(&mut ui_kb, &draft, clock.as_ref()) {
-                        Ok(saved) => Action::Saved(saved.id),
+                        Ok(saved) => {
+                            let rel_path = PathBuf::from(format!("{}.md", saved.id));
+                            let is_signing = kb_core::git::commit::is_signing_configured(
+                                ui_kb.root(),
+                                &crate::platform::SystemGitRunner,
+                            );
+                            if is_signing {
+                                guard.suspend();
+                            }
+                            let outcome = kb_core::git::commit::auto_commit_operation(
+                                ui_kb.root(),
+                                &crate::platform::SystemGitRunner,
+                                &state.options.settings,
+                                kb_core::git::commit::AutoCommitAction::Add,
+                                &saved.id,
+                                &[rel_path],
+                            );
+                            if is_signing {
+                                let _ = guard.resume();
+                                if let Ok(size) = terminal.size() {
+                                    let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                                }
+                            }
+                            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+                                state.say("Git identity unset: commit skipped", crate::tui::app::MessageKind::Warning, Instant::now(), true);
+                            }
+                            Action::Saved(saved.id)
+                        }
                         Err(e) => Action::SaveFailed(e.message()),
                     };
                     pending.extend(state.update(action, Instant::now()));
@@ -758,21 +812,47 @@ pub fn run(
                 Effect::Added(id) => added = Some(id),
                 Effect::RenameEntry { from, to } => {
                     let to = to.strip_suffix(".md").unwrap_or(&to).to_string();
-                    let action = match crate::author::move_entry(platform, &mut ui_kb, &from, &to) {
+                    let is_signing = kb_core::git::commit::is_signing_configured(
+                        ui_kb.root(),
+                        &crate::platform::SystemGitRunner,
+                    );
+                    if is_signing {
+                        guard.suspend();
+                    }
+                    let action = match crate::author::move_entry(platform, &mut ui_kb, &from, &to, &state.options.settings) {
                         Ok((renamed, _)) => Action::Renamed {
                             from: renamed.from,
                             to: renamed.to,
                         },
                         Err(e) => Action::OpFailed(e.to_string()),
                     };
+                    if is_signing {
+                        let _ = guard.resume();
+                        if let Ok(size) = terminal.size() {
+                            let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                        }
+                    }
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
                 Effect::RemoveEntry { id } => {
-                    let action = match crate::author::delete_entry(platform, &mut ui_kb, &id) {
+                    let is_signing = kb_core::git::commit::is_signing_configured(
+                        ui_kb.root(),
+                        &crate::platform::SystemGitRunner,
+                    );
+                    if is_signing {
+                        guard.suspend();
+                    }
+                    let action = match crate::author::delete_entry(platform, &mut ui_kb, &id, &state.options.settings) {
                         Ok(_) => Action::Removed(id),
                         Err(e) => Action::OpFailed(e.to_string()),
                     };
+                    if is_signing {
+                        let _ = guard.resume();
+                        if let Ok(size) = terminal.size() {
+                            let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                        }
+                    }
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }

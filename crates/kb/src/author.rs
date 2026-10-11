@@ -211,7 +211,7 @@ pub fn run_add(
     };
     let mut kb = Kb::open(root).map_err(io_error)?;
     if args.yes {
-        return save_without_asking(&mut kb, &draft, args.json);
+        return save_without_asking(&mut kb, &draft, args.json, &loaded.settings);
     }
     if args.editor {
         return crate::editfile::add_with_editor(platform, &mut kb, loaded, &draft, &args);
@@ -298,7 +298,12 @@ pub fn save_new(kb: &mut Kb, draft: &Draft, clock: &dyn Clock) -> Result<Saved, 
 }
 
 /// `--yes`: save or fail, never ask.
-fn save_without_asking(kb: &mut Kb, draft: &Draft, json: bool) -> Result<ExitCode, CliError> {
+fn save_without_asking(
+    kb: &mut Kb,
+    draft: &Draft,
+    json: bool,
+    settings: &kb_core::config::Settings,
+) -> Result<ExitCode, CliError> {
     let refuse = |message: &str| {
         eprintln!("kb: {message}");
         Ok(ExitCode::from(1))
@@ -333,6 +338,22 @@ fn save_without_asking(kb: &mut Kb, draft: &Draft, json: bool) -> Result<ExitCod
     } else {
         println!("{}", saved.id);
     }
+    let rel_path = saved
+        .path
+        .strip_prefix(kb.root())
+        .unwrap_or(&saved.path)
+        .to_path_buf();
+    let outcome = kb_core::git::commit::auto_commit_operation(
+        kb.root(),
+        &crate::platform::SystemGitRunner,
+        settings,
+        kb_core::git::commit::AutoCommitAction::Add,
+        &saved.id,
+        &[rel_path],
+    );
+    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -358,6 +379,7 @@ pub fn move_entry(
     kb: &mut Kb,
     old: &str,
     new: &str,
+    settings: &kb_core::config::Settings,
 ) -> Result<(kb_core::author::fsops::Renamed, &'static str), FsError> {
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("rename");
@@ -380,6 +402,20 @@ pub fn move_entry(
         std::fs::rename(from, to)
     };
     let renamed = kb.rename_entry(old, new, &mover)?;
+    let old_rel = PathBuf::from(format!("{old}.md"));
+    let new_rel = PathBuf::from(format!("{new}.md"));
+    let mv_id = format!("{old} -> {new}");
+    let outcome = kb_core::git::commit::auto_commit_operation(
+        &root,
+        &crate::platform::SystemGitRunner,
+        settings,
+        kb_core::git::commit::AutoCommitAction::Mv,
+        &mv_id,
+        &[old_rel, new_rel],
+    );
+    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+    }
     Ok((renamed, method.get()))
 }
 
@@ -388,6 +424,7 @@ pub fn delete_entry(
     platform: &impl Platform,
     kb: &mut Kb,
     id: &str,
+    settings: &kb_core::config::Settings,
 ) -> Result<&'static str, FsError> {
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("delete");
@@ -408,6 +445,18 @@ pub fn delete_entry(
         std::fs::remove_file(path)
     };
     kb.remove_entry(id, &remover)?;
+    let rel = PathBuf::from(format!("{id}.md"));
+    let outcome = kb_core::git::commit::auto_commit_operation(
+        &root,
+        &crate::platform::SystemGitRunner,
+        settings,
+        kb_core::git::commit::AutoCommitAction::Rm,
+        id,
+        &[rel],
+    );
+    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+    }
     Ok(method.get())
 }
 
@@ -415,6 +464,7 @@ pub fn delete_entry(
 pub fn run_mv(
     platform: &impl Platform,
     root: &Path,
+    loaded: &Loaded,
     old: &str,
     new: &str,
     json: bool,
@@ -425,7 +475,7 @@ pub fn run_mv(
     if old == new {
         return Ok(ExitCode::SUCCESS);
     }
-    match move_entry(platform, &mut kb, old, new) {
+    match move_entry(platform, &mut kb, old, new, &loaded.settings) {
         Ok((renamed, method)) => {
             if json {
                 println!(
@@ -449,6 +499,7 @@ pub fn run_mv(
 pub fn run_rm(
     platform: &impl Platform,
     root: &Path,
+    loaded: &Loaded,
     id: &str,
     yes: bool,
     json: bool,
@@ -477,7 +528,7 @@ pub fn run_rm(
             return Ok(ExitCode::from(130));
         }
     }
-    match delete_entry(platform, &mut kb, id) {
+    match delete_entry(platform, &mut kb, id, &loaded.settings) {
         Ok(method) => {
             if json {
                 println!("{}", serde_json::json!({ "id": id, "method": method }));

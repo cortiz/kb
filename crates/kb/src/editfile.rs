@@ -182,7 +182,7 @@ pub fn add_with_editor(
         let errors = findings.iter().any(|f| f.severity == Severity::Error);
         if let (Ok(id), false, false, false) = (&id, errors, secrets, too_large) {
             print_findings(&findings);
-            return finish(kb, &tty, id, bytes, findings, args.json);
+            return finish(kb, &tty, id, bytes, findings, args.json, &loaded.settings);
         }
         print_findings(&findings);
         if too_large {
@@ -203,7 +203,7 @@ pub fn add_with_editor(
                 eprintln!(
                     "kb: saved {id} with errors; it stays out of search until they are fixed"
                 );
-                return finish(kb, &tty, &id, bytes, findings, args.json);
+                return finish(kb, &tty, &id, bytes, findings, args.json, &loaded.settings);
             }
         }
     }
@@ -216,6 +216,7 @@ fn finish(
     bytes: Vec<u8>,
     findings: Vec<Finding>,
     json: bool,
+    settings: &kb_core::config::Settings,
 ) -> Result<ExitCode, CliError> {
     let check = Check {
         id: id.to_string(),
@@ -233,6 +234,21 @@ fn finish(
                 println!("{doc}");
             } else {
                 println!("{id}");
+            }
+            let rel = path
+                .strip_prefix(kb.root())
+                .unwrap_or(&path)
+                .to_path_buf();
+            let outcome = kb_core::git::commit::auto_commit_operation(
+                kb.root(),
+                &crate::platform::SystemGitRunner,
+                settings,
+                kb_core::git::commit::AutoCommitAction::Add,
+                id,
+                &[rel],
+            );
+            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+                eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -350,7 +366,21 @@ pub fn edit_entry(
                 .version(&id)
                 .map_err(|e| CliError::new("io", e.to_string()))?;
             match kb.save_edit(&id, &version, clock.as_ref()) {
-                Ok(_) => Ok(ExitCode::SUCCESS),
+                Ok(_) => {
+                    let rel = std::path::PathBuf::from(format!("{id}.md"));
+                    let outcome = kb_core::git::commit::auto_commit_operation(
+                        kb.root(),
+                        &crate::platform::SystemGitRunner,
+                        &loaded.settings,
+                        kb_core::git::commit::AutoCommitAction::Edit,
+                        &id,
+                        &[rel],
+                    );
+                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+                        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+                    }
+                    Ok(ExitCode::SUCCESS)
+                }
                 Err(FsError::Conflict(_)) => {
                     eprintln!("kb: the file changed while it was being saved; run kb edit again");
                     Ok(ExitCode::from(1))
@@ -397,6 +427,18 @@ pub fn edit_entry(
                 return if parses {
                     save(&mut kb)
                 } else {
+                    let rel = std::path::PathBuf::from(format!("{id}.md"));
+                    let outcome = kb_core::git::commit::auto_commit_operation(
+                        kb.root(),
+                        &crate::platform::SystemGitRunner,
+                        &loaded.settings,
+                        kb_core::git::commit::AutoCommitAction::Edit,
+                        &id,
+                        &[rel],
+                    );
+                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
+                        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+                    }
                     Ok(ExitCode::SUCCESS)
                 };
             }

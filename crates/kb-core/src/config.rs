@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The seventeen settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The twenty-two settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -164,6 +164,41 @@ pub const SETTINGS: &[Setting] = &[
         env: "KB_RUN_PAUSE_AFTER",
         doc: "Whether to pause and show exit code and duration after running a command.",
     },
+    Setting {
+        key: "git.auto_commit",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_GIT_AUTO_COMMIT",
+        doc: "Automatically commit entries created, edited, moved, removed, or repinned through kb.",
+    },
+    Setting {
+        key: "git.commit_template",
+        kind: Kind::Text,
+        default: "kb: {action} {id}",
+        env: "KB_GIT_COMMIT_TEMPLATE",
+        doc: "Template used for generating commit messages ({action}, {id}).",
+    },
+    Setting {
+        key: "sync.strategy",
+        kind: Kind::Choice(&["rebase", "merge"]),
+        default: "rebase",
+        env: "KB_SYNC_STRATEGY",
+        doc: "Integration strategy for kb sync: rebase | merge.",
+    },
+    Setting {
+        key: "sync.timeout",
+        kind: Kind::Int,
+        default: "30",
+        env: "KB_SYNC_TIMEOUT",
+        doc: "Foreground network timeout in seconds for fetch and push operations.",
+    },
+    Setting {
+        key: "sync.fetch_on_start",
+        kind: Kind::Bool,
+        default: "false",
+        env: "KB_SYNC_FETCH_ON_START",
+        doc: "Whether the TUI starts a non-blocking background fetch on startup.",
+    },
 ];
 
 /// A value as it was written, before it is checked against the setting's kind.
@@ -261,6 +296,13 @@ pub enum EnterAction {
     Copy,
     Print,
     Primary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncStrategy {
+    #[default]
+    Rebase,
+    Merge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -481,6 +523,29 @@ impl Settings {
 
     pub fn run_pause_after(&self) -> bool {
         self.flag("run.pause_after")
+    }
+
+    pub fn git_auto_commit(&self) -> bool {
+        self.flag("git.auto_commit")
+    }
+
+    pub fn git_commit_template(&self) -> &str {
+        self.text("git.commit_template")
+    }
+
+    pub fn sync_strategy(&self) -> SyncStrategy {
+        match self.text("sync.strategy") {
+            "merge" => SyncStrategy::Merge,
+            _ => SyncStrategy::Rebase,
+        }
+    }
+
+    pub fn sync_timeout(&self) -> u64 {
+        self.text("sync.timeout").parse().unwrap_or(30)
+    }
+
+    pub fn sync_fetch_on_start(&self) -> bool {
+        self.flag("sync.fetch_on_start")
     }
 
     pub fn code_search_paths(&self) -> &[String] {
@@ -1181,7 +1246,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 17, "seventeen settings, no duplicates");
+        assert_eq!(keys.len(), 22, "twenty-two settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -1213,7 +1278,7 @@ mod settings_tests {
         assert_eq!(s.code_default_open(), "web");
         assert_eq!(s.code_web_url(), None);
         assert!(s.run_pause_after());
-        assert_eq!(s.iter().count(), 17);
+        assert_eq!(s.iter().count(), 22);
         assert_eq!(s.path_template(), PathTemplate::default());
     }
 
@@ -1901,5 +1966,38 @@ input = "arg"
         assert_eq!(cmd_act.key, 'd');
         assert_eq!(cmd_act.command, "echo [DRY RUN]: {{payload}}");
         assert_eq!(cmd_act.input, CustomActionInput::Arg);
+    }
+
+    #[test]
+    fn git_and_sync_config_defaults_and_parsing() {
+        let defaults = Settings::defaults();
+        assert!(defaults.git_auto_commit());
+        assert_eq!(defaults.git_commit_template(), "kb: {action} {id}");
+        assert_eq!(defaults.sync_strategy(), SyncStrategy::Rebase);
+        assert_eq!(defaults.sync_timeout(), 30);
+        assert!(!defaults.sync_fetch_on_start());
+
+        let toml = r#"
+[git]
+auto_commit = false
+commit_template = "custom: {action} -> {id}"
+
+[sync]
+strategy = "merge"
+timeout = 45
+fetch_on_start = true
+"#;
+        let l = load_text(toml);
+        assert!(l.warnings.is_empty(), "warnings: {:?}", l.warnings);
+        assert!(!l.settings.git_auto_commit());
+        assert_eq!(l.settings.git_commit_template(), "custom: {action} -> {id}");
+        assert_eq!(l.settings.sync_strategy(), SyncStrategy::Merge);
+        assert_eq!(l.settings.sync_timeout(), 45);
+        assert!(l.settings.sync_fetch_on_start());
+
+        // Test invalid strategy warns and falls back to default
+        let bad = load_text("[sync]\nstrategy = \"invalid\"\n");
+        assert_eq!(bad.warnings.len(), 1);
+        assert_eq!(bad.settings.sync_strategy(), SyncStrategy::Rebase);
     }
 }

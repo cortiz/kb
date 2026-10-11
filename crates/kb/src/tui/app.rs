@@ -458,7 +458,7 @@ impl AppState {
         vec![self.search_effect(PAGE)]
     }
 
-    fn say(&mut self, text: &str, kind: MessageKind, now: Instant, timed: bool) {
+    pub(crate) fn say(&mut self, text: &str, kind: MessageKind, now: Instant, timed: bool) {
         self.message = Some(Message {
             text: text.to_string(),
             kind,
