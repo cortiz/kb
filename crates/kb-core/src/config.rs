@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The twenty-two settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The twenty-eight settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -198,6 +198,48 @@ pub const SETTINGS: &[Setting] = &[
         default: "false",
         env: "KB_SYNC_FETCH_ON_START",
         doc: "Whether the TUI starts a non-blocking background fetch on startup.",
+    },
+    Setting {
+        key: "widget.key",
+        kind: Kind::Text,
+        default: r"\ek",
+        env: "KB_WIDGET_KEY",
+        doc: "Shell key combination bound to open the picker.",
+    },
+    Setting {
+        key: "widget.save_key",
+        kind: Kind::Text,
+        default: r"\eK",
+        env: "KB_WIDGET_SAVE_KEY",
+        doc: "Shell key combination bound to save the previous command.",
+    },
+    Setting {
+        key: "widget.default_type",
+        kind: Kind::Choice(&["cmd", "all"]),
+        default: "cmd",
+        env: "KB_WIDGET_DEFAULT_TYPE",
+        doc: "Default entry type filter in widget mode: cmd | all.",
+    },
+    Setting {
+        key: "widget.buffer",
+        kind: Kind::Choice(&["query", "insert"]),
+        default: "query",
+        env: "KB_WIDGET_BUFFER",
+        doc: "Buffer strategy when prompt has text: query | insert.",
+    },
+    Setting {
+        key: "widget.height",
+        kind: Kind::Text,
+        default: "40%",
+        env: "KB_WIDGET_HEIGHT",
+        doc: "Inline picker height (<N>% or <N> lines).",
+    },
+    Setting {
+        key: "widget.preview",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_WIDGET_PREVIEW",
+        doc: "Show right preview pane in picker on wide terminals (>= 120 cols).",
     },
 ];
 
@@ -546,6 +588,30 @@ impl Settings {
 
     pub fn sync_fetch_on_start(&self) -> bool {
         self.flag("sync.fetch_on_start")
+    }
+
+    pub fn widget_key(&self) -> &str {
+        self.text("widget.key")
+    }
+
+    pub fn widget_save_key(&self) -> &str {
+        self.text("widget.save_key")
+    }
+
+    pub fn widget_default_type(&self) -> &str {
+        self.text("widget.default_type")
+    }
+
+    pub fn widget_buffer(&self) -> &str {
+        self.text("widget.buffer")
+    }
+
+    pub fn widget_height(&self) -> &str {
+        self.text("widget.height")
+    }
+
+    pub fn widget_preview(&self) -> bool {
+        self.flag("widget.preview")
     }
 
     pub fn code_search_paths(&self) -> &[String] {
@@ -1246,7 +1312,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 22, "twenty-two settings, no duplicates");
+        assert_eq!(keys.len(), 28, "twenty-eight settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -1278,7 +1344,7 @@ mod settings_tests {
         assert_eq!(s.code_default_open(), "web");
         assert_eq!(s.code_web_url(), None);
         assert!(s.run_pause_after());
-        assert_eq!(s.iter().count(), 22);
+        assert_eq!(s.iter().count(), 28);
         assert_eq!(s.path_template(), PathTemplate::default());
     }
 
@@ -2000,4 +2066,40 @@ fetch_on_start = true
         assert_eq!(bad.warnings.len(), 1);
         assert_eq!(bad.settings.sync_strategy(), SyncStrategy::Rebase);
     }
+
+    #[test]
+    fn widget_config_defaults_and_parsing() {
+        let defaults = Settings::defaults();
+        assert_eq!(defaults.widget_key(), r"\ek");
+        assert_eq!(defaults.widget_save_key(), r"\eK");
+        assert_eq!(defaults.widget_default_type(), "cmd");
+        assert_eq!(defaults.widget_buffer(), "query");
+        assert_eq!(defaults.widget_height(), "40%");
+        assert!(defaults.widget_preview());
+
+        let toml = r#"
+[widget]
+key = "\\ej"
+save_key = "\\eJ"
+default_type = "all"
+buffer = "insert"
+height = "20"
+preview = false
+"#;
+        let l = load_text(toml);
+        assert!(l.warnings.is_empty(), "warnings: {:?}", l.warnings);
+        assert_eq!(l.settings.widget_key(), r"\ej");
+        assert_eq!(l.settings.widget_save_key(), r"\eJ");
+        assert_eq!(l.settings.widget_default_type(), "all");
+        assert_eq!(l.settings.widget_buffer(), "insert");
+        assert_eq!(l.settings.widget_height(), "20");
+        assert!(!l.settings.widget_preview());
+
+        // Test invalid choices warn and fallback
+        let bad = load_text("[widget]\ndefault_type = \"invalid\"\nbuffer = \"invalid\"\n");
+        assert_eq!(bad.warnings.len(), 2);
+        assert_eq!(bad.settings.widget_default_type(), "cmd");
+        assert_eq!(bad.settings.widget_buffer(), "query");
+    }
 }
+

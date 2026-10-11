@@ -32,7 +32,7 @@ pub struct Session {
     guards: tempfile::TempDir,
     allow_clipboard: bool,
     child: Box<dyn Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     parser: Arc<Mutex<vt100::Parser>>,
     raw: Arc<Mutex<Vec<u8>>>,
@@ -181,11 +181,11 @@ impl Session {
         let child = pair.slave.spawn_command(cmd).expect("spawn");
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().expect("reader");
-        let writer = pair.master.take_writer().expect("writer");
+        let writer = Arc::new(Mutex::new(pair.master.take_writer().expect("writer")));
         let parser = Arc::new(Mutex::new(vt100::Parser::new(spec.size.1, spec.size.0, 0)));
         let raw = Arc::new(Mutex::new(Vec::new()));
         {
-            let (parser, raw) = (Arc::clone(&parser), Arc::clone(&raw));
+            let (parser, raw, writer) = (Arc::clone(&parser), Arc::clone(&raw), Arc::clone(&writer));
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 while let Ok(n) = reader.read(&mut buf) {
@@ -194,6 +194,14 @@ impl Session {
                     }
                     raw.lock().unwrap().extend_from_slice(&buf[..n]);
                     parser.lock().unwrap().process(&buf[..n]);
+                    if buf[..n].windows(4).any(|w| w == b"\x1b[6n") {
+                        let (row, col) = parser.lock().unwrap().screen().cursor_position();
+                        let resp = format!("\x1b[{};{}R", row + 1, col + 1);
+                        if let Ok(mut w) = writer.lock() {
+                            let _ = w.write_all(resp.as_bytes());
+                            let _ = w.flush();
+                        }
+                    }
                 }
             });
         }
@@ -285,8 +293,9 @@ impl Session {
     }
 
     pub fn send(&mut self, bytes: &[u8]) {
-        self.writer.write_all(bytes).expect("write to the pty");
-        self.writer.flush().expect("flush");
+        let mut w = self.writer.lock().unwrap();
+        w.write_all(bytes).expect("write to the pty");
+        w.flush().expect("flush");
     }
 
     pub fn type_text(&mut self, text: &str) {

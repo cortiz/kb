@@ -55,6 +55,13 @@ pub enum Call {
         opener: String,
     },
     TmuxPassthrough,
+    IsTmuxPopupSupported,
+    RunTmuxPopup {
+        title: String,
+        width: String,
+        height: String,
+        command: String,
+    },
     ResolveEditor,
     RunEditor {
         command: String,
@@ -86,6 +93,7 @@ pub struct FakePlatform {
     pub home: Option<PathBuf>,
     pub tools: BTreeMap<String, FakeTool>,
     pub tmux_passthrough: Option<bool>,
+    pub tmux_popup_supported: Option<bool>,
     /// There is a controlling terminal: `has_terminal` is true and `write_tty` works.
     pub terminal: bool,
     /// What `$VISUAL` and `$EDITOR` hold.
@@ -129,6 +137,7 @@ impl FakePlatform {
             home: Some(PathBuf::from("/home/fake")),
             tools: BTreeMap::new(),
             tmux_passthrough: None,
+            tmux_popup_supported: None,
             terminal: true,
             visual: None,
             editor_var: None,
@@ -253,6 +262,27 @@ impl Platform for FakePlatform {
         } else {
             None
         }
+    }
+
+    fn is_tmux_popup_supported(&self) -> bool {
+        self.record(Call::IsTmuxPopupSupported);
+        self.tmux_popup_supported.unwrap_or(false)
+    }
+
+    fn run_tmux_popup(
+        &self,
+        title: &str,
+        width: &str,
+        height: &str,
+        command: &str,
+    ) -> io::Result<(Option<i32>, String)> {
+        self.record(Call::RunTmuxPopup {
+            title: title.to_string(),
+            width: width.to_string(),
+            height: height.to_string(),
+            command: command.to_string(),
+        });
+        Ok((Some(0), String::new()))
     }
 
     fn has_terminal(&self) -> bool {

@@ -188,3 +188,89 @@ code:
         elapsed
     );
 }
+
+#[test]
+fn perf_dynamic_completion_under_50ms() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let kb_root = temp.path().join("kb");
+    fs::create_dir_all(&kb_root).unwrap();
+
+    // Create 1,000 entries
+    for i in 0..1000 {
+        let doc = format!(
+            "---\nkb_format: 1\ntype: cmd\ntitle: Command {i}\ntags: [perf, test]\nshell: bash\n---\n\n```\necho {i}\n```\n"
+        );
+        fs::write(kb_root.join(format!("cmd-{i:04}.md")), doc).unwrap();
+    }
+
+    // Warm index
+    let mut reindex_cmd = AssertCommand::cargo_bin("kb").unwrap();
+    reindex_cmd
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .arg("reindex");
+    let reindex_out = reindex_cmd.output().expect("reindex");
+    assert!(reindex_out.status.success());
+
+    // Benchmark dynamic completion
+    let mut comp_cmd = AssertCommand::cargo_bin("kb").unwrap();
+    comp_cmd
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .args(["__complete", "entries", "cmd-00"]);
+
+    let start = Instant::now();
+    let output = comp_cmd.output().expect("kb __complete entries");
+    let elapsed = start.elapsed();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.is_empty(), "must complete entries");
+    assert!(
+        elapsed.as_millis() <= 50,
+        "dynamic completion took {:?}, budget is <= 50ms",
+        elapsed
+    );
+}
+
+#[test]
+fn perf_picker_startup_under_80ms() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let kb_root = temp.path().join("kb");
+    fs::create_dir_all(&kb_root).unwrap();
+
+    // Warm index with entries
+    for i in 0..100 {
+        let doc = format!(
+            "---\nkb_format: 1\ntype: cmd\ntitle: Entry {i}\nshell: bash\n---\n\n```\necho {i}\n```\n"
+        );
+        fs::write(kb_root.join(format!("entry-{i:03}.md")), doc).unwrap();
+    }
+
+    let mut reindex_cmd = AssertCommand::cargo_bin("kb").unwrap();
+    reindex_cmd
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .arg("reindex");
+    assert!(reindex_cmd.output().unwrap().status.success());
+
+    // Benchmark completions type listing startup
+    let mut comp_cmd = AssertCommand::cargo_bin("kb").unwrap();
+    comp_cmd
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .args(["__complete", "types"]);
+
+    let start = Instant::now();
+    let output = comp_cmd.output().expect("kb __complete types");
+    let elapsed = start.elapsed();
+
+    assert!(output.status.success());
+    assert!(
+        elapsed.as_millis() <= 80,
+        "startup took {:?}, budget is <= 80ms",
+        elapsed
+    );
+}

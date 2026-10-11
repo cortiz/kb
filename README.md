@@ -5,7 +5,7 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
-> Status: milestone M7 (actions, URL generators, code drift detection, action menu, custom actions).
+> Status: milestone M8 (shell integration: prompt widgets for zsh/bash/fish, inline picker, tab completion, pick command, save last command).
 
 ## Install
 
@@ -122,6 +122,12 @@ kb config list                      # every setting, its value and where the val
 | `code.fetch_on_check` | auto-fetch before drift check | `false` |
 | `run.dangerous_patterns` | list of regex patterns triggering confirmation | `["rm -rf", "DROP TABLE", ...]` |
 | `run.require_confirmation`| `true`, `false` | `true` |
+| `widget.key` | key combination to open picker | `\ek` (`Alt-K`) |
+| `widget.save_key` | key combination to save last command | `\eK` (`Alt-Shift-K`) |
+| `widget.default_type` | `cmd`, `all` | `cmd` |
+| `widget.buffer` | `query`, `insert` | `query` |
+| `widget.height` | `<N>%` or `<N>` lines | `40%` |
+| `widget.preview` | `true`, `false` | `true` |
 
 Custom actions are defined under `[[actions.<type>]]` tables (e.g. `[[actions.cmd]]`, `[[actions.sql]]`), specifying `name`, `command`, optional `key`, `input` (`"stdin"` or `"arg"`), `description`, and `confirm`. Local clone paths can be mapped explicitly via `[code.repos]` (e.g. `"org/repo" = "~/repos/repo"`).
 
@@ -647,8 +653,60 @@ the file is tracked, both use `git mv` / `git rm` (and say so); otherwise, or if
 use plain file operations. Committing is up to you. `Ctrl-R` and `Ctrl-X` in the list do the same
 with a prompt on the key bar.
 
-Exit codes for `add`, `edit`, `mv` and `rm`: `0` done, `1` invalid, not found, ambiguous or target
-exists, `2` usage or I/O error, `130` cancelled.
+## Shell integration
+
+kb integrates with your shell prompt in `zsh`, `bash`, and `fish`:
+
+- **Pull commands into your prompt** with `Alt-K`: opens a compact picker under the prompt line. Pick an entry, fill any variables via the inline form, and the resolved command is inserted onto your command line ready to review, edit, and run with Enter. kb inserts into the prompt buffer but **never auto-executes**.
+- **Secrets stay out of shell history**: variables with `kind: secret` and an `env` source are resolved to environment variable references (`"$VAR_NAME"`), never plaintext secrets. Secrets without an `env` source are blocked from shell insertion.
+- **Save the command you just ran** with `Alt-Shift-K` (or `kb-save-last`): captures the previous command from shell history and opens `kb add --type cmd` pre-filled.
+- **Tab completion**: dynamic shell tab completion for entry IDs (with titles in zsh and fish), tags, entry types, variable names (`--var name=`), and enum options.
+- **Scripted picking with `kb pick`**: invoke the compact picker from shell scripts or tmux keybindings, with support for tmux popups (`--tmux`).
+
+### Setup
+
+```sh
+kb shell install              # detects shell, previews changes, and appends init block
+kb shell uninstall            # removes only the marked kb block
+```
+
+Or configure manually in your shell profile:
+
+- **zsh** (`~/.zshrc`): `eval "$(kb shell init zsh)"`
+- **bash** (`~/.bashrc`): `eval "$(kb shell init bash)"`
+- **fish** (`~/.config/fish/config.fish`): `kb shell init fish | source`
+
+To generate standalone completion scripts:
+
+```sh
+kb completions zsh > ~/.zsh/completion/_kb
+kb completions bash > /etc/bash_completion.d/kb
+kb completions fish > ~/.config/fish/completions/kb.fish
+```
+
+### Key bindings and configuration
+
+| Key | Action | Configuration |
+|---|---|---|
+| `Alt-K` | Open inline picker under prompt | `widget.key` / `KB_WIDGET_KEY` |
+| `Alt-Shift-K` | Save previous command from history | `widget.save_key` / `KB_WIDGET_SAVE_KEY` |
+
+In the inline picker:
+- Type words to search in real time.
+- `Tab` cycles the type filter (`cmd` -> all -> `cmd`).
+- `Enter` selects an entry (opens inline variable form if the entry has variables, else inserts the command).
+- `Esc` or `Ctrl-C` cancels and restores your prompt line unchanged.
+- `Ctrl-Y` copies the resolved payload to the clipboard without touching the command line.
+
+### Scripted picking (`kb pick`)
+
+```sh
+kb pick                                # open compact picker, print resolved payload to stdout
+kb pick "tail auth" --type cmd         # pre-filter query and entry type
+kb pick --print id                     # print picked entry ID instead of payload
+kb pick --print json                   # print full entry JSON
+kb pick --tmux                         # open in tmux popup (tmux 3.2+)
+```
 
 ## Checking your setup
 

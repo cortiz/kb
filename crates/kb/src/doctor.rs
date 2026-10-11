@@ -479,6 +479,88 @@ fn check_clipboard_read(platform: &impl Platform, env: &Environment) -> Check {
     check
 }
 
+fn check_shell(platform: &impl Platform, loaded: &Loaded) -> Check {
+    let dialect = crate::commands::shell::detect_current_shell();
+    let home = platform.home_dir();
+    let widget_key = loaded.settings.widget_key();
+    let save_key = loaded.settings.widget_save_key();
+
+    let target_file = home
+        .as_ref()
+        .map(|h| crate::commands::shell::get_shell_startup_file(dialect, h));
+    let installed = target_file
+        .as_ref()
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .map(|content| content.contains(kb_core::shell::templates::KB_STARTUP_BLOCK_BEGIN))
+        .unwrap_or(false);
+
+    let has_clash = if let Some(f) = &target_file {
+        if let Ok(content) = std::fs::read_to_string(f) {
+            let outside = if let (Some(start), Some(end)) = (
+                content.find(kb_core::shell::templates::KB_STARTUP_BLOCK_BEGIN),
+                content.find(kb_core::shell::templates::KB_STARTUP_BLOCK_END),
+            ) {
+                format!(
+                    "{}{}",
+                    &content[..start],
+                    &content[end + kb_core::shell::templates::KB_STARTUP_BLOCK_END.len()..]
+                )
+            } else {
+                content
+            };
+            outside.contains(widget_key)
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let mut check = if has_clash {
+        Check::new(
+            "shell",
+            Status::Warn,
+            format!("{} (clash on key '{}')", dialect.as_str(), widget_key),
+        )
+        .hint(format!("key '{widget_key}' is already bound; use KB_WIDGET_KEY or widget.key to rebind, or KB_WIDGET_FORCE=1"))
+    } else if installed {
+        Check::new(
+            "shell",
+            Status::Pass,
+            format!(
+                "{} (widget: {}, save: {})",
+                dialect.as_str(),
+                widget_key,
+                save_key
+            ),
+        )
+    } else {
+        Check::new(
+            "shell",
+            Status::Pass,
+            format!(
+                "{} (widget not loaded; run `kb shell install`)",
+                dialect.as_str()
+            ),
+        )
+    };
+
+    if let Some(f) = &target_file {
+        check = check.detail(format!("startup file: {}", f.display()));
+    }
+    check = check.detail(format!("widget key: {widget_key}, save key: {save_key}"));
+    if has_clash {
+        if let Some(f) = &target_file {
+            check = check.detail(format!(
+                "warning: key '{widget_key}' is bound elsewhere in {}",
+                f.display()
+            ));
+        }
+    }
+
+    check
+}
+
 pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
     let env = platform.env();
     let (clipboard_check, alternatives) = check_clipboard(platform, &env, loaded);
@@ -511,6 +593,7 @@ pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
         check_true_color(&env),
         check_editor(platform, loaded),
         check_opener(platform, &env, loaded),
+        check_shell(platform, loaded),
     ]);
     Report {
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -604,7 +687,8 @@ mod tests {
                 "clipboard-read",
                 "true-color",
                 "editor",
-                "opener"
+                "opener",
+                "shell",
             ]
         );
     }

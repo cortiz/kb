@@ -208,6 +208,16 @@ pub trait Platform {
     fn find_tool(&self, name: &str) -> Option<PathBuf>;
     /// Whether tmux forwards escape sequences to the outer terminal. `None` outside tmux.
     fn tmux_allows_passthrough(&self) -> Option<bool>;
+    /// Whether tmux popup is supported (running inside tmux 3.2+).
+    fn is_tmux_popup_supported(&self) -> bool;
+    /// Runs a command inside a tmux popup, returning its exit code and stdout.
+    fn run_tmux_popup(
+        &self,
+        title: &str,
+        width: &str,
+        height: &str,
+        command: &str,
+    ) -> io::Result<(Option<i32>, String)>;
 
     // ---- terminal ----
     /// Whether there is a terminal to interact with: stdin is one, or the controlling terminal

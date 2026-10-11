@@ -22,6 +22,7 @@ pub mod resolve;
 pub mod root;
 pub mod run;
 pub mod search;
+pub mod shell;
 pub mod source;
 pub mod sync;
 pub mod usage;
