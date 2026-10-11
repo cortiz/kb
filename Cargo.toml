@@ -30,7 +30,7 @@ crossterm = { version = "0.29", features = ["use-dev-tty"] }
 unicode-width = "0.2"
 vt100 = "0.15"
 portable-pty = "0.9"
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 unicode-normalization = "0.1"
 # parses the config file with line numbers and edits it without losing comments (kb config set)
 toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
