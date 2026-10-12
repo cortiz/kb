@@ -216,6 +216,49 @@ fn test_shell_init_includes_vi_keymaps() {
     assert!(script_fish.contains("-M insert"));
 }
 
+#[test]
+fn test_widget_unreviewed_cmd_requires_y_confirmation() {
+    let (t, home, root) = kb_home("search");
+    let out = t.path().join("widget_out.json");
+
+    let entry_path = root.join("cmd/agent-unrev.md");
+    let content = r#"---
+kb_format: 1
+type: cmd
+title: Agent Unreviewed Cmd
+shell: sh
+---
+
+```
+echo 'agent-danger'
+```
+"#;
+    fs::write(&entry_path, content).unwrap();
+    kb_core::mcp::review::ReviewStateTracker::mark_unreviewed(&root, "cmd/agent-unrev").unwrap();
+
+    let mut spec = Spec::new(
+        &["pick", "--widget", "--shell", "zsh", "--buffer", "agent-unrev"],
+        &home,
+        &root,
+    );
+    spec.out = Some(out.clone());
+
+    let mut s = Session::spawn(&spec);
+    s.wait_for("Search");
+    s.send(ENTER);
+    s.wait_for("Unreviewed Agent Change");
+    s.wait_for("Insert this command? [y/N]");
+
+    // Send y to confirm
+    s.send(b"y");
+    assert_eq!(s.wait_exit(), 0);
+
+    let output = fs::read_to_string(&out).expect("failed to read widget output");
+    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    assert_eq!(parsed["status"], "picked");
+    assert!(parsed["command"].as_str().unwrap().contains("agent-danger"));
+}
+
 
 
 

@@ -14,7 +14,7 @@ pub const STOP_WORDS: [&str; 17] = [
 ];
 
 /// The filter keys, for hints.
-pub const FILTER_KEYS: &str = "type, tag, -tag, var, repo, in";
+pub const FILTER_KEYS: &str = "type, tag, -tag, var, repo, in, unreviewed";
 
 /// An indexed field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -72,6 +72,8 @@ pub struct Query {
     pub vars: Vec<String>,
     pub repos: Vec<String>,
     pub scope: Option<Field>,
+    /// Filter by review status (agent-authored entries).
+    pub unreviewed: Option<bool>,
     /// `0` means no limit.
     pub limit: usize,
     /// All free text as typed (stop words included), for the exact-title rule.
@@ -113,6 +115,7 @@ impl Default for Query {
             vars: Vec::new(),
             repos: Vec::new(),
             scope: None,
+            unreviewed: None,
             limit: DEFAULT_LIMIT,
             raw_text: String::new(),
             hints: Vec::new(),
@@ -194,6 +197,14 @@ impl Query {
                     match f {
                         Some(f) => self.scope = Some(f),
                         None => self.hints.push(Hint::UnknownFilter(format!("in:{value}"))),
+                    }
+                    return;
+                }
+                "unreviewed" => {
+                    match fold(value).as_str() {
+                        "true" | "1" | "yes" => self.unreviewed = Some(true),
+                        "false" | "0" | "no" => self.unreviewed = Some(false),
+                        _ => self.hints.push(Hint::UnknownFilter(format!("unreviewed:{value}"))),
                     }
                     return;
                 }

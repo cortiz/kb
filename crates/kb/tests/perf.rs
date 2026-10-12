@@ -265,6 +265,7 @@ fn one_frame_with_ten_thousand_results_under_16ms() {
             tier: Tier::Exact,
             matches: vec![],
             snippet: None,
+            unreviewed: false,
         })
         .collect();
     let mut state = AppState::new(Options::default(), (200, 60), "", "~/kb".into());

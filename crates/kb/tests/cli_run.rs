@@ -461,3 +461,101 @@ DROP TABLE events;
     );
     assert!(marker.exists(), "marker should exist with --force");
 }
+
+#[test]
+fn test_run_unreviewed_cmd_requires_force_with_yes() {
+    let (dir, home, root) = setup_run_kb();
+    let marker = dir.path().join("unrev_marker.txt");
+    let marker_str = marker.display().to_string();
+
+    fs::write(
+        root.join("unrev.md"),
+        format!(
+            r#"---
+kb_format: 1
+type: cmd
+title: Unreviewed Echo
+shell: sh
+---
+
+```
+echo 'UNREV_EXECUTED' > '{marker_str}'
+```
+"#
+        ),
+    )
+    .unwrap();
+
+    kb_core::mcp::review::ReviewStateTracker::mark_unreviewed(&root, "unrev").unwrap();
+
+    // -y without --force should fail
+    let out = kb_in(&root)
+        .env("HOME", &home)
+        .args(["run", "unrev", "-y"])
+        .output()
+        .unwrap();
+
+    assert_ne!(out.status.code(), Some(0));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("unreviewed"), "stderr: {err}");
+    assert!(!marker.exists(), "marker should not exist without --force");
+
+    // -y with --force should succeed
+    let out_force = kb_in(&root)
+        .env("HOME", &home)
+        .args(["run", "unrev", "-y", "--force"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        out_force.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&out_force.stderr)
+    );
+    assert!(marker.exists(), "marker should exist with --force");
+}
+
+#[test]
+fn test_run_unreviewed_cmd_pty_requires_typing_run() {
+    let (dir, home, root) = setup_run_kb();
+    let marker = dir.path().join("unrev_pty_marker.txt");
+    let marker_str = marker.display().to_string();
+
+    fs::write(
+        root.join("unrev_pty.md"),
+        format!(
+            r#"---
+kb_format: 1
+type: cmd
+title: Unreviewed PTY
+shell: sh
+---
+
+```
+echo 'UNREV_PTY_EXECUTED' > '{marker_str}'
+```
+"#
+        ),
+    )
+    .unwrap();
+
+    kb_core::mcp::review::ReviewStateTracker::mark_unreviewed(&root, "unrev_pty").unwrap();
+
+    // 1. Sending plain 'y' is rejected for unreviewed commands
+    let spec1 = Spec::new(&["run", "unrev_pty"], &home, &root);
+    let mut s1 = Session::spawn(&spec1);
+    s1.wait_for("This command was changed by an agent and is unreviewed");
+    s1.send(b"y\n");
+    s1.wait_for("run cancelled");
+    assert_ne!(s1.wait_exit(), 0);
+    assert!(!marker.exists());
+
+    // 2. Typing 'run' executes the unreviewed command
+    let spec2 = Spec::new(&["run", "unrev_pty"], &home, &root);
+    let mut s2 = Session::spawn(&spec2);
+    s2.wait_for("This command was changed by an agent and is unreviewed");
+    s2.send(b"run\n");
+    assert_eq!(s2.wait_exit(), 0);
+    assert!(marker.exists());
+}

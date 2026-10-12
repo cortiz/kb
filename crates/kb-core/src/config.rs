@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The twenty-eight settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The thirty-three settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -241,6 +241,41 @@ pub const SETTINGS: &[Setting] = &[
         env: "KB_WIDGET_PREVIEW",
         doc: "Show right preview pane in picker on wide terminals (>= 120 cols).",
     },
+    Setting {
+        key: "mcp.write",
+        kind: Kind::Bool,
+        default: "false",
+        env: "KB_MCP_WRITE",
+        doc: "Enable agent write tools (create and update). Defaults to false for security.",
+    },
+    Setting {
+        key: "mcp.prompts",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_MCP_PROMPTS",
+        doc: "Expose prompt entries as MCP slash commands / prompts.",
+    },
+    Setting {
+        key: "mcp.record_usage",
+        kind: Kind::Bool,
+        default: "false",
+        env: "KB_MCP_RECORD_USAGE",
+        doc: "Record tool lookups as usage hits in frecency rankings.",
+    },
+    Setting {
+        key: "mcp.use_remembered",
+        kind: Kind::Bool,
+        default: "false",
+        env: "KB_MCP_USE_REMEMBERED",
+        doc: "Use remembered variable values as pre-fills for agent queries.",
+    },
+    Setting {
+        key: "mcp.log_reads",
+        kind: Kind::Bool,
+        default: "false",
+        env: "KB_MCP_LOG_READS",
+        doc: "Append read queries to .kb/mcp.log. Defaults to false (writes are always logged).",
+    },
 ];
 
 /// A value as it was written, before it is checked against the setting's kind.
@@ -379,6 +414,9 @@ pub struct Settings {
     code_repos: BTreeMap<String, String>,
     run_destructive_patterns: Vec<String>,
     custom_actions: Vec<CustomActionConfig>,
+    mcp_exclude_tags: Vec<String>,
+    mcp_exclude_types: Vec<String>,
+    mcp_write_types: Vec<String>,
 }
 
 /// Values given on the command line that map to settings.
@@ -437,6 +475,9 @@ impl Settings {
             code_repos: BTreeMap::new(),
             run_destructive_patterns: Vec::new(),
             custom_actions: Vec::new(),
+            mcp_exclude_tags: vec!["private".to_string()],
+            mcp_exclude_types: Vec::new(),
+            mcp_write_types: Vec::new(),
         }
     }
 }
@@ -638,6 +679,62 @@ impl Settings {
         &self.custom_actions
     }
 
+    pub fn mcp_write(&self) -> bool {
+        self.flag("mcp.write")
+    }
+
+    pub fn mcp_prompts(&self) -> bool {
+        self.flag("mcp.prompts")
+    }
+
+    pub fn mcp_record_usage(&self) -> bool {
+        self.flag("mcp.record_usage")
+    }
+
+    pub fn mcp_use_remembered(&self) -> bool {
+        self.flag("mcp.use_remembered")
+    }
+
+    pub fn mcp_log_reads(&self) -> bool {
+        self.flag("mcp.log_reads")
+    }
+
+    pub fn mcp_exclude_tags(&self) -> &[String] {
+        &self.mcp_exclude_tags
+    }
+
+    pub fn mcp_exclude_tags_mut(&mut self) -> &mut Vec<String> {
+        &mut self.mcp_exclude_tags
+    }
+
+    pub fn mcp_exclude_types(&self) -> &[String] {
+        &self.mcp_exclude_types
+    }
+
+    pub fn mcp_exclude_types_mut(&mut self) -> &mut Vec<String> {
+        &mut self.mcp_exclude_types
+    }
+
+    pub fn mcp_write_types(&self) -> &[String] {
+        &self.mcp_write_types
+    }
+
+    pub fn mcp_write_types_mut(&mut self) -> &mut Vec<String> {
+        &mut self.mcp_write_types
+    }
+
+    pub fn is_write_type_allowed(&self, type_name: &str) -> bool {
+        self.mcp_write_types.is_empty() || self.mcp_write_types.iter().any(|t| t == type_name)
+    }
+
+    pub fn is_type_excluded(&self, type_name: &str) -> bool {
+        self.mcp_exclude_types.iter().any(|t| t == type_name)
+    }
+
+    pub fn is_tag_excluded(&self, tag: &str) -> bool {
+        self.mcp_exclude_tags.iter().any(|t| t == tag)
+    }
+
     /// The template for new entry IDs; the default when unset (an invalid value was already
     /// refused with a warning when the settings were loaded).
     pub fn path_template(&self) -> PathTemplate {
@@ -773,6 +870,9 @@ fn collect(table: &dyn toml_edit::TableLike, prefix: &str, text: &str, out: &mut
             || key == "run.destructive_patterns"
             || key == "actions"
             || key.starts_with("actions.")
+            || key == "mcp.exclude_tags"
+            || key == "mcp.exclude_types"
+            || key == "mcp.write_types"
         {
             continue;
         }
@@ -1008,6 +1108,86 @@ impl Loader {
             }
         }
 
+        // 4. mcp lists
+        if let Some(mcp_item) = doc.get("mcp")
+            && let Some(mcp_tbl) = mcp_item.as_table_like()
+        {
+            if let Some(et_item) = mcp_tbl.get("exclude_tags") {
+                if let Some(arr) = et_item.as_array() {
+                    self.settings.mcp_exclude_tags.clear();
+                    for val in arr.iter() {
+                        if let Some(s) = val.as_str() {
+                            self.settings.mcp_exclude_tags.push(s.to_string());
+                        } else {
+                            let line = val.span().map(|r| line_of(text, r.start));
+                            self.warn(
+                                Some(path),
+                                line,
+                                "mcp.exclude_tags: expected string elements".into(),
+                            );
+                        }
+                    }
+                } else {
+                    let line = et_item.span().map(|r| line_of(text, r.start));
+                    self.warn(
+                        Some(path),
+                        line,
+                        "mcp.exclude_tags: expected an array of strings".into(),
+                    );
+                }
+            }
+
+            if let Some(et_item) = mcp_tbl.get("exclude_types") {
+                if let Some(arr) = et_item.as_array() {
+                    self.settings.mcp_exclude_types.clear();
+                    for val in arr.iter() {
+                        if let Some(s) = val.as_str() {
+                            self.settings.mcp_exclude_types.push(s.to_string());
+                        } else {
+                            let line = val.span().map(|r| line_of(text, r.start));
+                            self.warn(
+                                Some(path),
+                                line,
+                                "mcp.exclude_types: expected string elements".into(),
+                            );
+                        }
+                    }
+                } else {
+                    let line = et_item.span().map(|r| line_of(text, r.start));
+                    self.warn(
+                        Some(path),
+                        line,
+                        "mcp.exclude_types: expected an array of strings".into(),
+                    );
+                }
+            }
+
+            if let Some(wt_item) = mcp_tbl.get("write_types") {
+                if let Some(arr) = wt_item.as_array() {
+                    self.settings.mcp_write_types.clear();
+                    for val in arr.iter() {
+                        if let Some(s) = val.as_str() {
+                            self.settings.mcp_write_types.push(s.to_string());
+                        } else {
+                            let line = val.span().map(|r| line_of(text, r.start));
+                            self.warn(
+                                Some(path),
+                                line,
+                                "mcp.write_types: expected string elements".into(),
+                            );
+                        }
+                    }
+                } else {
+                    let line = wt_item.span().map(|r| line_of(text, r.start));
+                    self.warn(
+                        Some(path),
+                        line,
+                        "mcp.write_types: expected an array of strings".into(),
+                    );
+                }
+            }
+        }
+
         let mut leaves = Vec::new();
         collect(doc.as_table(), "", text, &mut leaves);
         for leaf in leaves {
@@ -1102,6 +1282,27 @@ pub fn load(files: &[PathBuf], get_env: &dyn Fn(&str) -> Option<String>, flags: 
         if let Some(v) = get_env(s.env).filter(|v| !v.is_empty()) {
             l.apply(s, &Raw::Str(v), true, Source::Env(s.env), None, None, s.env);
         }
+    }
+    if let Some(v) = get_env("KB_MCP_EXCLUDE_TAGS").filter(|v| !v.is_empty()) {
+        l.settings.mcp_exclude_tags = v
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(v) = get_env("KB_MCP_EXCLUDE_TYPES").filter(|v| !v.is_empty()) {
+        l.settings.mcp_exclude_types = v
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+    if let Some(v) = get_env("KB_MCP_WRITE_TYPES").filter(|v| !v.is_empty()) {
+        l.settings.mcp_write_types = v
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
     }
     if let Some(v) = &flags.root
         && let Some(s) = setting("root")
@@ -1312,7 +1513,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 28, "twenty-eight settings, no duplicates");
+        assert_eq!(keys.len(), 33, "thirty-three settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -1344,8 +1545,48 @@ mod settings_tests {
         assert_eq!(s.code_default_open(), "web");
         assert_eq!(s.code_web_url(), None);
         assert!(s.run_pause_after());
-        assert_eq!(s.iter().count(), 28);
+        assert!(!s.mcp_write());
+        assert!(s.mcp_prompts());
+        assert!(!s.mcp_record_usage());
+        assert!(!s.mcp_use_remembered());
+        assert!(!s.mcp_log_reads());
+        assert_eq!(s.mcp_exclude_tags(), &["private"]);
+        assert!(s.mcp_exclude_types().is_empty());
+        assert!(s.mcp_write_types().is_empty());
+        assert_eq!(s.iter().count(), 33);
         assert_eq!(s.path_template(), PathTemplate::default());
+    }
+
+    #[test]
+    fn mcp_settings_load_and_override() {
+        let text = r#"
+[mcp]
+write = true
+prompts = false
+record_usage = true
+use_remembered = true
+log_reads = true
+exclude_tags = ["wip", "draft"]
+exclude_types = ["cmd"]
+write_types = ["sql", "sumo"]
+"#;
+        let (_d, l) = load_text(text);
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+        let s = &l.settings;
+        assert!(s.mcp_write());
+        assert!(!s.mcp_prompts());
+        assert!(s.mcp_record_usage());
+        assert!(s.mcp_use_remembered());
+        assert!(s.mcp_log_reads());
+        assert_eq!(s.mcp_exclude_tags(), &["wip", "draft"]);
+        assert_eq!(s.mcp_exclude_types(), &["cmd"]);
+        assert_eq!(s.mcp_write_types(), &["sql", "sumo"]);
+        assert!(s.is_write_type_allowed("sql"));
+        assert!(!s.is_write_type_allowed("cmd"));
+        assert!(s.is_type_excluded("cmd"));
+        assert!(!s.is_type_excluded("sql"));
+        assert!(s.is_tag_excluded("wip"));
+        assert!(!s.is_tag_excluded("prod"));
     }
 
     #[test]

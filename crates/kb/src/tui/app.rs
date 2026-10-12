@@ -1421,6 +1421,7 @@ pub(crate) mod tests {
             tier: Tier::Exact,
             matches: vec![],
             snippet: None,
+            unreviewed: false,
         }
     }
 

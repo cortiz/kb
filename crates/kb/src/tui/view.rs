@@ -91,6 +91,13 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             theme.warning(),
         ));
     }
+    let unreviewed_count = kb_core::mcp::review::ReviewStateTracker::unreviewed_entries(std::path::Path::new(&state.root)).len();
+    if unreviewed_count > 0 {
+        tail.push(Span::styled(
+            format!(" · ⚠ {unreviewed_count} unreviewed"),
+            theme.warning(),
+        ));
+    }
     if state.options.config_problems > 0 {
         let n = state.options.config_problems;
         tail.push(Span::styled(
@@ -343,12 +350,16 @@ fn draw_list(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             buf.set_style(Rect::new(inner.x, y, inner.width, 2), theme.selection());
         }
         let badge = pad(result.entry_type.name(), 6);
-        let title_cols = cols.saturating_sub(8);
+        let mut title_cols = cols.saturating_sub(8);
         let mut spans = vec![
             Span::raw(" "),
             Span::styled(badge, theme.badge(result.entry_type)),
             Span::raw(" "),
         ];
+        if result.unreviewed {
+            spans.push(Span::styled("agent ", theme.warning()));
+            title_cols = title_cols.saturating_sub(6);
+        }
         spans.extend(highlighted(
             &result.title,
             &ranges_of(result, Field::Title),
@@ -723,6 +734,9 @@ fn meta_spans(m: &PreviewModel, theme: &Theme, cols: usize) -> Vec<Span<'static>
         meta.entry_type.name().to_string(),
         theme.badge(meta.entry_type),
     )];
+    if meta.unreviewed {
+        spans.push(Span::styled(" · agent (unreviewed)", theme.warning()));
+    }
     if !meta.tags.is_empty() {
         let tags: Vec<String> = meta.tags.iter().map(|t| format!("#{t}")).collect();
         spans.push(Span::styled(

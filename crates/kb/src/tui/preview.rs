@@ -17,6 +17,7 @@ pub struct Meta {
     pub use_count: u64,
     /// The entry's `updated:` value, else the file's modification date as `YYYY-MM-DD`.
     pub edited: Option<String>,
+    pub unreviewed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,6 +165,7 @@ pub fn build_preview(
             tags: entry.tags().to_vec(),
             use_count,
             edited,
+            unreviewed: false,
         }),
         url,
         code,

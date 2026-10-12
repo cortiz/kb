@@ -281,6 +281,24 @@ impl State {
         self.vars.entries.retain(|id, _| existing.contains(id));
         self.usage.len() != before || self.vars.entries.len() != before_vars
     }
+
+    /// Whether `id` is recorded as an unreviewed agent change.
+    pub fn is_unreviewed(&self, id: &str) -> bool {
+        if let Some(Value::Object(map)) = self.extra.get("unreviewed") {
+            if let Some(Value::Bool(b)) = map.get(id) {
+                return *b;
+            }
+        }
+        false
+    }
+
+    /// Count of entries marked unreviewed.
+    pub fn unreviewed_count(&self) -> usize {
+        if let Some(Value::Object(map)) = self.extra.get("unreviewed") {
+            return map.values().filter(|v| v.as_bool() == Some(true)).count();
+        }
+        0
+    }
 }
 
 fn parse(text: &[u8]) -> Option<State> {

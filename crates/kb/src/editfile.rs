@@ -379,6 +379,11 @@ pub fn edit_entry(
                     if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
                         eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
                     }
+                    let _ = kb_core::mcp::review::ReviewStateTracker::approve_with_git(
+                        kb.root(),
+                        &id,
+                        &crate::platform::SystemGitRunner,
+                    );
                     Ok(ExitCode::SUCCESS)
                 }
                 Err(FsError::Conflict(_)) => {

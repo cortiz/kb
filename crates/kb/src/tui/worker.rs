@@ -174,14 +174,20 @@ pub fn run(
             let mtime = modified.unwrap_or(0);
             let reply = if let Some(model) = cache.get(&id, mtime) {
                 let mut model = model.clone();
+                let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
                 if let Some(meta) = &mut model.meta {
                     meta.use_count = use_count;
+                    meta.unreviewed = unreviewed;
                 }
                 Reply::Preview(generation, Box::new(model))
             } else {
                 match kb.entry(&id) {
                     Ok(entry) => {
-                        let model = build_preview(&entry, modified, use_count, highlight);
+                        let mut model = build_preview(&entry, modified, use_count, highlight);
+                        let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
+                        if let Some(meta) = &mut model.meta {
+                            meta.unreviewed = unreviewed;
+                        }
                         cache.put(model.clone());
                         Reply::Preview(generation, Box::new(model))
                     }

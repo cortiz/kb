@@ -208,6 +208,7 @@ pub fn run_inline_picker(
     let mut selected_type = options.default_type;
     let mut selected_idx: usize = 0;
     let mut active_form: Option<InlineForm> = None;
+    let mut confirming_unreviewed: Option<(String, String, BTreeMap<String, String>)> = None;
 
     let dialect = options.dialect.unwrap_or(ShellDialect::Zsh);
 
@@ -242,6 +243,7 @@ pub fn run_inline_picker(
         }
 
         // Draw UI
+        let unrev_preview = confirming_unreviewed.as_ref().map(|(id, _, _)| id.as_str());
         let draw_res = if let Some(alt) = &mut alt_terminal {
             alt.draw(|f| {
                 render_inline_ui(
@@ -251,6 +253,7 @@ pub fn run_inline_picker(
                     &entries,
                     selected_idx,
                     active_form.as_ref(),
+                    unrev_preview,
                     &options,
                 );
             })
@@ -265,6 +268,7 @@ pub fn run_inline_picker(
                         &entries,
                         selected_idx,
                         active_form.as_ref(),
+                        unrev_preview,
                         &options,
                     );
                 })
@@ -287,7 +291,20 @@ pub fn run_inline_picker(
         // Wait for event
         if event::poll(Duration::from_millis(100)).unwrap_or(false) {
             if let Ok(Event::Key(key)) = event::read() {
-                if let Some(form) = active_form.as_mut() {
+                if let Some((unrev_id, unrev_cmd, unrev_vars)) = confirming_unreviewed.take() {
+                    match key.code {
+                        KeyCode::Char('y') | KeyCode::Char('Y') => {
+                            break InlinePickerResult::Picked {
+                                id: unrev_id,
+                                resolved_command: unrev_cmd,
+                                variables: unrev_vars,
+                            };
+                        }
+                        _ => {
+                            break InlinePickerResult::Cancelled;
+                        }
+                    }
+                } else if let Some(form) = active_form.as_mut() {
                     match form.handle_key(key) {
                         InlineFormEvent::Cancel => {
                             active_form = None;
@@ -318,11 +335,17 @@ pub fn run_inline_picker(
                                         .primary()
                                         .map(|o| o.text.clone())
                                         .unwrap_or_default();
-                                    break InlinePickerResult::Picked {
-                                        id: entry_id,
-                                        resolved_command: cmd,
-                                        variables: values,
-                                    };
+                                    let is_unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &entry_id);
+                                    if is_unreviewed {
+                                        confirming_unreviewed = Some((entry_id, cmd, values));
+                                        active_form = None;
+                                    } else {
+                                        break InlinePickerResult::Picked {
+                                            id: entry_id,
+                                            resolved_command: cmd,
+                                            variables: values,
+                                        };
+                                    }
                                 }
                                 Err(errs) => {
                                     let msg = errs
@@ -371,11 +394,17 @@ pub fn run_inline_picker(
                                         .payload()
                                         .map(|p| p.text.clone())
                                         .unwrap_or_else(|| entry.notes().to_string());
-                                    break InlinePickerResult::Picked {
-                                        id: entry.id().to_string(),
-                                        resolved_command,
-                                        variables: BTreeMap::new(),
-                                    };
+                                    let id = entry.id().to_string();
+                                    let is_unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
+                                    if is_unreviewed {
+                                        confirming_unreviewed = Some((id, resolved_command, BTreeMap::new()));
+                                    } else {
+                                        break InlinePickerResult::Picked {
+                                            id,
+                                            resolved_command,
+                                            variables: BTreeMap::new(),
+                                        };
+                                    }
                                 } else {
                                     // Open inline form
                                     let (mem, _) = kb.remembered(entry.id());
@@ -427,9 +456,30 @@ fn render_inline_ui(
     entries: &[Entry],
     selected_idx: usize,
     active_form: Option<&InlineForm>,
+    confirming_unreviewed: Option<&str>,
     options: &InlinePickerOptions,
 ) {
     let area = f.area();
+
+    if let Some(unrev_id) = confirming_unreviewed {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(format!(" Unreviewed Agent Change: {unrev_id} "))
+            .border_style(Style::default().fg(Color::Yellow));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let lines = vec![
+            Line::from(Span::styled(
+                "WARNING: This entry was changed by an agent and has not been reviewed.",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from("Insert this command? [y/N]"),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
 
     if let Some(form) = active_form {
         // Render Inline Form

@@ -400,6 +400,10 @@ enum Command {
     /// Hidden dynamic completion helper for shell completion scripts.
     #[command(name = "__complete", hide = true)]
     Complete(commands::complete::CompleteArgs),
+    /// Run or configure the Model Context Protocol stdio server for AI agents.
+    Mcp(commands::mcp::McpArgs),
+    /// Review and approve or revert agent-made changes.
+    Review(commands::review::ReviewArgs),
 }
 
 #[derive(Subcommand)]
@@ -562,6 +566,8 @@ fn main() -> ExitCode {
         Command::Shell(_) => false,
         Command::Completions(_) => false,
         Command::Complete(_) => false,
+        Command::Mcp(_) => false,
+        Command::Review(a) => a.json,
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -692,6 +698,8 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             commands::shell::run_completions(&args, &mut <Cli as clap::CommandFactory>::command())
         }
         Command::Complete(args) => commands::complete::run_complete(&platform, &root, &args),
+        Command::Mcp(args) => Ok(commands::mcp::run_mcp(&root, &loaded, &args)),
+        Command::Review(args) => commands::review::run_review(&platform, &root, &loaded, &args),
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }

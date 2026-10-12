@@ -40,11 +40,11 @@ migration bugs.
 
 ### IV. Terminal Only, One Core
 
-- kb is 100% terminal. There is no GUI, webview or desktop app.
+- kb is 100% terminal and local. There is no GUI, webview or desktop app.
 - All domain logic (parsing, validation, indexing, search, variable resolution, actions, code-link
   resolution) MUST live in the `kb-core` crate.
-- The CLI commands and the TUI MUST be thin layers over `kb-core` that only handle input, rendering
-  and platform glue. They MUST NOT duplicate core logic.
+- The CLI commands, the TUI, and agent adapters over stdio (MCP) MUST be thin layers over `kb-core`
+  that only handle input, rendering and platform glue. They MUST NOT duplicate core logic.
 - Every TUI action MUST also be available as a scriptable CLI command, and every command MUST
   support `--json` output so kb composes with `fzf`, `jq` and shell scripts.
 
@@ -149,4 +149,4 @@ now.
   - PATCH for clarifications.
 - Exceptions granted in a plan apply only to that milestone and MUST be recorded in its plan.
 
-**Version**: 1.0.0 | **Ratified**: 2026-10-08 | **Last Amended**: 2026-10-08
+**Version**: 1.1.0 | **Ratified**: 2026-10-08 | **Last Amended**: 2026-10-11

@@ -641,6 +641,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "rusqlite",
+ "serde",
  "serde_json",
  "signal-hook 0.4.5",
  "syntect",

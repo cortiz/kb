@@ -448,6 +448,7 @@ use crate::shell::ShellDialect;
 pub enum ResolutionTarget {
     Standard,
     ShellWidget(ShellDialect),
+    Mcp,
 }
 
 /// Resolves variables with target destination rules.
@@ -471,6 +472,18 @@ pub fn resolve_for_target(
                 }
                 continue;
             }
+            if let ResolutionTarget::Mcp = target {
+                if values.contains_key(&p.var.name) {
+                    errors.push(VarError {
+                        name: p.var.name.clone(),
+                        message: format!(
+                            "cannot supply value for secret variable '{}'",
+                            p.var.name
+                        ),
+                    });
+                }
+                continue;
+            }
         }
         match values.get(&p.var.name) {
             Some(v) => {
@@ -479,9 +492,24 @@ pub fn resolve_for_target(
                 }
             }
             None => {
+                let msg = if let ResolutionTarget::Mcp = target {
+                    let options_desc = if p.var.options.is_empty() {
+                        "".to_string()
+                    } else {
+                        format!(", options: {:?}", p.var.options)
+                    };
+                    format!(
+                        "missing required variable '{}' (kind: {}{})",
+                        p.var.name,
+                        p.var.kind.name(),
+                        options_desc
+                    )
+                } else {
+                    "a value is required".into()
+                };
                 errors.push(VarError {
                     name: p.var.name.clone(),
-                    message: "a value is required".into(),
+                    message: msg,
                 });
             }
         }
@@ -534,23 +562,41 @@ fn substitute_target(
                 Piece::Ref(name) => {
                     let p = plan.var(name).expect("planned");
                     if p.var.kind == VarKind::Secret {
-                        if let ResolutionTarget::ShellWidget(dialect) = target {
-                            if let Some(env_name) = &p.var.env {
-                                let start = text.len();
-                                let ref_str = match state {
-                                    Quote::Double => format!("${env_name}"),
-                                    Quote::None | Quote::Single => dialect.env_var_ref(env_name),
-                                };
-                                text.push_str(&ref_str);
-                                has_secret = true;
-                                spans.push(Span {
-                                    range: start..text.len(),
-                                    name: name.clone(),
-                                    secret: true,
-                                });
-                                state = escape::advance(state, &ref_str);
-                                continue;
+                        match target {
+                            ResolutionTarget::ShellWidget(dialect) => {
+                                if let Some(env_name) = &p.var.env {
+                                    let start = text.len();
+                                    let ref_str = match state {
+                                        Quote::Double => format!("${env_name}"),
+                                        Quote::None | Quote::Single => dialect.env_var_ref(env_name),
+                                    };
+                                    text.push_str(&ref_str);
+                                    has_secret = true;
+                                    spans.push(Span {
+                                        range: start..text.len(),
+                                        name: name.clone(),
+                                        secret: true,
+                                    });
+                                    state = escape::advance(state, &ref_str);
+                                    continue;
+                                }
                             }
+                            ResolutionTarget::Mcp => {
+                                if let Some(env_name) = &p.var.env {
+                                    let start = text.len();
+                                    let ref_str = format!("${env_name}");
+                                    text.push_str(&ref_str);
+                                    has_secret = true;
+                                    spans.push(Span {
+                                        range: start..text.len(),
+                                        name: name.clone(),
+                                        secret: true,
+                                    });
+                                    state = escape::advance(state, &ref_str);
+                                    continue;
+                                }
+                            }
+                            ResolutionTarget::Standard => {}
                         }
                     }
                     let value = values

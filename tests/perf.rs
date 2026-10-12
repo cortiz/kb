@@ -1,7 +1,7 @@
 //! Performance benchmark tests (FR-033, SC-006).
 
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -274,3 +274,123 @@ fn perf_picker_startup_under_80ms() {
         elapsed
     );
 }
+
+#[test]
+fn perf_mcp_startup_under_150ms() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let kb_root = temp.path().join("kb");
+    fs::create_dir_all(&kb_root).unwrap();
+
+    let bin_path = AssertCommand::cargo_bin("kb").unwrap().get_program().to_os_string();
+
+    // Warm binary in OS cache
+    let _ = Command::new(&bin_path).arg("--version").output();
+
+    let t0 = Instant::now();
+    let mut child = Command::new(&bin_path)
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn kb mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = std::io::BufReader::new(stdout);
+
+    writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}").unwrap();
+    stdin.flush().unwrap();
+
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let elapsed = t0.elapsed();
+
+    drop(stdin);
+    let _ = child.wait();
+
+    assert!(line.contains("\"result\""), "valid initialize response");
+    assert!(
+        elapsed.as_millis() <= 150,
+        "mcp startup took {:?}, budget is <= 150ms",
+        elapsed
+    );
+}
+
+#[test]
+fn perf_mcp_search_under_50ms() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let kb_root = temp.path().join("kb");
+    fs::create_dir_all(&kb_root).unwrap();
+
+    // Populate KB with 100 entries and warm index
+    for i in 0..100 {
+        let doc = format!(
+            "---\nkb_format: 1\ntype: cmd\ntitle: Command {i} service handler\ntags: [auth, prod]\nshell: bash\n---\n\n```\necho {i}\n```\n"
+        );
+        fs::write(kb_root.join(format!("cmd-{i:03}.md")), doc).unwrap();
+    }
+
+    let mut reindex_cmd = AssertCommand::cargo_bin("kb").unwrap();
+    reindex_cmd
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .arg("reindex");
+    assert!(reindex_cmd.output().unwrap().status.success());
+
+    let bin_path = AssertCommand::cargo_bin("kb").unwrap().get_program().to_os_string();
+    let mut child = Command::new(&bin_path)
+        .env("HOME", &home)
+        .env("KB_ROOT", &kb_root)
+        .arg("mcp")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn kb mcp");
+
+    let mut stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let mut reader = std::io::BufReader::new(stdout);
+
+    // Initialize first
+    writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}").unwrap();
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+
+    // Measure tool search latency
+    let search_req = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "search",
+            "arguments": {
+                "query": "service handler"
+            }
+        }
+    });
+
+    let start = Instant::now();
+    writeln!(stdin, "{}", serde_json::to_string(&search_req).unwrap()).unwrap();
+    stdin.flush().unwrap();
+    line.clear();
+    reader.read_line(&mut line).unwrap();
+    let elapsed = start.elapsed();
+
+    drop(stdin);
+    let _ = child.wait();
+
+    assert!(line.contains("\"result\""), "valid search response");
+    assert!(
+        elapsed.as_millis() <= 50,
+        "mcp tool search latency took {:?}, budget is <= 50ms",
+        elapsed
+    );
+}
+

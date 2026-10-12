@@ -28,6 +28,16 @@ impl VarKind {
             _ => None,
         }
     }
+
+    /// The name of this kind.
+    pub fn name(&self) -> &'static str {
+        match self {
+            VarKind::Text => "text",
+            VarKind::Number => "number",
+            VarKind::Enum => "enum",
+            VarKind::Secret => "secret",
+        }
+    }
 }
 
 /// How a value is escaped when it is substituted (`escape:` under a variable).

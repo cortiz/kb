@@ -45,6 +45,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "kb-core/src/author/suggest.rs",
         "turns a literal value into a reference (the opposite of resolving) and skips existing references",
     ),
+    (
+        "kb-core/src/mcp/write.rs",
+        "lists references in create/update to auto-declare undeclared variables under vars; never substitutes a value",
+    ),
 ];
 
 const NEEDLES: &[&str] = &[

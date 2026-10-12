@@ -16,6 +16,7 @@ pub mod history;
 pub mod index;
 pub mod init;
 pub mod lint;
+pub mod mcp;
 pub mod payload;
 pub mod query;
 pub mod resolve;

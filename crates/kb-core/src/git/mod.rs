@@ -71,6 +71,8 @@ pub trait GitRunner: Send + Sync {
     }
 }
 
+
+
 type FakeHandler = dyn Fn(&Path, &[&str]) -> Result<GitCommandResult, GitError> + Send + Sync;
 
 #[derive(Clone)]

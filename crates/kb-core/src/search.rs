@@ -150,6 +150,7 @@ pub struct SearchResult {
     pub tier: Tier,
     pub matches: Vec<FieldMatch>,
     pub snippet: Option<Snippet>,
+    pub unreviewed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -294,6 +295,15 @@ impl Kb {
         parse_entry(id, &rel, bytes)
             .entry
             .ok_or_else(|| KbError::Unreadable(id.to_string()))
+    }
+
+    /// Lists all tags with their frequency counts from the index.
+    pub fn list_tags(&mut self) -> Result<Vec<(String, usize)>, KbError> {
+        self.refresh()?;
+        let Some(index) = self.held.as_ref() else {
+            return Err(KbError::Index("no index".into()));
+        };
+        index.list_tags().map_err(|e| KbError::Index(e.to_string()))
     }
 
     /// Counts one use of an entry (FR-017). Search never calls this.
@@ -641,6 +651,9 @@ impl Kb {
         if !q.types.is_empty() {
             cands.retain(|c| q.types.contains(&c.ty));
         }
+        if let Some(want_unreviewed) = q.unreviewed {
+            cands.retain(|c| state.is_unreviewed(&c.id) == want_unreviewed);
+        }
         cands.sort_by(|a, b| {
             a.tier
                 .cmp(&b.tier)
@@ -901,6 +914,7 @@ fn load_result(
         tier: cand.tier,
         matches: Vec::new(),
         snippet: None,
+        unreviewed: state.is_unreviewed(&cand.id),
     }))
 }
 

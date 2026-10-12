@@ -2,7 +2,9 @@ pub mod clone;
 pub mod complete;
 pub mod history;
 pub mod hooks;
+pub mod mcp;
 pub mod pick;
+pub mod review;
 pub mod shell;
 pub mod sync;
 
@@ -945,6 +947,35 @@ fn execute_open_url(
     used: &[varcli::Used],
     remember: bool,
 ) -> Result<ExitCode, CliError> {
+    let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed_with_git(
+        kb.root(),
+        id,
+        &crate::platform::SystemGitRunner,
+    );
+    if unreviewed {
+        if !platform.has_terminal() {
+            return Err(CliError::new(
+                "usage",
+                "cannot prompt for confirmation on unreviewed entry without a terminal",
+            ));
+        }
+        eprintln!("WARNING: This entry was changed by an agent and has not been reviewed.");
+        let mut tty =
+            TtyAsk::open(platform).ok_or_else(|| CliError::new("io", "cannot open terminal"))?;
+        let answer = tty
+            .line("Open this unreviewed URL? [y/N]: ")
+            .map_err(|e| CliError::new("io", e.to_string()))?;
+        match answer {
+            Some(ans)
+                if ans.trim().eq_ignore_ascii_case("y")
+                    || ans.trim().eq_ignore_ascii_case("yes") => {}
+            _ => {
+                eprintln!("kb: open cancelled");
+                return Ok(ExitCode::from(130));
+            }
+        }
+    }
+
     match opener::open_url(platform, settings.opener_command(), url) {
         Ok(Opened::Launched) => {
             finish_use(kb, settings, id, used, remember);
@@ -1108,7 +1139,19 @@ fn deliver_run_values_map(
         kb_core::run::RunPlanError::VarResolution(msg) => CliError::new("usage", msg),
     })?;
 
+    let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed_with_git(
+        kb.root(),
+        id,
+        &crate::platform::SystemGitRunner,
+    );
+
     if opts.yes {
+        if unreviewed && !opts.force {
+            return Err(CliError::new(
+                "usage",
+                "command was changed by an agent and is unreviewed; use --yes --force to execute non-interactively",
+            ));
+        }
         if run_plan.requires_typed_run && !opts.force {
             return Err(CliError::new(
                 "usage",
@@ -1137,6 +1180,9 @@ fn deliver_run_values_map(
                 .collect();
             eprintln!("Secrets: {}", secret_names.join(", "));
         }
+        if unreviewed {
+            eprintln!("WARNING: This command was changed by an agent and has not been reviewed.");
+        }
         for warn in &run_plan.destructive_warnings {
             eprintln!("WARNING: Destructive pattern matched: {}", warn.description);
         }
@@ -1144,7 +1190,18 @@ fn deliver_run_values_map(
         let mut tty =
             TtyAsk::open(platform).ok_or_else(|| CliError::new("io", "cannot open terminal"))?;
 
-        if run_plan.requires_typed_run {
+        if unreviewed {
+            let answer = tty
+                .line("This command was changed by an agent and is unreviewed. Type 'run' to execute: ")
+                .map_err(|e| CliError::new("io", e.to_string()))?;
+            match answer {
+                Some(ans) if ans.trim() == "run" => {}
+                _ => {
+                    eprintln!("kb: run cancelled");
+                    return Ok(ExitCode::from(130));
+                }
+            }
+        } else if run_plan.requires_typed_run {
             let answer = tty
                 .line("This command matched destructive patterns. Type 'run' to execute: ")
                 .map_err(|e| CliError::new("io", e.to_string()))?;

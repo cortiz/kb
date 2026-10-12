@@ -172,24 +172,33 @@ pub fn print_search_json(query: &str, total: usize, results: &[SearchResult]) {
     let results: Vec<_> = results
         .iter()
         .map(|r| {
-            json!({
-                "id": r.id,
-                "type": r.entry_type.name(),
-                "title": r.title,
-                "tags": r.tags,
-                "path": r.path,
-                "score": r.score,
-                "tier": r.tier.name(),
-                "matches": r.matches.iter().map(|m| json!({
+            let mut obj = serde_json::Map::new();
+            obj.insert("id".into(), json!(r.id));
+            obj.insert("type".into(), json!(r.entry_type.name()));
+            obj.insert("title".into(), json!(r.title));
+            obj.insert("tags".into(), json!(r.tags));
+            obj.insert("path".into(), json!(r.path));
+            obj.insert("score".into(), json!(r.score));
+            obj.insert("tier".into(), json!(r.tier.name()));
+            if r.unreviewed {
+                obj.insert("unreviewed".into(), json!(true));
+            }
+            obj.insert(
+                "matches".into(),
+                json!(r.matches.iter().map(|m| json!({
                     "field": m.field.name(),
                     "ranges": ranges_json(&m.ranges),
-                })).collect::<Vec<_>>(),
-                "snippet": r.snippet.as_ref().map(|s| json!({
+                })).collect::<Vec<_>>()),
+            );
+            obj.insert(
+                "snippet".into(),
+                json!(r.snippet.as_ref().map(|s| json!({
                     "field": s.field.name(),
                     "text": s.text,
                     "ranges": ranges_json(&s.ranges),
-                })),
-            })
+                }))),
+            );
+            serde_json::Value::Object(obj)
         })
         .collect();
     println!(
@@ -330,6 +339,7 @@ mod tests {
                 },
             ],
             snippet: None,
+            unreviewed: false,
         }
     }
 

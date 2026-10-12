@@ -145,6 +145,18 @@ impl Index {
         self.path.is_none()
     }
 
+    pub fn list_tags(&self) -> rusqlite::Result<Vec<(String, usize)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT tag, COUNT(*) as cnt FROM entry_tags GROUP BY tag ORDER BY cnt DESC, tag ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let tag: String = r.get(0)?;
+            let count: usize = r.get(1)?;
+            Ok((tag, count))
+        })?;
+        rows.collect()
+    }
+
     fn prev_rows(&self) -> rusqlite::Result<HashMap<String, FileRow>> {
         let mut stmt = self
             .conn

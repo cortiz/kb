@@ -561,6 +561,55 @@ fn check_shell(platform: &impl Platform, loaded: &Loaded) -> Check {
     check
 }
 
+fn check_mcp(root: &Path, loaded: &Loaded) -> Check {
+    let mut server = crate::commands::mcp::McpServer::with_settings(
+        root,
+        loaded.settings.clone(),
+        false,
+        loaded.settings.mcp_prompts(),
+    );
+    let init_req = crate::commands::mcp::JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(1)),
+        method: "initialize".to_string(),
+        params: None,
+    };
+    let init_ok = server
+        .handle_request(init_req)
+        .is_some_and(|r| r.error.is_none());
+
+    let ping_req = crate::commands::mcp::JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(2)),
+        method: "ping".to_string(),
+        params: None,
+    };
+    let ping_ok = server
+        .handle_request(ping_req)
+        .is_some_and(|r| r.error.is_none());
+
+    let kb_ok = server.ensure_kb().is_ok();
+
+    if init_ok && ping_ok && kb_ok {
+        let mut check = Check::new("mcp", Status::Pass, "stdio server responsive");
+        check = check.detail("protocol: 2024-11-05");
+        if loaded.settings.mcp_prompts() {
+            check = check.detail("prompts: enabled");
+        } else {
+            check = check.detail("prompts: disabled");
+        }
+        if loaded.settings.mcp_write() {
+            check = check.detail("write: enabled");
+        } else {
+            check = check.detail("write: disabled (read-only)");
+        }
+        check
+    } else {
+        Check::new("mcp", Status::Warn, "mcp stdio server failed self-test")
+            .hint("check permissions or run `kb mcp` directly to inspect errors")
+    }
+}
+
 pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
     let env = platform.env();
     let (clipboard_check, alternatives) = check_clipboard(platform, &env, loaded);
@@ -595,6 +644,9 @@ pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
         check_opener(platform, &env, loaded),
         check_shell(platform, loaded),
     ]);
+    if root_ok {
+        checks.push(check_mcp(root, loaded));
+    }
     Report {
         version: env!("CARGO_PKG_VERSION").to_string(),
         config_path: loaded
@@ -689,6 +741,7 @@ mod tests {
                 "editor",
                 "opener",
                 "shell",
+                "mcp",
             ]
         );
     }
@@ -706,7 +759,11 @@ mod tests {
                 .unwrap()
                 .contains("kb init")
         );
-        assert!(r.check("index").is_none() && r.check("root-writable").is_none());
+        assert!(
+            r.check("index").is_none()
+                && r.check("root-writable").is_none()
+                && r.check("mcp").is_none()
+        );
         assert!(!r.ok());
         // a file where the root should be
         let f = d.path().join("file");

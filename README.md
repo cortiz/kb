@@ -5,7 +5,7 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
-> Status: milestone M8 (shell integration: prompt widgets for zsh/bash/fish, inline picker, tab completion, pick command, save last command).
+> Status: milestone MCP (012-mcp-server: stdio MCP server for AI agents, human review workflow, secret shielding).
 
 ## Install
 
@@ -706,6 +706,75 @@ kb pick "tail auth" --type cmd         # pre-filter query and entry type
 kb pick --print id                     # print picked entry ID instead of payload
 kb pick --print json                   # print full entry JSON
 kb pick --tmux                         # open in tmux popup (tmux 3.2+)
+```
+
+## AI agent integration (MCP server)
+
+`kb mcp` exposes your knowledge base to AI coding agents (such as Claude Code, Cursor, or any Model Context Protocol client) via a local stdio JSON-RPC server:
+
+- **No daemons or network listeners**: The client spawns `kb mcp` as a subprocess communicating over stdin/stdout.
+- **Read tools by default**: The server exposes `search`, `get`, and `list_tags` tools to look up operational knowledge, resolve variables, and retrieve console/permalink URLs.
+- **Strict secret shielding**: Secrets never reach the model. Variables with `kind: secret` backed by an environment variable resolve to `$VAR_NAME` references; secrets without an environment variable preserve `{{name}}` placeholders. Supplying secret values to tool calls is rejected.
+- **Safe write capabilities**: `create` and `update` tools allow agents to capture or refine entries, but are **disabled by default**. Enable them with `--allow-write` or `mcp.write = true`. Edits use format-preserving YAML modifications and optimistic concurrency version hashes.
+- **Reusable prompts as slash commands**: `prompt` entries are offered through `prompts/list` and `prompts/get`, turning your curated prompt snippets into agent slash commands with typed arguments.
+
+### Client setup
+
+```sh
+kb mcp setup                  # print registration commands and configuration snippets
+```
+
+To register with Claude Code:
+
+```sh
+# Read-only (default)
+claude mcp add kb -- kb mcp
+
+# With write capabilities enabled
+claude mcp add kb -- kb mcp --allow-write
+```
+
+For clients using JSON configuration (e.g. Claude Desktop):
+
+```json
+{
+  "mcpServers": {
+    "kb": {
+      "command": "kb",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Human review workflow (`kb review`)
+
+Any entry created or modified by an agent is tagged as unreviewed and flagged with an `agent` badge in the TUI, preview pane, and `kb show`:
+
+- **Execution protection**: Running an unreviewed `cmd` entry via `kb run` or the shell widget warns that the entry was modified by an agent and requires typed `run` confirmation before execution.
+- **Interactive review**: Run `kb review` to inspect changes:
+
+```sh
+kb review                     # interactive review with unified diffs
+kb review --approve-all       # batch approve all unreviewed entries
+kb review --json              # machine-readable list of unreviewed entries
+```
+
+In the interactive review prompt:
+- `a`: Approve the entry and record an approval commit.
+- `r`: Revert to the last approved human version.
+- `e`: Open the entry in your configured `$EDITOR`.
+- `s`: Skip for now.
+
+### MCP configuration
+
+Add optional settings to your `config.toml`:
+
+```toml
+[mcp]
+write = false                 # allow agents to create and update entries (default: false)
+prompts = true                # expose prompt entries as MCP prompts (default: true)
+exclude_tags = ["private"]    # hide entries with these tags from MCP tools and prompts
 ```
 
 ## Checking your setup

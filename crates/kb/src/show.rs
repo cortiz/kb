@@ -31,7 +31,11 @@ pub fn preview_text(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     let uses = kb.usage(id).map_or(0, |u| u.count);
-    let model = build_preview(&entry, modified, uses, color);
+    let mut model = build_preview(&entry, modified, uses, color);
+    let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), id);
+    if let Some(meta) = &mut model.meta {
+        meta.unreviewed = unreviewed;
+    }
     // two columns of padding are part of the drawing and are cut off again below
     let buf = render_preview(&model, theme, width.max(MIN_WIDTH) + 2);
     Ok(buffer_to_text(&buf, color))

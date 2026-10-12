@@ -19,6 +19,7 @@ path = "src/main.rs"
 [dependencies]
 kb-core.workspace = true
 clap.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 ratatui.workspace = true
 syntect.workspace = true
