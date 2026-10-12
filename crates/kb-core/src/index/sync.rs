@@ -198,7 +198,7 @@ fn insert_doc(conn: &Connection, id: &str, doc: &Doc, vocab: bool) -> rusqlite::
             conn.prepare_cached("INSERT OR IGNORE INTO vocab(term, len) VALUES (?1, ?2)")?;
         for col in &doc.cols {
             for w in crate::fold::words(col) {
-                add.execute(params![w.text, w.text.chars().count()])?;
+                add.execute(params![w.text, w.text.chars().count() as i64])?;
             }
         }
     }

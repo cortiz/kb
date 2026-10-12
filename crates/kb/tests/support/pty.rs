@@ -315,7 +315,7 @@ impl Session {
                 pixel_height: 0,
             })
             .expect("resize");
-        self.parser.lock().unwrap().set_size(rows, cols);
+        self.parser.lock().unwrap().screen_mut().set_size(rows, cols);
     }
 
     pub fn pid(&self) -> Option<u32> {

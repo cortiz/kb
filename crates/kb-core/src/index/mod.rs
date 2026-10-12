@@ -151,8 +151,8 @@ impl Index {
         )?;
         let rows = stmt.query_map([], |r| {
             let tag: String = r.get(0)?;
-            let count: usize = r.get(1)?;
-            Ok((tag, count))
+            let count: i64 = r.get(1)?;
+            Ok((tag, count as usize))
         })?;
         rows.collect()
     }
