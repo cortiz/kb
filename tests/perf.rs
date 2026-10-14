@@ -182,9 +182,11 @@ code:
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    // 10s locally; shared CI runners are slower
+    let budget = if std::env::var("CI").is_ok() { 20 } else { 10 };
     assert!(
-        elapsed.as_secs() <= 10,
-        "checking 200 entries took {:?}, budget is <= 10s",
+        elapsed.as_secs() <= budget,
+        "checking 200 entries took {:?}, budget is <= {budget}s",
         elapsed
     );
 }
