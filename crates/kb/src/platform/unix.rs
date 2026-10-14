@@ -274,15 +274,49 @@ pub fn run_read_tool(tool: &NativeTool, timeout: Duration) -> Result<Vec<u8>, To
 
 /// `git -C <root> <args>`: both streams captured, never asks for a password or a terminal.
 pub fn run_git(root: &Path, args: &[&str], timeout: Duration) -> Result<GitOutput, ToolError> {
+    run_git_with(root, args, timeout, false)
+}
+
+/// Like [`run_git`], but never asks anything: for fetches the UI starts by itself, where a
+/// prompt would land in the middle of the screen. ssh gets `BatchMode=yes`.
+pub fn run_git_batch(
+    root: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<GitOutput, ToolError> {
+    run_git_with(root, args, timeout, true)
+}
+
+fn run_git_with(
+    root: &Path,
+    args: &[&str],
+    timeout: Duration,
+    batch: bool,
+) -> Result<GitOutput, ToolError> {
     use std::io::Read;
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(root)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Talking to a remote may need an ssh password, a key passphrase or an https login. ssh and
+    // git ask on the controlling terminal, so with one available they may prompt, and the user
+    // is not hurried by `timeout`. Without one, fail at once instead of hanging.
+    let prompts = args
+        .iter()
+        .find(|a| !a.starts_with('-'))
+        .is_some_and(|a| matches!(*a, "fetch" | "push" | "clone" | "pull" | "ls-remote"))
+        && !batch
+        && open_tty().is_ok();
+    if batch {
+        let ssh = std::env::var("GIT_SSH_COMMAND").unwrap_or_else(|_| "ssh".into());
+        cmd.env("GIT_SSH_COMMAND", format!("{ssh} -o BatchMode=yes"));
+    }
+    match open_tty().ok().filter(|_| prompts).map(|t| t.try_clone()) {
+        Some(Ok(tty)) => cmd.stdin(Stdio::from(tty)),
+        _ => cmd.stdin(Stdio::null()).env("GIT_TERMINAL_PROMPT", "0"),
+    };
     let mut child = cmd.spawn().map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => ToolError::NotFound,
         _ => ToolError::Io(e.to_string()),
@@ -300,7 +334,7 @@ pub fn run_git(root: &Path, args: &[&str], timeout: Duration) -> Result<GitOutpu
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
+            Ok(None) if !prompts && Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(ToolError::TimedOut);

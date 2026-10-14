@@ -602,3 +602,71 @@ fn saving_a_new_entry_under_100ms_and_add_yes_cold_start_under_100ms() {
     // the process starts, reads the body, checks it, writes the file and refreshes the index
     assert!(runs[2] < Duration::from_millis(100), "median {:?}", runs[2]);
 }
+
+/// Git sync SC-004: auto-commit adds at most 100 ms to a save on a 10,000-entry repository.
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn auto_commit_adds_under_100ms() {
+    use std::process::Command as Git;
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    generate(dir.path());
+    let git = |args: &[&str]| {
+        let s = Git::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .output()
+            .unwrap();
+        assert!(s.status.success(), "{}", String::from_utf8_lossy(&s.stderr));
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.name", "T"]);
+    git(&["config", "user.email", "t@example.com"]);
+    // 10,000 loose objects would make git start a background repack that skews the timings
+    git(&["config", "maintenance.auto", "false"]);
+    git(&["config", "gc.auto", "0"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "initial"]);
+    kb_in(dir.path()).arg("reindex").output().unwrap();
+
+    // renames alternate between auto-commit on and off; the difference is the commit's cost
+    let rename = |i: usize, commit: bool| {
+        let from = generated_path(dir.path(), i);
+        let id = |p: &Path| {
+            p.strip_prefix(dir.path())
+                .unwrap()
+                .with_extension("")
+                .to_string_lossy()
+                .into_owned()
+        };
+        let to = from.with_file_name(format!("moved-{i:05}.md"));
+        let mut cmd = kb_in(dir.path());
+        cmd.env("KB_GIT_AUTO_COMMIT", if commit { "true" } else { "false" })
+            .args(["mv", &id(&from), &id(&to)]);
+        let start = Instant::now();
+        let out = cmd.output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        start.elapsed()
+    };
+    rename(0, false); // warm up
+    let with: Vec<Duration> = (1..=6).map(|i| rename(i * 2, true)).collect();
+    let without: Vec<Duration> = (1..=6).map(|i| rename(i * 2 + 1, false)).collect();
+    let (with, without) = (median(with), median(without));
+    println!("mv with auto-commit {with:?}, without {without:?}");
+    let extra = with.saturating_sub(without);
+    let limit = if std::env::var("CI").is_ok() {
+        Duration::from_millis(150)
+    } else {
+        Duration::from_millis(100)
+    };
+    assert!(extra < limit, "auto-commit added {extra:?}");
+}

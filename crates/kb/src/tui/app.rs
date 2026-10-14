@@ -197,6 +197,13 @@ pub enum Action {
     Removed(String),
     /// A rename or delete from the list did not work.
     OpFailed(String),
+    /// Alt-S finished: the one-line summary, and whether it worked.
+    SyncDone(String, bool),
+    GitStatus(Box<kb_core::git::status::SyncStatus>),
+    FetchFailed,
+    HistoryLoaded(Result<Box<super::history_view::HistoryState>, String>),
+    HistoryDiff(Result<String, String>),
+    HistoryRestored(Result<String, String>),
     /// Ctrl-E in the add form returned: the new body (`None`: unchanged or cancelled) or why not.
     BodyEdited(Result<Option<String>, String>),
     /// The new entry was written.
@@ -227,6 +234,24 @@ pub enum Effect {
         use_count: u64,
     },
     Refresh,
+    /// Alt-S: run `kb sync` in the foreground.
+    Sync,
+    /// Re-read the git status for the header badge.
+    GitStatus,
+    /// Alt-H: read the entry's history.
+    LoadHistory(String),
+    /// Enter in the history overlay.
+    LoadHistoryDiff {
+        id: String,
+        rev: String,
+    },
+    /// `r` then `y` in the history overlay.
+    RestoreRevision {
+        id: String,
+        rev: String,
+    },
+    /// `sync.fetch_on_start`: fetch in the background.
+    Fetch,
     /// Enter on the selected entry: leave the UI and let the caller copy or print it.
     Pick,
     CopyPayload,
@@ -286,6 +311,10 @@ pub enum Effect {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub root: String,
+    /// The git badge's data; `None` until the first status arrives.
+    pub sync_status: Option<kb_core::git::status::SyncStatus>,
+    pub fetch_failed: bool,
+    pub history: Option<Box<super::history_view::HistoryState>>,
     pub input: SearchInput,
     pub results: Vec<SearchResult>,
     pub total: usize,
@@ -336,6 +365,9 @@ impl AppState {
     pub fn new(options: Options, size: (u16, u16), initial_query: &str, root: String) -> AppState {
         AppState {
             root,
+            sync_status: None,
+            fetch_failed: false,
+            history: None,
             input: SearchInput::from_text(initial_query),
             results: Vec::new(),
             total: 0,
@@ -399,6 +431,7 @@ impl AppState {
             || self.add.is_some()
             || self.code_view.is_some()
             || self.action_menu.is_some()
+            || self.history.is_some()
         {
             Mode::Form
         } else if self.overlay == Overlay::Help {
@@ -534,6 +567,19 @@ impl AppState {
                 if self.action_menu.is_some() {
                     return self.action_menu_key(e, now);
                 }
+                if let Some(h) = self.history.as_mut() {
+                    use super::history_view::HistoryOutcome as O;
+                    let id = h.history.id.clone();
+                    return match h.key(e) {
+                        O::Nothing => Vec::new(),
+                        O::Close => {
+                            self.history = None;
+                            Vec::new()
+                        }
+                        O::Diff(rev) => vec![Effect::LoadHistoryDiff { id, rev }],
+                        O::Restore(rev) => vec![Effect::RestoreRevision { id, rev }],
+                    };
+                }
                 if self.prompt.is_some() {
                     return self.prompt_key(e, now);
                 }
@@ -615,7 +661,11 @@ impl AppState {
                 };
                 self.empty_kb = info.indexed + info.skipped == 0;
                 let limit = self.limit;
-                vec![self.search_effect(limit)]
+                let mut effects = vec![self.search_effect(limit)];
+                if self.sync_status.as_ref().is_some_and(|s| s.git.is_git) {
+                    effects.push(Effect::GitStatus);
+                }
+                effects
             }
             Action::WorkerFailed(message) => {
                 self.status.refreshing = false;
@@ -736,6 +786,54 @@ impl AppState {
                 self.say(&format!("Deleted {id}"), MessageKind::Info, now, true);
                 self.status.refreshing = true;
                 vec![Effect::Refresh]
+            }
+            Action::SyncDone(message, ok) => {
+                let kind = if ok {
+                    MessageKind::Info
+                } else {
+                    MessageKind::Warning
+                };
+                self.say(&message, kind, now, ok);
+                self.fetch_failed = false;
+                self.status.refreshing = true;
+                vec![Effect::Refresh, Effect::GitStatus]
+            }
+            Action::GitStatus(status) => {
+                self.sync_status = Some(*status);
+                Vec::new()
+            }
+            Action::HistoryLoaded(Ok(h)) => {
+                self.history = Some(h);
+                Vec::new()
+            }
+            Action::HistoryLoaded(Err(m)) => {
+                self.say(&m, MessageKind::Warning, now, false);
+                Vec::new()
+            }
+            Action::HistoryDiff(result) => {
+                if let Some(h) = &mut self.history {
+                    match result {
+                        Ok(d) => h.diff = Some((d, 0)),
+                        Err(m) => h.message = Some(m),
+                    }
+                }
+                Vec::new()
+            }
+            Action::HistoryRestored(Ok(message)) => {
+                self.history = None;
+                self.say(&message, MessageKind::Info, now, true);
+                self.status.refreshing = true;
+                vec![Effect::Refresh, Effect::GitStatus]
+            }
+            Action::HistoryRestored(Err(m)) => {
+                if let Some(h) = &mut self.history {
+                    h.message = Some(m);
+                }
+                Vec::new()
+            }
+            Action::FetchFailed => {
+                self.fetch_failed = true;
+                Vec::new()
             }
             Action::OpFailed(message) => {
                 // a rename keeps its question open so the name can be fixed
@@ -1264,6 +1362,17 @@ impl AppState {
             Command::Refresh => {
                 self.status.refreshing = true;
                 vec![Effect::Refresh]
+            }
+            Command::History => {
+                let Some(id) = self.selected_result().map(|r| r.id.clone()) else {
+                    self.say("Nothing to pick", MessageKind::Info, now, true);
+                    return Vec::new();
+                };
+                vec![Effect::LoadHistory(id)]
+            }
+            Command::Sync => {
+                self.say("Syncing…", MessageKind::Info, now, true);
+                vec![Effect::Sync]
             }
             Command::Esc => {
                 if self.layout_mode == LayoutMode::FullPreview {

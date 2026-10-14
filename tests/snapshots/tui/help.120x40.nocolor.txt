@@ -7,29 +7,29 @@
 │ cmd    Deploy service                        ││ cmd/cache-role-flush.md                                              │
 │        #deploy #prod                         ││                                                                      │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Shift-↓            scroll preview                        │ │
-│ │ Ctrl-Y             copy payload                         Shift-↑            scroll preview                        │ │
-│ │ Ctrl-O             open                                 Shift-PgDn         preview page                          │ │
-│ │ Ctrl-G             run                                  Shift-PgUp         preview page                          │ │
-│ │ Alt-A  F2          action menu                          Alt-P              zoom preview                          │ │
-│ │ Alt-C              copy template                        ←                  cursor left                           │ │
-│ │ Ctrl-E             edit entry                           →                  cursor right                          │ │
-│ │ Ctrl-N             add entry                            Home  Ctrl-A       line start                            │ │
-│ │ Ctrl-R             rename entry                         End                line end                              │ │
-│ │ Ctrl-X             delete entry                         Backspace          delete, drop chip                     │ │
-│ │ ↓  Ctrl-J          next result                          Delete             delete                                │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Ctrl-W             delete word                           │ │
-│ │ PgDn               page down                            Ctrl-U             clear line                            │ │
-│ │ PgUp               page up                              Ctrl-L             refresh                               │ │
-│ │ Ctrl-End           last result                          ?                  help                                  │ │
-│ │ Ctrl-Home          first result                         F1                 help                                  │ │
-│ │ Tab                next type                            Esc                clear / quit                          │ │
-│ │ Shift-Tab          previous type                        Ctrl-C             exit                                  │ │
+│ │ Enter              pick and exit                        Shift-↑            scroll preview                        │ │
+│ │ Ctrl-Y             copy payload                         Shift-PgDn         preview page                          │ │
+│ │ Ctrl-O             open                                 Shift-PgUp         preview page                          │ │
+│ │ Ctrl-G             run                                  Alt-H              history                               │ │
+│ │ Alt-A  F2          action menu                          Alt-S              sync                                  │ │
+│ │ Alt-C              copy template                        Alt-P              zoom preview                          │ │
+│ │ Ctrl-E             edit entry                           ←                  cursor left                           │ │
+│ │ Ctrl-N             add entry                            →                  cursor right                          │ │
+│ │ Ctrl-R             rename entry                         Home  Ctrl-A       line start                            │ │
+│ │ Ctrl-X             delete entry                         End                line end                              │ │
+│ │ ↓  Ctrl-J          next result                          Backspace          delete, drop chip                     │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Delete             delete                                │ │
+│ │ PgDn               page down                            Ctrl-W             delete word                           │ │
+│ │ PgUp               page up                              Ctrl-U             clear line                            │ │
+│ │ Ctrl-End           last result                          Ctrl-L             refresh                               │ │
+│ │ Ctrl-Home          first result                         ?                  help                                  │ │
+│ │ Tab                next type                            F1                 help                                  │ │
+│ │ Shift-Tab          previous type                        Esc                clear / quit                          │ │
+│ │ Shift-↓            scroll preview                       Ctrl-C             exit                                  │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
-│        #prod #sqs                            ││                                                                      │
 │ link   Grafana dashboards                    ││                                                                      │
 │        #observability                        ││                                                                      │
 │ link   On-call handbook                      ││                                                                      │
@@ -90,11 +90,11 @@
 26:2..8 bold
 27:9..14 dim
 27:15..23 dim
-28:2..4 bold
-28:4..8 bold+dim
-28:8..72 dim
-29:4..47 dim
-30:2..8 bold
+28:2..8 bold
+29:4..72 dim
+30:2..4 bold
+30:4..8 bold+dim
+30:8..47 dim
 31:9..14 dim
 31:15..19 dim
 32:2..8 bold
