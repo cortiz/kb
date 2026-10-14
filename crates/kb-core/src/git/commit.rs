@@ -51,17 +51,25 @@ pub fn is_signing_configured(root: &Path, git: &impl GitRunner) -> bool {
     }
 }
 
-/// Checks whether author identity (`user.name` and `user.email`) is configured.
+/// Checks whether author identity (`user.name` and `user.email`) is configured. One git call:
+/// every process costs ~15 ms and a save has a 100 ms budget on a big KB.
 pub fn check_git_identity(root: &Path, git: &impl GitRunner) -> Result<(), String> {
-    let name = git.run_git(root, &["config", "user.name"]);
-    let email = git.run_git(root, &["config", "user.email"]);
-    match (name, email) {
-        (Ok(n), Ok(e)) if !n.trim().is_empty() && !e.trim().is_empty() => Ok(()),
-        _ => Err("Git author identity not configured (user.name or user.email missing)".into()),
+    let out = git
+        .run_git(root, &["config", "--get-regexp", r"^user\.(name|email)$"])
+        .unwrap_or_default();
+    let has = |key: &str| {
+        out.lines().any(|l| {
+            l.split_once(' ')
+                .is_some_and(|(k, v)| k == key && !v.trim().is_empty())
+        })
+    };
+    if has("user.name") && has("user.email") {
+        Ok(())
+    } else {
+        Err("Git author identity not configured (user.name or user.email missing)".into())
     }
 }
 
-/// Formats the commit message using the template from settings.
 pub fn format_commit_message(template: &str, action: AutoCommitAction, id: &str) -> String {
     template
         .replace("{action}", action.as_str())
@@ -81,11 +89,10 @@ pub fn auto_commit_operation(
         return Ok(AutoCommitOutcome::SkippedDisabled);
     }
 
-    // 1. Check if root is inside a git working tree
-    let inside = git.run_git(root, &["rev-parse", "--is-inside-work-tree"]);
-    match inside {
-        Ok(out) if out.trim() == "true" => {}
-        _ => return Ok(AutoCommitOutcome::SkippedNotGitRepo),
+    // 1. Is the root inside a git working tree? A `.git` directory or file above it says so
+    //    without a process (~15 ms of the 100 ms a save may cost on a large KB).
+    if !root.ancestors().any(|d| d.join(".git").exists()) {
+        return Ok(AutoCommitOutcome::SkippedNotGitRepo);
     }
 
     // 2. Check author identity
@@ -96,32 +103,53 @@ pub fn auto_commit_operation(
     // 3. Format message
     let message = format_commit_message(settings.git_commit_template(), action, id);
 
-    // 4. Stage specified paths with git add -A -- <path>
+    // 4. Commit exactly the given paths (`--only`), leaving everything else staged or not alone.
+    //    New files must be added first; for the rest `--only` reads the working tree itself, so
+    //    the `git add` process is only spent when git says it does not know a path.
     let path_strs: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
-    for p in &path_strs {
-        let add_res = git.run_git(root, &["add", "-A", "--", p]);
-        if let Err(GitError::CommandFailed { stderr, .. }) = &add_res
-            && stderr.contains("did not match any files")
-        {
-            // The path was already removed/staged by git mv or git rm.
-            continue;
+    let add = |paths: &[String]| -> Result<(), GitError> {
+        let mut args = vec!["add", "-A", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        match git.run_git(root, &args) {
+            // already removed or staged by git mv / git rm
+            Err(GitError::CommandFailed { stderr, .. })
+                if stderr.contains("did not match any files") =>
+            {
+                Ok(())
+            }
+            other => other.map(|_| ()),
         }
-        add_res?;
-    }
-
-    // 5. Commit specified paths with git commit --only -m <message> -- <paths>
+    };
     let mut commit_args = vec!["commit", "--only", "-m", &message, "--"];
-    for p in &path_strs {
-        commit_args.push(p.as_str());
+    commit_args.extend(path_strs.iter().map(String::as_str));
+    if action == AutoCommitAction::Add {
+        add(&path_strs)?;
     }
-    git.run_git(root, &commit_args)?;
+    let out = match git.run_git(root, &commit_args) {
+        Err(GitError::CommandFailed { stderr, .. })
+            if action != AutoCommitAction::Add && stderr.contains("did not match any file") =>
+        {
+            add(&path_strs)?;
+            git.run_git(root, &commit_args)?
+        }
+        other => other?,
+    };
 
-    // 6. Get commit hash
-    let hash_out = git.run_git(root, &["rev-parse", "HEAD"])?;
-    let commit_hash = hash_out.trim().to_string();
+    // 5. The new commit's hash is in git's own summary line: `[main abc1234] message`
+    let from_summary = out
+        .lines()
+        .find_map(|l| l.strip_prefix('[')?.split_once(']'))
+        .and_then(|(head, _)| head.split_whitespace().last().map(str::to_string));
+    let commit_hash = match from_summary {
+        Some(h) => h,
+        None => git
+            .run_git(root, &["rev-parse", "HEAD"])?
+            .trim()
+            .to_string(),
+    };
 
     Ok(AutoCommitOutcome::Committed {
         commit_hash,
@@ -136,8 +164,16 @@ mod tests {
     use crate::git::{FakeGitRunner, GitCommandResult};
     use std::path::{Path, PathBuf};
 
+    /// A directory that looks like a working tree to `auto_commit_operation`.
+    fn work_tree() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        dir
+    }
+
     #[test]
     fn test_auto_commit_operation_success() {
+        let tree = work_tree();
         let fake = FakeGitRunner::with_handler(|_, args| {
             if args.contains(&"--is-inside-work-tree") {
                 Ok(GitCommandResult {
@@ -145,16 +181,10 @@ mod tests {
                     stdout: "true\n".into(),
                     stderr: String::new(),
                 })
-            } else if args.contains(&"user.name") {
+            } else if args.contains(&"--get-regexp") {
                 Ok(GitCommandResult {
                     exit_code: Some(0),
-                    stdout: "Alice\n".into(),
-                    stderr: String::new(),
-                })
-            } else if args.contains(&"user.email") {
-                Ok(GitCommandResult {
-                    exit_code: Some(0),
-                    stdout: "alice@example.com\n".into(),
+                    stdout: "user.name Alice\nuser.email alice@example.com\n".into(),
                     stderr: String::new(),
                 })
             } else if args.contains(&"HEAD") {
@@ -174,7 +204,7 @@ mod tests {
 
         let settings = Settings::default();
         let outcome = auto_commit_operation(
-            Path::new("/kb"),
+            tree.path(),
             &fake,
             &settings,
             AutoCommitAction::Add,
@@ -206,6 +236,53 @@ mod tests {
     }
 
     #[test]
+    fn untracked_file_on_edit_is_added_then_committed_once_more() {
+        let tree = work_tree();
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let first = AtomicBool::new(true);
+        let fake = FakeGitRunner::with_handler(move |_, args| {
+            let ok = |out: &str| {
+                Ok(GitCommandResult {
+                    exit_code: Some(0),
+                    stdout: out.into(),
+                    stderr: String::new(),
+                })
+            };
+            match args {
+                ["rev-parse", "--is-inside-work-tree"] => ok("true\n"),
+                ["config", ..] => ok("user.name A\nuser.email a@x\n"),
+                ["commit", ..] if first.swap(false, Ordering::SeqCst) => {
+                    Err(crate::git::GitError::CommandFailed {
+                        exit_code: Some(1),
+                        stderr: "error: pathspec 'a.md' did not match any file(s) known to git"
+                            .into(),
+                    })
+                }
+                ["commit", ..] => ok("[main abc1234] kb: edit a\n 1 file changed\n"),
+                _ => ok(""),
+            }
+        });
+        let outcome = auto_commit_operation(
+            tree.path(),
+            &fake,
+            &Settings::default(),
+            AutoCommitAction::Edit,
+            "a",
+            &[PathBuf::from("a.md")],
+        )
+        .unwrap();
+        assert!(
+            matches!(outcome, AutoCommitOutcome::Committed { commit_hash, .. } if commit_hash == "abc1234")
+        );
+        let c: Vec<String> = fake
+            .calls()
+            .into_iter()
+            .map(|(_, a)| a[0].clone())
+            .collect();
+        assert_eq!(c, ["config", "commit", "add", "commit"]);
+    }
+
+    #[test]
     fn test_auto_commit_operation_disabled() {
         let fake = FakeGitRunner::new();
         let mut settings = Settings::default();
@@ -227,26 +304,12 @@ mod tests {
 
     #[test]
     fn test_auto_commit_operation_not_git_repo() {
-        let fake = FakeGitRunner::with_handler(|_, args| {
-            if args.contains(&"--is-inside-work-tree") {
-                Err(crate::git::GitError::CommandFailed {
-                    exit_code: Some(128),
-                    stderr: "fatal: not a git repository".into(),
-                })
-            } else {
-                Ok(GitCommandResult {
-                    exit_code: Some(0),
-                    stdout: String::new(),
-                    stderr: String::new(),
-                })
-            }
-        });
-
-        let settings = Settings::default();
+        let fake = FakeGitRunner::new();
+        let dir = tempfile::tempdir().unwrap();
         let outcome = auto_commit_operation(
-            Path::new("/kb"),
+            dir.path(),
             &fake,
-            &settings,
+            &Settings::default(),
             AutoCommitAction::Rm,
             "cmd/old",
             &[PathBuf::from("cmd/old.md")],
@@ -254,10 +317,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(outcome, AutoCommitOutcome::SkippedNotGitRepo);
+        assert!(
+            fake.calls().is_empty(),
+            "no git process for a plain directory"
+        );
     }
 
     #[test]
     fn test_auto_commit_operation_missing_identity() {
+        let tree = work_tree();
         let fake = FakeGitRunner::with_handler(|_, args| {
             if args.contains(&"--is-inside-work-tree") {
                 Ok(GitCommandResult {
@@ -265,9 +333,10 @@ mod tests {
                     stdout: "true\n".into(),
                     stderr: String::new(),
                 })
-            } else if args.contains(&"user.name") {
-                Err(crate::git::GitError::CommandFailed {
-                    exit_code: Some(1),
+            } else if args.contains(&"--get-regexp") {
+                Ok(GitCommandResult {
+                    exit_code: Some(0),
+                    stdout: "user.name Alice\n".into(),
                     stderr: String::new(),
                 })
             } else {
@@ -281,7 +350,7 @@ mod tests {
 
         let settings = Settings::default();
         let outcome = auto_commit_operation(
-            Path::new("/kb"),
+            tree.path(),
             &fake,
             &settings,
             AutoCommitAction::Add,

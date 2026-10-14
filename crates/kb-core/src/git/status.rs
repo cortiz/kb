@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::git::{GitError, GitRunner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum FileStatus {
     Modified,
     Added,
@@ -117,6 +118,39 @@ impl GitStatus {
         }
 
         status
+    }
+}
+
+/// [`GitStatus`] plus what `kb sync status` adds, all read locally (no network).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncStatus {
+    #[serde(flatten)]
+    pub git: GitStatus,
+    /// When `.git/FETCH_HEAD` was last written, in epoch seconds.
+    pub last_fetch: Option<u64>,
+    pub in_progress: Option<crate::sync::SyncInProgressState>,
+}
+
+impl SyncStatus {
+    pub fn query(runner: &impl GitRunner, root: &Path) -> Result<Self, GitError> {
+        let git = GitStatus::query(runner, root)?;
+        let last_fetch = if git.is_git {
+            runner
+                .run_git(root, &["rev-parse", "--git-path", "FETCH_HEAD"])
+                .ok()
+                .map(|p| root.join(p.trim()))
+                .and_then(|p| std::fs::metadata(p).ok())
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+        } else {
+            None
+        };
+        Ok(Self {
+            git,
+            last_fetch,
+            in_progress: crate::sync::state::load(root),
+        })
     }
 }
 
@@ -310,5 +344,33 @@ R  old/id.md -> new/id.md
         });
         let status_fail = GitStatus::query(&fake_fail, Path::new("/tmp")).unwrap();
         assert!(!status_fail.is_git);
+    }
+
+    #[test]
+    fn sync_status_reads_counts_fetch_time_and_serializes_as_the_contract_says() {
+        use crate::git::{FakeGitRunner, GitCommandResult};
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("FETCH_HEAD"), "x").unwrap();
+        let git = FakeGitRunner::with_handler(|_, args| {
+            let out = match args {
+                ["rev-parse", "--is-inside-work-tree"] => "true\n",
+                ["rev-parse", "--git-path", _] => "FETCH_HEAD\n",
+                ["status", ..] => "## main...origin/main [ahead 2, behind 3]\n M cw/p99.md\n",
+                _ => "",
+            };
+            Ok(GitCommandResult {
+                exit_code: Some(0),
+                stdout: out.into(),
+                stderr: String::new(),
+            })
+        });
+        let st = SyncStatus::query(&git, dir.path()).unwrap();
+        assert_eq!((st.git.ahead, st.git.behind), (2, 3));
+        assert!(st.last_fetch.is_some());
+        let v = serde_json::to_value(&st).unwrap();
+        assert_eq!(v["upstream"], "origin/main");
+        assert_eq!(v["uncommitted"][0]["id"], "cw/p99");
+        assert_eq!(v["uncommitted"][0]["status"], "modified");
+        assert!(v["in_progress"].is_null());
     }
 }

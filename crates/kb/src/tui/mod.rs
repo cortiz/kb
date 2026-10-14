@@ -8,6 +8,7 @@ pub mod code_view;
 pub mod conflict_view;
 pub mod form;
 pub mod form_view;
+pub mod header;
 pub mod highlight;
 pub mod history_view;
 pub mod inline_form;
@@ -115,7 +116,12 @@ pub fn run(
         state.open_start_add(*start, SystemTime::now());
     }
     let mut worker = Worker::spawn(root.to_path_buf(), theme.is_color());
+    let git_worker = header::GitWorker::spawn(root.to_path_buf());
     let mut pending: Vec<Effect> = state.start();
+    pending.push(Effect::GitStatus);
+    if settings.sync_fetch_on_start() {
+        pending.push(Effect::Fetch);
+    }
     let mut picked: Option<String> = None;
     let mut resolved: Option<Submission> = None;
     let mut exit: Option<i32> = None;
@@ -128,6 +134,61 @@ pub fn run(
             match effect {
                 Effect::Refresh => {
                     let _ = worker.tx.send(Request::Refresh);
+                }
+                Effect::LoadHistory(id) => {
+                    let git = crate::platform::SystemGitRunner;
+                    let result = kb_core::history::HistoryEngine::new(ui_kb.root(), &git)
+                        .log(&id)
+                        .map(|h| Box::new(history_view::HistoryState::new(h)))
+                        .map_err(|e| e.to_string());
+                    pending.extend(state.update(Action::HistoryLoaded(result), Instant::now()));
+                    dirty = true;
+                }
+                Effect::LoadHistoryDiff { id, rev } => {
+                    let git = crate::platform::SystemGitRunner;
+                    let result = kb_core::history::HistoryEngine::new(ui_kb.root(), &git)
+                        .diff(&id, &rev)
+                        .map_err(|e| e.to_string());
+                    pending.extend(state.update(Action::HistoryDiff(result), Instant::now()));
+                    dirty = true;
+                }
+                Effect::RestoreRevision { id, rev } => {
+                    let signing = kb_core::git::commit::is_signing_configured(
+                        ui_kb.root(),
+                        &crate::platform::SystemGitRunner,
+                    );
+                    if signing {
+                        guard.suspend();
+                    }
+                    let result = crate::commands::history::restore_entry(
+                        ui_kb.root(),
+                        &state.options.settings,
+                        &id,
+                        &rev,
+                    )
+                    .map(|(short, warning)| match warning {
+                        Some(w) => format!("Restored {id} from {short}; {w}"),
+                        None => format!("Restored {id} from {short}"),
+                    });
+                    if signing {
+                        let _ = guard.resume();
+                        if let Ok(size) = terminal.size() {
+                            let _ = terminal.resize(ratatui::layout::Rect::new(
+                                0,
+                                0,
+                                size.width,
+                                size.height,
+                            ));
+                        }
+                    }
+                    pending.extend(state.update(Action::HistoryRestored(result), Instant::now()));
+                    dirty = true;
+                }
+                Effect::GitStatus => {
+                    let _ = git_worker.tx.send(header::GitRequest::Status);
+                }
+                Effect::Fetch => {
+                    let _ = git_worker.tx.send(header::GitRequest::Fetch);
                 }
                 Effect::Search {
                     generation,
@@ -787,6 +848,29 @@ pub fn run(
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
+                Effect::Sync => {
+                    // leave the screen so an ssh password or passphrase prompt can be seen
+                    guard.suspend();
+                    let action = run_foreground_sync(
+                        platform,
+                        ui_kb.root(),
+                        &state.options.settings,
+                        &mut guard,
+                        &mut terminal,
+                        &theme,
+                    );
+                    let _ = guard.resume();
+                    if let Ok(size) = terminal.size() {
+                        let _ = terminal.resize(ratatui::layout::Rect::new(
+                            0,
+                            0,
+                            size.width,
+                            size.height,
+                        ));
+                    }
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
                 Effect::LoadTags => {
                     let _ = worker.tx.send(Request::Tags);
                 }
@@ -989,6 +1073,14 @@ pub fn run(
                     break;
                 }
             }
+        }
+        while let Ok(reply) = git_worker.rx.try_recv() {
+            let action = match reply {
+                header::GitReply::Status(status) => Action::GitStatus(status),
+                header::GitReply::FetchFailed => Action::FetchFailed,
+            };
+            pending.extend(state.update(action, Instant::now()));
+            dirty = true;
         }
         while let Ok(reply) = worker.rx.try_recv() {
             actions.push(match reply {
@@ -1599,6 +1691,161 @@ fn edit_entry(
         return Edited::Returned(Some(format!("could not return to the UI: {e}")));
     }
     Edited::Returned(kb.lint_entry(id).ok().and_then(|f| first_error_text(&f)))
+}
+
+/// Alt-S: the same pipeline as `kb sync`, on the suspended terminal so a password or passphrase
+/// prompt can be answered. Each conflict brings the UI back as the conflict screen.
+fn run_foreground_sync(
+    platform: &impl Platform,
+    root: &Path,
+    settings: &Settings,
+    guard: &mut TerminalGuard,
+    terminal: &mut Terminal<CrosstermBackend<std::fs::File>>,
+    theme: &Theme,
+) -> Action {
+    use conflict_view::{ConflictOutcome, ConflictScreen, draw_conflict};
+    use kb_core::sync::conflict::validate_entry_text;
+    use kb_core::sync::{
+        Conflict, ConflictError, ConflictHandler, ResolutionChoice, SyncConfig, SyncEngine,
+        SyncOptions,
+    };
+
+    struct Screen<'a, P: Platform> {
+        platform: &'a P,
+        editor: Option<String>,
+        guard: &'a mut TerminalGuard,
+        terminal: &'a mut Terminal<CrosstermBackend<std::fs::File>>,
+        theme: &'a Theme,
+        host: String,
+        number: usize,
+    }
+
+    impl<P: Platform> Screen<'_, P> {
+        /// Shows `screen` until a key decides it.
+        fn decide(
+            &mut self,
+            screen: &mut ConflictScreen,
+        ) -> Result<ConflictOutcome, ConflictError> {
+            let _ = self.guard.resume();
+            let result = loop {
+                let theme = self.theme;
+                if self
+                    .terminal
+                    .draw(|f| {
+                        let area = f.area();
+                        draw_conflict(screen, theme, area, f.buffer_mut());
+                    })
+                    .is_err()
+                {
+                    break Err(ConflictError::Io(
+                        "could not draw the conflict screen".into(),
+                    ));
+                }
+                match event::poll(Duration::from_millis(100)) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => break Err(ConflictError::Io(e.to_string())),
+                }
+                match event::read() {
+                    Ok(Event::Key(k)) if k.kind != crossterm::event::KeyEventKind::Release => {
+                        if let Some(outcome) = screen.key(k) {
+                            break Ok(outcome);
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => break Err(ConflictError::Io(e.to_string())),
+                }
+            };
+            // git may prompt for credentials next: give the terminal back
+            self.guard.suspend();
+            result
+        }
+
+        fn edit_merged(&mut self, conflict: &Conflict) -> Option<String> {
+            let tty = self.guard.writer().ok()?;
+            let temp = self
+                .platform
+                .private_temp_file(
+                    "md",
+                    crate::commands::sync::merged_template(conflict).as_bytes(),
+                )
+                .ok()?;
+            let editor = self.platform.resolve_editor(self.editor.as_deref());
+            self.guard.suspend();
+            let ran = self
+                .platform
+                .run_editor(&editor, temp.path(), &tty, &|| false);
+            ran.ok()??;
+            temp.read_to_string().ok()
+        }
+    }
+
+    impl<P: Platform> ConflictHandler for Screen<'_, P> {
+        fn resolve(&mut self, c: &Conflict) -> Result<ResolutionChoice, ConflictError> {
+            self.number += 1;
+            let mut screen = ConflictScreen::new(c.clone(), self.number);
+            loop {
+                match self.decide(&mut screen)? {
+                    ConflictOutcome::Mine => return Ok(ResolutionChoice::Mine),
+                    ConflictOutcome::Theirs => return Ok(ResolutionChoice::Theirs),
+                    ConflictOutcome::Delete => return Ok(ResolutionChoice::Delete),
+                    ConflictOutcome::Abort | ConflictOutcome::NewId(_) => {
+                        return Err(ConflictError::UserAborted);
+                    }
+                    ConflictOutcome::Both => {
+                        return Ok(ResolutionChoice::KeepBoth {
+                            new_id: format!("{}-conflict-{}", c.id, self.host),
+                        });
+                    }
+                    ConflictOutcome::Edit => match self.edit_merged(c) {
+                        None => screen.message = Some("could not run the editor".into()),
+                        Some(text) => match validate_entry_text(&c.id, &text) {
+                            None => return Ok(ResolutionChoice::EditMerged(text)),
+                            Some(problem) => screen.message = Some(problem),
+                        },
+                    },
+                }
+            }
+        }
+
+        fn new_id(&mut self, taken: &str) -> Result<String, ConflictError> {
+            let mut screen = ConflictScreen::new(
+                Conflict {
+                    id: taken.to_string(),
+                    rel_path: format!("{taken}.md").into(),
+                    kind: kb_core::sync::ConflictKind::BothAdded,
+                    mine: None,
+                    theirs: None,
+                    base: None,
+                },
+                self.number,
+            );
+            screen.new_id = Some((String::new(), taken.to_string()));
+            match self.decide(&mut screen)? {
+                ConflictOutcome::NewId(id) => Ok(id),
+                _ => Err(ConflictError::UserAborted),
+            }
+        }
+    }
+
+    let git = crate::platform::SystemGitRunner;
+    let config = SyncConfig {
+        strategy: settings.sync_strategy(),
+        timeout: Duration::from_secs(settings.sync_timeout()),
+    };
+    let mut handler = Screen {
+        platform,
+        editor: settings.editor().map(str::to_string),
+        guard,
+        terminal,
+        theme,
+        host: crate::commands::sync::host(),
+        number: 0,
+    };
+    match SyncEngine::new(root, &git, config).execute(&SyncOptions::default(), &mut handler) {
+        Ok(s) => Action::SyncDone(format!("Sync: {}", s.new_status), true),
+        Err(e) => Action::SyncDone(format!("Sync failed: {e}"), false),
+    }
 }
 
 #[cfg(test)]

@@ -401,6 +401,42 @@ impl kb_core::git::GitRunner for SystemGitRunner {
     }
 }
 
+/// A [`kb_core::git::GitRunner`] that never prompts, for work done behind the UI's back.
+#[derive(Debug, Clone, Default)]
+pub struct BatchGitRunner;
+
+impl kb_core::git::GitRunner for BatchGitRunner {
+    fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, kb_core::git::GitError> {
+        let r = self.run_git_status(cwd, args, Duration::from_secs(30))?;
+        if r.success() {
+            Ok(r.stdout)
+        } else {
+            Err(kb_core::git::GitError::CommandFailed {
+                exit_code: r.exit_code,
+                stderr: r.stderr,
+            })
+        }
+    }
+
+    fn run_git_status(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<kb_core::git::GitCommandResult, kb_core::git::GitError> {
+        let output = unix::run_git_batch(cwd, args, timeout).map_err(|e| match e {
+            ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
+            ToolError::TimedOut => kb_core::git::GitError::TimedOut,
+            _ => kb_core::git::GitError::Io(e.to_string()),
+        })?;
+        Ok(kb_core::git::GitCommandResult {
+            exit_code: output.code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

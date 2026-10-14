@@ -185,6 +185,10 @@ pub enum Command {
     DeleteWord,
     ClearLine,
     Refresh,
+    /// Alt-S: sync with the git remote.
+    Sync,
+    /// Alt-H: the selected entry's git history.
+    History,
     /// `?`: help when the text line is empty, otherwise the character is typed.
     HelpKey,
     Help,
@@ -460,6 +464,24 @@ pub const BINDINGS: &[Binding] = &[
         group: Group::Preview,
         display: "Shift-PgUp",
         label: "scroll the preview one page up",
+        bar: None,
+    },
+    Binding {
+        keys: &[Key::new(Code::Char('h'), ALT)],
+        modes: SF,
+        command: Command::History,
+        group: Group::App,
+        display: "Alt-H",
+        label: "history of the selected entry",
+        bar: None,
+    },
+    Binding {
+        keys: &[Key::new(Code::Char('s'), ALT)],
+        modes: SF,
+        command: Command::Sync,
+        group: Group::App,
+        display: "Alt-S",
+        label: "sync with the git remote",
         bar: None,
     },
     Binding {
@@ -846,6 +868,8 @@ pub fn short_label(c: Command) -> &'static str {
         Command::DeleteWord => "delete word",
         Command::ClearLine => "clear line",
         Command::Refresh => "refresh",
+        Command::Sync => "sync",
+        Command::History => "history",
         Command::HelpKey | Command::Help => "help",
         Command::Esc => "clear / quit",
         Command::Quit => "exit",

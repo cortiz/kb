@@ -377,6 +377,8 @@ printed on stderr after the UI closes.
 | `Shift-PgDn` | scroll the preview one page down |
 | `Shift-PgUp` | scroll the preview one page up |
 | `Alt-P` | full-screen preview (narrow terminals) |
+| `Alt-S` | sync with the git remote (see [Git sync](#git-sync)) |
+| `Alt-H` | history of the selected entry |
 | `←` | cursor left |
 | `→` | cursor right |
 | `Home  Ctrl-A` | start of the line |
@@ -776,6 +778,66 @@ write = false                 # allow agents to create and update entries (defau
 prompts = true                # expose prompt entries as MCP prompts (default: true)
 exclude_tags = ["private"]    # hide entries with these tags from MCP tools and prompts
 ```
+
+## Git sync
+
+The KB is plain files, so git gives it history, backup and sync between machines through any remote
+you control. kb uses your installed `git` (2.28 or newer), your identity, signing, credential helpers
+and hooks; it stores no credentials. Nothing touches the network except the commands below.
+
+```sh
+kb sync setup git@github.com:me/kb.git   # git init, ignore .kb/, "kb: initial import", push -u
+kb clone git@github.com:me/kb.git [path]  # a second machine: clone, build the index
+kb init --git                             # a new KB under git from the start
+kb sync                                   # commit hand edits, fetch, rebase, push, refresh the index
+kb sync --dry-run                         # what would be committed, pulled and pushed
+kb sync --no-push                         # integrate remote changes, do not push
+kb sync status [--fetch] [--json]         # ahead/behind/uncommitted, offline unless --fetch
+kb history <id> [--diff <rev>] [--json]   # commits that changed an entry, renames followed
+kb restore <id> --at <rev>                # put an old version back (lint, secret check, commit)
+kb git install-hooks                      # pre-commit hook that blocks staged secrets
+kb git uninstall-hooks
+```
+
+**Every change through kb is committed**: `add`, `edit`, `mv`, `rm`, `code repin` and `restore` make
+one commit limited to the files they touched (`git commit --only`), so your other staged or
+unstaged changes are left alone. The message follows `git.commit_template`
+(default `kb: {action} {id}`); with `git.auto_commit = false` or no git identity, nothing is committed.
+
+**`kb sync`** refuses to run while non-entry files (a `README.md`, say) have changes, because it would
+have to stash them; commit them first. Edits made outside kb are committed as one `kb: sync N
+entries` (or `-m`). If the remote moved while pushing, kb fetches and integrates once more; a second
+rejection stops cleanly with exit 1.
+
+**Conflicts** are resolved one entry at a time: `m` mine, `t` theirs, `e` edit the merged text
+(checked by lint and the secret scan), `b` keep both (theirs is saved as `<id>-conflict-<host>`),
+`d` delete. In the terminal UI (`Alt-S`) each conflict gets a full-screen view, side by side from 120
+columns; on the command line the same letters are read from the terminal or from stdin. Quitting
+restores the repository to where it was before the integration. With nobody to ask (no input), the
+conflict waits: run `kb sync --continue` or `kb sync --abort`.
+
+**Passwords and passphrases**: when git or ssh needs one for a fetch, push or clone, it asks on your
+terminal as usual (the UI steps aside for it). Background fetches never prompt.
+
+**Secrets never leave the machine**: entries are scanned before every commit, and before a push every
+unpushed commit is scanned, so a secret committed and later removed still stops the push (exit 1;
+rewrite local history with `git rebase -i` or `git reset`). `# kb:allow-secret` marks a reviewed
+exception.
+
+Settings (`kb config set <key> <value>`):
+
+| Key | Default | |
+|-----|---------|---|
+| `git.auto_commit` | `true` | commit what kb changes |
+| `git.commit_template` | `kb: {action} {id}` | `{action}` and `{id}` |
+| `sync.strategy` | `rebase` | or `merge` |
+| `sync.timeout` | `30` | seconds, for fetch and push when there is no terminal to ask on |
+| `sync.fetch_on_start` | `false` | fetch in the background when the UI opens (5 s limit, never prompts) |
+
+The UI header shows `git ✓ in sync`, `git ↑2`, `git ↓3`, `git ● 4 changed`, `git ⚠ conflict` or
+`git ⚠ fetch auth`. Exit codes: `0` done or already in sync; `1` blocked (secrets, unresolved
+conflicts, push rejected twice, dirty non-entry files, not a git repository); `2` usage, git
+missing or too old, I/O; `130` cancelled with the repository restored.
 
 ## Checking your setup
 

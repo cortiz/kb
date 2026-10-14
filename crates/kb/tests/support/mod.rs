@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 
 use assert_cmd::Command;
 
+pub mod git_sync;
 pub mod pty;
 pub mod snapshot;
 

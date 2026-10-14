@@ -91,13 +91,13 @@ description: "Task list for M9: Git Sync"
 
 - [x] T018 [P] [US4] Write failing tests for pre-commit entry secret scanner in `crates/kb-core/src/git/secrets.rs`: verify blocking findings without `kb:allow-secret`, and allowing marked entries.
 - [x] T019 [P] [US4] Write failing tests for historical commit scanner in `crates/kb-core/src/git/secrets.rs`: verify traversing `@{u}..HEAD` detects secrets introduced earlier in history even if deleted in latest commit.
-- [ ] T020 [P] [US4] Write failing integration tests for hook installation and chaining in `tests/hook_installation.rs`: verify installing, chaining existing user hooks, and uninstalling hooks cleanly.
+- [x] T020 [P] [US4] Write failing integration tests for hook installation and chaining in `tests/hook_installation.rs`: verify installing, chaining existing user hooks, and uninstalling hooks cleanly.
 
 ### Implementation for User Story 4
 
 - [x] T021 [US4] Implement `SecretGate::check_entries` in `crates/kb-core/src/git/secrets.rs`. Makes T018 pass.
 - [x] T022 [US4] Implement `SecretGate::check_unpushed_history` in `crates/kb-core/src/git/secrets.rs` using `git rev-list` and `git show`. Makes T019 pass.
-- [ ] T023 [US4] Implement `kb git install-hooks` and `kb git uninstall-hooks` CLI commands in `crates/kb/src/commands/hooks.rs`. Makes T020 pass.
+- [x] T023 [US4] Implement `kb git install-hooks` and `kb git uninstall-hooks` CLI commands in `crates/kb/src/commands/hooks.rs`. Makes T020 pass.
 
 **Checkpoint**: No secret can be committed or pushed; pre-commit hooks chain cleanly.
 
@@ -111,16 +111,16 @@ description: "Task list for M9: Git Sync"
 
 ### Tests for User Story 2
 
-- [ ] T024 [P] [US2] Write failing tests for `SyncEngine::plan` and hand-edit batch committing in `crates/kb-core/src/sync/pipeline.rs`: verify hand-edit commit message `kb: sync N entries`, pre-sync commit recording, and unmanaged dirty file guard.
-- [ ] T025 [P] [US2] Write failing tests for push rejection and automatic retry in `crates/kb-core/src/sync/pipeline.rs`: verify 1 retry on rejected push, and stopping cleanly if rejected twice.
-- [ ] T026 [P] [US2] Write failing integration tests for two-clone sync in `tests/sync_two_clones.rs`: test bare remote sharing, linear rebase history, `--dry-run`, and `--no-push`.
+- [x] T024 [P] [US2] Write failing tests for `SyncEngine::plan` and hand-edit batch committing in `crates/kb-core/src/sync/pipeline.rs`: verify hand-edit commit message `kb: sync N entries`, pre-sync commit recording, and unmanaged dirty file guard.
+- [x] T025 [P] [US2] Write failing tests for push rejection and automatic retry in `crates/kb-core/src/sync/pipeline.rs`: verify 1 retry on rejected push, and stopping cleanly if rejected twice.
+- [x] T026 [P] [US2] Write failing integration tests for two-clone sync in `tests/sync_two_clones.rs`: test bare remote sharing, linear rebase history, `--dry-run`, and `--no-push`.
 
 ### Implementation for User Story 2
 
-- [ ] T027 [US2] Implement hand-edit scanning, dirty unmanaged file validation, and pre-sync commit recording in `crates/kb-core/src/sync/pipeline.rs`. Makes T024 pass.
-- [ ] T028 [US2] Implement fetch, rebase integration, pre-push secret check, push with concurrency retry, rename migration, and index refresh in `crates/kb-core/src/sync/pipeline.rs`. Makes T025 pass.
-- [ ] T029 [US2] Implement `kb sync` CLI subcommand with `--dry-run`, `--no-push`, `--message`, `--json` in `crates/kb/src/commands/sync.rs`. Makes T026 pass.
-- [ ] T030 [US2] Wire `Alt-S` keybinding in `crates/kb/src/tui/app.rs` to run foreground sync and report summary in status bar.
+- [x] T027 [US2] Implement hand-edit scanning, dirty unmanaged file validation, and pre-sync commit recording in `crates/kb-core/src/sync/pipeline.rs`. Makes T024 pass.
+- [x] T028 [US2] Implement fetch, rebase integration, pre-push secret check, push with concurrency retry, rename migration, and index refresh in `crates/kb-core/src/sync/pipeline.rs`. Makes T025 pass.
+- [x] T029 [US2] Implement `kb sync` CLI subcommand with `--dry-run`, `--no-push`, `--message`, `--json` in `crates/kb/src/commands/sync.rs`. Makes T026 pass.
+- [x] T030 [US2] Wire `Alt-S` keybinding in `crates/kb/src/tui/app.rs` to run foreground sync and report summary in status bar.
 
 **Checkpoint**: `kb sync` synchronizes multi-clone repositories in one command with clean linear rebase history.
 
@@ -134,17 +134,17 @@ description: "Task list for M9: Git Sync"
 
 ### Tests for User Story 3
 
-- [ ] T031 [P] [US3] Write failing tests for conflict porcelain status parsing in `crates/kb-core/src/sync/conflict.rs`: test `both_modified`, `modified_vs_deleted`, `deleted_vs_modified`, `both_added`, and `renamed_differently`.
-- [ ] T032 [P] [US3] Write failing tests for conflict resolution choices in `crates/kb-core/src/sync/conflict.rs`: test mine, theirs, edit merged, delete, and keep both with interactive ID collision prompt.
-- [ ] T033 [P] [US3] Write failing tests for rollback and sync resumption in `crates/kb-core/src/sync/state.rs`: test restoring pre-sync commit on abort, and persisting `.kb/sync-state.json`.
-- [ ] T034 [P] [US3] Write failing integration tests for conflict resolution and abort in `tests/sync_conflicts.rs`: test scripted resolutions, invalid merged text lint loop, non-interactive exit 1, and `kb sync --abort` / `--continue`.
+- [x] T031 [P] [US3] Write failing tests for conflict porcelain status parsing in `crates/kb-core/src/sync/conflict.rs`: test `both_modified`, `modified_vs_deleted`, `deleted_vs_modified`, `both_added`, and `renamed_differently`.
+- [x] T032 [P] [US3] Write failing tests for conflict resolution choices in `crates/kb-core/src/sync/conflict.rs`: test mine, theirs, edit merged, delete, and keep both with interactive ID collision prompt.
+- [x] T033 [P] [US3] Write failing tests for rollback and sync resumption in `crates/kb-core/src/sync/state.rs`: test restoring pre-sync commit on abort, and persisting `.kb/sync-state.json`.
+- [x] T034 [P] [US3] Write failing integration tests for conflict resolution and abort in `tests/sync_conflicts.rs`: test scripted resolutions, invalid merged text lint loop, non-interactive exit 1, and `kb sync --abort` / `--continue`.
 
 ### Implementation for User Story 3
 
-- [ ] T035 [US3] Implement conflict parsing and `apply_resolution` in `crates/kb-core/src/sync/conflict.rs`. Makes T031 and T032 pass.
-- [ ] T036 [US3] Implement `SyncInProgressState` persistence, rollback (`git reset --hard`), and `--continue`/`--abort` in `crates/kb-core/src/sync/state.rs` and `pipeline.rs`. Makes T033 pass.
-- [ ] T037 [US3] Implement CLI interactive conflict resolution loop in `crates/kb/src/commands/sync.rs`. Makes T034 pass.
-- [ ] T038 [US3] Implement TUI Conflict Screen (`crates/kb/src/tui/conflict_view.rs`) supporting side-by-side ($\ge 120$) and stacked ($< 120$) diffs, frontmatter comparison, and keys `m`, `t`, `e`, `b`, `d`, `n`/`p`, `Esc`.
+- [x] T035 [US3] Implement conflict parsing and `apply_resolution` in `crates/kb-core/src/sync/conflict.rs`. Makes T031 and T032 pass.
+- [x] T036 [US3] Implement `SyncInProgressState` persistence, rollback (`git reset --hard`), and `--continue`/`--abort` in `crates/kb-core/src/sync/state.rs` and `pipeline.rs`. Makes T033 pass.
+- [x] T037 [US3] Implement CLI interactive conflict resolution loop in `crates/kb/src/commands/sync.rs`. Makes T034 pass.
+- [x] T038 [US3] Implement TUI Conflict Screen (`crates/kb/src/tui/conflict_view.rs`) supporting side-by-side ($\ge 120$) and stacked ($< 120$) diffs, frontmatter comparison, and keys `m`, `t`, `e`, `b`, `d`, `n`/`p`, `Esc`.
 
 **Checkpoint**: Entry-by-entry conflict resolution works in both CLI and TUI; aborting restores pre-sync repository byte-for-byte.
 
@@ -158,14 +158,14 @@ description: "Task list for M9: Git Sync"
 
 ### Tests for User Story 5
 
-- [ ] T039 [P] [US5] Write failing tests for `kb sync setup` logic in `crates/kb-core/src/sync/mod.rs`: test git init, `.gitignore` creation with `.kb/`, initial secret scan, initial commit, remote setup, and active branch default resolution.
-- [ ] T040 [P] [US5] Write failing integration tests for `kb clone` and `kb init --git` in `tests/cli_clone_setup.rs`: test cloning from bare remote, building disposable index, hook prompt, and empty remote error.
+- [x] T039 [P] [US5] Write failing tests for `kb sync setup` logic in `crates/kb-core/src/sync/mod.rs`: test git init, `.gitignore` creation with `.kb/`, initial secret scan, initial commit, remote setup, and active branch default resolution.
+- [x] T040 [P] [US5] Write failing integration tests for `kb clone` and `kb init --git` in `tests/cli_clone_setup.rs`: test cloning from bare remote, building disposable index, hook prompt, and empty remote error.
 
 ### Implementation for User Story 5
 
-- [ ] T041 [US5] Implement `kb sync setup` subcommand in `crates/kb/src/commands/sync.rs`. Makes T039 pass.
-- [ ] T042 [US5] Implement `kb clone` subcommand in `crates/kb/src/commands/clone.rs`. Makes T040 pass.
-- [ ] T043 [US5] Extend `kb init` in `crates/kb/src/commands/init.rs` with `--git` flag to initialize git and make the first commit (FR-024).
+- [x] T041 [US5] Implement `kb sync setup` subcommand in `crates/kb/src/commands/sync.rs`. Makes T039 pass.
+- [x] T042 [US5] Implement `kb clone` subcommand in `crates/kb/src/commands/clone.rs`. Makes T040 pass.
+- [x] T043 [US5] Extend `kb init` in `crates/kb/src/commands/init.rs` with `--git` flag to initialize git and make the first commit (FR-024).
 
 **Checkpoint**: Setup and cloning workflows are fully operational and idempotent.
 
@@ -179,14 +179,14 @@ description: "Task list for M9: Git Sync"
 
 ### Tests for User Story 6
 
-- [ ] T044 [P] [US6] Write failing tests for `kb sync status` data resolution in `crates/kb-core/src/git/status.rs`: test ahead, behind, uncommitted, last fetch timestamp from `FETCH_HEAD`, and JSON serialization.
-- [ ] T045 [P] [US6] Write failing integration tests for `kb sync status` CLI in `tests/cli_sync_status.rs`: test `--json`, `--fetch`, and offline behavior without network calls.
+- [x] T044 [P] [US6] Write failing tests for `kb sync status` data resolution in `crates/kb-core/src/git/status.rs`: test ahead, behind, uncommitted, last fetch timestamp from `FETCH_HEAD`, and JSON serialization.
+- [x] T045 [P] [US6] Write failing integration tests for `kb sync status` CLI in `tests/cli_sync_status.rs`: test `--json`, `--fetch`, and offline behavior without network calls.
 
 ### Implementation for User Story 6
 
-- [ ] T046 [US6] Implement `kb sync status` CLI subcommand in `crates/kb/src/commands/sync.rs`. Makes T044 and T045 pass.
-- [ ] T047 [US6] Implement TUI header sync indicator rendering in `crates/kb/src/tui/header.rs` (badges: in sync, ahead, behind, dirty, conflict, fetch auth).
-- [ ] T048 [US6] Implement background fetch worker thread and event dispatch in `crates/kb/src/tui/app.rs` respecting `sync.fetch_on_start`, 5s timeout, batch mode, and non-blocking startup.
+- [x] T046 [US6] Implement `kb sync status` CLI subcommand in `crates/kb/src/commands/sync.rs`. Makes T044 and T045 pass.
+- [x] T047 [US6] Implement TUI header sync indicator rendering in `crates/kb/src/tui/header.rs` (badges: in sync, ahead, behind, dirty, conflict, fetch auth).
+- [x] T048 [US6] Implement background fetch worker thread and event dispatch in `crates/kb/src/tui/app.rs` respecting `sync.fetch_on_start`, 5s timeout, batch mode, and non-blocking startup.
 
 **Checkpoint**: TUI header displays live sync status badges; offline CLI queries complete $\le 50$ ms.
 
@@ -200,14 +200,14 @@ description: "Task list for M9: Git Sync"
 
 ### Tests for User Story 7
 
-- [ ] T049 [P] [US7] Write failing tests for `HistoryEngine` in `crates/kb-core/src/history.rs`: test `git log --follow`, change categorization (payload, tags, vars, frontmatter), diff generation, and reading content at revision.
-- [ ] T050 [P] [US7] Write failing integration tests for `kb history` and `kb restore` in `tests/cli_history.rs`: test JSON output, diff display, restore through lint and auto-commit.
+- [x] T049 [P] [US7] Write failing tests for `HistoryEngine` in `crates/kb-core/src/history.rs`: test `git log --follow`, change categorization (payload, tags, vars, frontmatter), diff generation, and reading content at revision.
+- [x] T050 [P] [US7] Write failing integration tests for `kb history` and `kb restore` in `tests/cli_history.rs`: test JSON output, diff display, restore through lint and auto-commit.
 
 ### Implementation for User Story 7
 
-- [ ] T051 [US7] Implement `HistoryEngine` in `crates/kb-core/src/history.rs`. Makes T049 pass.
-- [ ] T052 [US7] Implement `kb history` and `kb restore` CLI subcommands in `crates/kb/src/commands/history.rs`. Makes T050 pass.
-- [ ] T053 [US7] Implement TUI History overlay modal in `crates/kb/src/tui/history_view.rs` and wire `Alt-H` keybinding in `crates/kb/src/tui/app.rs`.
+- [x] T051 [US7] Implement `HistoryEngine` in `crates/kb-core/src/history.rs`. Makes T049 pass.
+- [x] T052 [US7] Implement `kb history` and `kb restore` CLI subcommands in `crates/kb/src/commands/history.rs`. Makes T050 pass.
+- [x] T053 [US7] Implement TUI History overlay modal in `crates/kb/src/tui/history_view.rs` and wire `Alt-H` keybinding in `crates/kb/src/tui/app.rs`.
 
 **Checkpoint**: Entry revisions can be inspected, compared, and restored from both CLI and TUI.
 
@@ -217,10 +217,10 @@ description: "Task list for M9: Git Sync"
 
 **Purpose**: Documentation, end-to-end quickstart validation, performance benchmarking, and compiler lint checks.
 
-- [ ] T054 [P] Update user documentation in `README.md` and man pages for all new sync commands, configuration keys, and TUI shortcuts.
-- [ ] T055 Performance benchmark in `benches/auto_commit.rs`: verify auto-commit adds $\le 100$ ms on 10,000-entry repository (SC-004).
-- [ ] T056 Run end-to-end scenarios from `quickstart.md` in integration test harness (`tests/quickstart_scenarios.rs`).
-- [ ] T057 Code cleanup, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check`.
+- [x] T054 [P] Update user documentation in `README.md` and man pages for all new sync commands, configuration keys, and TUI shortcuts.
+- [x] T055 Performance benchmark in `benches/auto_commit.rs`: verify auto-commit adds $\le 100$ ms on 10,000-entry repository (SC-004).
+- [x] T056 Run end-to-end scenarios from `quickstart.md` in integration test harness (`tests/quickstart_scenarios.rs`).
+- [x] T057 Code cleanup, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check`.
 
 ---
 

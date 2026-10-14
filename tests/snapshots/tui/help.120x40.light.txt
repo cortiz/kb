@@ -7,29 +7,29 @@
 │ cmd    Deploy service                        ││ cmd/cache-role-flush.md                                              │
 │        #deploy #prod                         ││                                                                      │
 │ ┌ keys ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│ │ Enter              pick and exit                        Shift-↓            scroll preview                        │ │
-│ │ Ctrl-Y             copy payload                         Shift-↑            scroll preview                        │ │
-│ │ Ctrl-O             open                                 Shift-PgDn         preview page                          │ │
-│ │ Ctrl-G             run                                  Shift-PgUp         preview page                          │ │
-│ │ Alt-A  F2          action menu                          Alt-P              zoom preview                          │ │
-│ │ Alt-C              copy template                        ←                  cursor left                           │ │
-│ │ Ctrl-E             edit entry                           →                  cursor right                          │ │
-│ │ Ctrl-N             add entry                            Home  Ctrl-A       line start                            │ │
-│ │ Ctrl-R             rename entry                         End                line end                              │ │
-│ │ Ctrl-X             delete entry                         Backspace          delete, drop chip                     │ │
-│ │ ↓  Ctrl-J          next result                          Delete             delete                                │ │
-│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Ctrl-W             delete word                           │ │
-│ │ PgDn               page down                            Ctrl-U             clear line                            │ │
-│ │ PgUp               page up                              Ctrl-L             refresh                               │ │
-│ │ Ctrl-End           last result                          ?                  help                                  │ │
-│ │ Ctrl-Home          first result                         F1                 help                                  │ │
-│ │ Tab                next type                            Esc                clear / quit                          │ │
-│ │ Shift-Tab          previous type                        Ctrl-C             exit                                  │ │
+│ │ Enter              pick and exit                        Shift-↑            scroll preview                        │ │
+│ │ Ctrl-Y             copy payload                         Shift-PgDn         preview page                          │ │
+│ │ Ctrl-O             open                                 Shift-PgUp         preview page                          │ │
+│ │ Ctrl-G             run                                  Alt-H              history                               │ │
+│ │ Alt-A  F2          action menu                          Alt-S              sync                                  │ │
+│ │ Alt-C              copy template                        Alt-P              zoom preview                          │ │
+│ │ Ctrl-E             edit entry                           ←                  cursor left                           │ │
+│ │ Ctrl-N             add entry                            →                  cursor right                          │ │
+│ │ Ctrl-R             rename entry                         Home  Ctrl-A       line start                            │ │
+│ │ Ctrl-X             delete entry                         End                line end                              │ │
+│ │ ↓  Ctrl-J          next result                          Backspace          delete, drop chip                     │ │
+│ │ ↑  Ctrl-P  Ctrl-K  previous result                      Delete             delete                                │ │
+│ │ PgDn               page down                            Ctrl-W             delete word                           │ │
+│ │ PgUp               page up                              Ctrl-U             clear line                            │ │
+│ │ Ctrl-End           last result                          Ctrl-L             refresh                               │ │
+│ │ Ctrl-Home          first result                         ?                  help                                  │ │
+│ │ Tab                next type                            F1                 help                                  │ │
+│ │ Shift-Tab          previous type                        Esc                clear / quit                          │ │
+│ │ Shift-↓            scroll preview                       Ctrl-C             exit                                  │ │
 │ │                                                                                                                  │ │
 │ │ Terminals may keep Shift-PgUp/PgDn and Ctrl-Home/End for themselves;                                             │ │
 │ │ use PgUp/PgDn, Shift-↑/↓ and Alt-P instead.                                                                      │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
-│        #prod #sqs                            ││                                                                      │
 │ link   Grafana dashboards                    ││                                                                      │
 │        #observability                        ││                                                                      │
 │ link   On-call handbook                      ││                                                                      │
@@ -213,25 +213,25 @@
 27:119..120 fg=246
 28:0..1 fg=246
 28:2..3 fg=246 bold
-28:3..4 fg=106 bold
-28:4..8 fg=241 bold
-28:8..72 fg=241
+28:3..8 fg=106 bold
+28:47..49 fg=246
 28:117..118 fg=246
 28:119..120 fg=246
 29:0..1 fg=246
 29:2..3 fg=246
-29:4..47 fg=241
-29:47..49 fg=246
+29:4..72 fg=241
 29:117..118 fg=246
 29:119..120 fg=246
 30:0..1 fg=246
-30:2..8 fg=246 bold
-30:8..118 fg=246
+30:2..3 fg=246 bold
+30:3..4 fg=106 bold
+30:4..8 fg=241 bold
+30:8..47 fg=241
+30:47..49 fg=246
+30:117..118 fg=246
 30:119..120 fg=246
 31:0..1 fg=246
-31:9..14 fg=241
-31:15..19 fg=241
-31:47..49 fg=246
+31:2..118 fg=246
 31:119..120 fg=246
 32:0..1 fg=246
 32:2..8 fg=30 bold

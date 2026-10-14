@@ -29,9 +29,8 @@ echo "staged scratch note" > scratch.txt
 git add scratch.txt
 
 # 3. Add an entry using kb
-kb add --id "cw/latency" --type cw --title "Latency P99" \
-  --body "fields @timestamp, latency | filter latency > 100" \
-  --tags "aws,p99"
+echo "fields @timestamp, latency | filter latency > 100" | \
+  kb add --path cw/latency --type cw --title "Latency P99" --tag aws,p99 --stdin --yes
 
 # 4. Verify git log shows an atomic commit for the entry
 git log -1 --pretty=format:"%s%n%b"
@@ -62,14 +61,14 @@ git push -u origin main
 kb clone /tmp/bare-remote.git /tmp/kb-clone2
 
 # 4. Make a change in clone 1
-kb add --id "sumo/5xx" --type sumo --title "5xx errors" \
-  --body "_sourceCategory=prod | count" --tags "prod"
+echo "_sourceCategory=prod | count" | \
+kb add --path sumo/5xx --type sumo --title "5xx errors" --tag prod --stdin --yes
 kb sync
 
 # 5. Make a separate change in clone 2 (different file)
 cd /tmp/kb-clone2
-kb add --id "sql/users" --type sql --title "User count" \
-  --body "SELECT count(*) FROM users" --tags "db"
+echo "SELECT count(*) FROM users" | \
+kb add --path sql/users --type sql --title "User count" --tag db --stdin --yes
 
 # 6. Run kb sync on clone 2
 kb sync

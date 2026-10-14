@@ -61,6 +61,9 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     if let Some(ref menu) = state.action_menu {
         super::action_view::draw_action_menu(state, menu, theme, area, buf);
     }
+    if let Some(ref h) = state.history {
+        super::history_view::draw_history(h, theme, area, buf);
+    }
     if state.overlay == Overlay::Help {
         draw_help(theme, area, buf);
     }
@@ -110,6 +113,15 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             ),
             theme.warning(),
         ));
+    }
+    if let Some(status) = &state.sync_status {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        if let Some((text, warn)) = super::header::badge(status, state.fetch_failed, now) {
+            let style = if warn { theme.warning() } else { theme.muted() };
+            tail.push(Span::styled(format!(" · {text}"), style));
+        }
     }
     if state.status.refreshing {
         tail.push(Span::styled(" · refreshing…", theme.muted()));

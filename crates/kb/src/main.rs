@@ -404,6 +404,17 @@ enum Command {
     Mcp(commands::mcp::McpArgs),
     /// Review and approve or revert agent-made changes.
     Review(commands::review::ReviewArgs),
+    /// Sync the KB with its git remote in one command.
+    Sync(commands::sync::SyncArgs),
+    /// Clone an existing KB from a git remote and index it.
+    Clone(commands::clone::CloneArgs),
+    /// List the commits that changed an entry, or show the diff of one.
+    History(commands::history::HistoryArgs),
+    /// Put an entry back to how it was at an earlier commit.
+    Restore(commands::history::RestoreArgs),
+    /// Manage git hooks that keep secrets out of commits.
+    #[command(subcommand)]
+    Git(commands::hooks::GitCommand),
 }
 
 #[derive(Subcommand)]
@@ -450,6 +461,9 @@ struct InitArgs {
     /// Don't create the example entries.
     #[arg(long)]
     no_examples: bool,
+    /// Also put the KB under git: init, ignore `.kb/`, first commit.
+    #[arg(long)]
+    git: bool,
     /// Print a JSON report.
     #[arg(long)]
     json: bool,
@@ -468,6 +482,12 @@ struct LintArgs {
     /// Print a JSON report.
     #[arg(long)]
     json: bool,
+    /// Check the files staged in git (used by the pre-commit hook).
+    #[arg(long)]
+    staged: bool,
+    /// Run only the secret scan, on the staged files or the given paths.
+    #[arg(long)]
+    secrets_only: bool,
 }
 
 /// `-tag:x` in a query is `--not-tag x`, but clap would take it for a flag, so it is rewritten
@@ -568,6 +588,11 @@ fn main() -> ExitCode {
         Command::Complete(_) => false,
         Command::Mcp(_) => false,
         Command::Review(a) => a.json,
+        Command::Git(_) => false,
+        Command::History(a) => a.json,
+        Command::Restore(_) => false,
+        Command::Clone(_) => false,
+        Command::Sync(a) => a.json(),
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -606,6 +631,14 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
     let root = resolve_root(&inputs).map_err(|e| CliError::new("config", e.to_string()))?;
     if !matches!(cli.command, Command::Tui(_) | Command::Pick(_)) {
         print_config_warnings(&loaded);
+        // an interrupted sync (FR-017) is flagged by every command except the ones that end it
+        if !matches!(
+            cli.command,
+            Command::Sync(_) | Command::Completions(_) | Command::Complete(_)
+        ) && root.join(".kb/sync-state.json").exists()
+        {
+            eprintln!("kb: a sync is in progress; run `kb sync --continue` or `kb sync --abort`");
+        }
     }
     match cli.command {
         Command::Init(args) => run_init(&root, platform.config_write_path().as_deref(), &args),
@@ -700,6 +733,11 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Complete(args) => commands::complete::run_complete(&platform, &root, &args),
         Command::Mcp(args) => Ok(commands::mcp::run_mcp(&root, &loaded, &args)),
         Command::Review(args) => commands::review::run_review(&platform, &root, &loaded, &args),
+        Command::Git(args) => commands::hooks::run_git(&root, &args),
+        Command::History(args) => commands::history::run_history(&root, &args),
+        Command::Restore(args) => commands::history::run_restore(&root, &loaded, &args),
+        Command::Clone(args) => commands::clone::run_clone(&platform, &loaded, &args),
+        Command::Sync(args) => commands::sync::run_sync(&platform, &root, &loaded, &args),
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }
@@ -749,6 +787,12 @@ fn run_init(
     let plan =
         plan_init(&path, !args.no_examples).map_err(|e| CliError::new("io", e.to_string()))?;
     let report = apply_init(&plan).map_err(|e| CliError::new("io", e.to_string()))?;
+    if args.git
+        && let Err(e) =
+            kb_core::sync::init_repo(&report.root, &kb_cli::platform::SystemGitRunner, None)
+    {
+        return Err(CliError::new("io", format!("git setup failed: {e}")));
+    }
     let default_root = resolved_root
         .canonicalize()
         .or_else(|_| std::path::absolute(resolved_root))
@@ -762,7 +806,35 @@ fn run_init(
     Ok(ExitCode::SUCCESS)
 }
 
+/// The secret scan alone, over the staged files or the given paths: 1 when anything is blocked.
+fn run_secrets_only(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliError> {
+    use kb_core::git::{GitRunner, secrets::SecretGate};
+    let files: Vec<PathBuf> = if args.staged {
+        let out = kb_cli::platform::SystemGitRunner
+            .run_git(
+                root,
+                &["diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+            )
+            .map_err(|e| CliError::new("io", e.to_string()))?;
+        out.lines()
+            .filter(|l| l.ends_with(".md") && !l.starts_with(".kb/"))
+            .map(PathBuf::from)
+            .collect()
+    } else {
+        args.paths.clone()
+    };
+    let report =
+        SecretGate::check_entries(root, &files).map_err(|e| CliError::new("io", e.to_string()))?;
+    for f in &report.blocked {
+        eprintln!("{}:{}: {} {}", f.path, f.line, f.code.slug(), f.message);
+    }
+    Ok(ExitCode::from(u8::from(!report.is_clean())))
+}
+
 fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliError> {
+    if args.secrets_only || args.staged {
+        return run_secrets_only(root, args);
+    }
     let cwd = std::env::current_dir().map_err(|e| CliError::new("io", e.to_string()))?;
     let scope = resolve_scope(root, &cwd, &args.paths).map_err(lint_error)?;
     let report = lint(root, &scope).map_err(lint_error)?;
