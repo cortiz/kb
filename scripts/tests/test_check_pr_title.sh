@@ -51,7 +51,9 @@ assert_contains "feat, fix, docs, test, refactor, perf, build, ci, chore, revert
 # a hostile title is only ever data (the single quotes are deliberate)
 # shellcheck disable=SC2016
 assert_exit 1 "a command substitution in a title" -- "$script" 'Update $(touch '"$TMP"'/pwned) and `touch '"$TMP"'/pwned2`'
-[ ! -e "$TMP/pwned" ] && [ ! -e "$TMP/pwned2" ] || _fail "the title was executed"
+if [ -e "$TMP/pwned" ] || [ -e "$TMP/pwned2" ]; then
+  _fail "the title was executed"
+fi
 # shellcheck disable=SC2016
 assert_exit 0 "a valid title that contains shell syntax" -- "$script" 'feat(x): handle $(echo) and `ticks` literally'
 [ ! -e "$TMP/pwned" ] || _fail "the title was executed"
