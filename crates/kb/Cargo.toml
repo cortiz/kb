@@ -38,6 +38,10 @@ portable-pty.workspace = true
 
 [[test]]
 name = "perf"
+path = "tests/perf.rs"
+
+[[test]]
+name = "perf_features"
 path = "../../tests/perf.rs"
 
 [lints]

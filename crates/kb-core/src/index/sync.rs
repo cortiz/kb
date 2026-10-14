@@ -3,7 +3,7 @@
 //! Work is split in two so the write lock is held only briefly: `scan` reads the database and
 //! the files (no lock), and `apply` writes the result in short transactions.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -99,16 +99,24 @@ pub(crate) fn scan(
         start_ns: now_ns(),
         ..Scan::default()
     };
-    let mut lower: HashMap<String, usize> = HashMap::new();
+    let mut seen = HashSet::with_capacity(walk.files.len());
+    let mut collided = HashSet::new();
     for f in &walk.files {
-        *lower.entry(f.id.to_lowercase()).or_default() += 1;
+        let low = f.id.to_lowercase();
+        if !seen.insert(low.clone()) {
+            collided.insert(low);
+        }
     }
     for file in &walk.files {
         let Some((mtime_ns, size)) = stat(&file.abs_path) else {
             continue;
         };
         out.present.insert(file.id.clone());
-        let collides = lower[&file.id.to_lowercase()] > 1;
+        let collides = if collided.is_empty() {
+            false
+        } else {
+            collided.contains(&file.id.to_lowercase())
+        };
         let old = prev.get(&file.id);
         let same = old.is_some_and(|o| o.mtime_ns == mtime_ns && o.size == size);
         let racy = same && mtime_ns >= last_sync_start_ns - RACY_NS;
