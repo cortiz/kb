@@ -41,7 +41,9 @@ for n in "$fmt" "$clippy" "$tests" "$docs"; do
   [ -n "$n" ] || _fail "a required cargo step is missing from: $log"
 done
 if [ -n "$fmt" ] && [ -n "$clippy" ] && [ -n "$tests" ] && [ -n "$docs" ]; then
-  [ "$fmt" -lt "$clippy" ] && [ "$clippy" -lt "$tests" ] && [ "$tests" -lt "$docs" ] || _fail "steps out of order: $fmt $clippy $tests $docs"
+  if ! { [ "$fmt" -lt "$clippy" ] && [ "$clippy" -lt "$tests" ] && [ "$tests" -lt "$docs" ]; }; then
+    _fail "steps out of order: $fmt $clippy $tests $docs"
+  fi
 fi
 assert_contains "RUSTDOCFLAGS=-D warnings" "$log" "docs are built with warnings denied"
 assert_contains "actionlint ran" "$log" "an installed optional tool runs"

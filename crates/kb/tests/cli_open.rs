@@ -170,7 +170,8 @@ fn open_cw_with_log_groups_and_resolved_range() {
 fn open_ssh_fallback_prints_and_copies_url() {
     let (d, root) = actions_kb();
     let (opener_dir, opened_log) = fake_opener(d.path());
-    let (_clip_name, clip_dir, clip_file, clip_env) = fake_clipboard(d.path());
+    let (clip_name, clip_dir, clip_file, _clip_env) = fake_clipboard(d.path());
+    let clip_prog = clip_dir.join(clip_name);
 
     let mut combined_paths = vec![clip_dir, opener_dir];
     combined_paths.extend(std::env::split_paths(
@@ -183,12 +184,9 @@ fn open_ssh_fallback_prints_and_copies_url() {
         .arg("link-auth0")
         .env("PATH", path_val)
         .env("SSH_CONNECTION", "1.2.3.4 22 5.6.7.8 22")
-        .env("KB_CLIPBOARD_METHOD", "native")
+        .env("KB_CLIPBOARD_COMMAND", clip_prog.display().to_string())
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY");
-    for (k, v) in clip_env {
-        cmd.env(k, v);
-    }
     let out = cmd.output().unwrap();
 
     assert_eq!(
