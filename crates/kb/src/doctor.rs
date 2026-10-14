@@ -549,13 +549,11 @@ fn check_shell(platform: &impl Platform, loaded: &Loaded) -> Check {
         check = check.detail(format!("startup file: {}", f.display()));
     }
     check = check.detail(format!("widget key: {widget_key}, save key: {save_key}"));
-    if has_clash {
-        if let Some(f) = &target_file {
-            check = check.detail(format!(
-                "warning: key '{widget_key}' is bound elsewhere in {}",
-                f.display()
-            ));
-        }
+    if has_clash && let Some(f) = &target_file {
+        check = check.detail(format!(
+            "warning: key '{widget_key}' is bound elsewhere in {}",
+            f.display()
+        ));
     }
 
     check

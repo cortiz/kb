@@ -2,14 +2,14 @@
 //! Communicates via newline-delimited JSON-RPC 2.0 messages over stdio.
 
 use clap::{Args, Subcommand};
-use std::collections::HashMap;
-use std::io::{BufRead, Write};
-use std::path::Path;
-use std::process::ExitCode;
 use kb_core::config::{Loaded, Settings};
 use kb_core::mcp::*;
 use kb_core::search::Kb;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::{BufRead, Write};
+use std::path::Path;
+use std::process::ExitCode;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct McpArgs {
@@ -220,12 +220,11 @@ impl McpServer {
         match req.method.as_str() {
             "initialize" => {
                 let id = id.unwrap_or(serde_json::Value::Null);
-                if let Some(params) = &req.params {
-                    if let Some(client_info) = params.get("clientInfo") {
-                        if let Some(name) = client_info.get("name").and_then(|v| v.as_str()) {
-                            self.client_name = Some(name.to_string());
-                        }
-                    }
+                if let Some(params) = &req.params
+                    && let Some(client_info) = params.get("clientInfo")
+                    && let Some(name) = client_info.get("name").and_then(|v| v.as_str())
+                {
+                    self.client_name = Some(name.to_string());
                 }
                 let mut capabilities = serde_json::json!({
                     "tools": {}
@@ -253,7 +252,10 @@ impl McpServer {
             }
             "tools/list" => {
                 let id = id.unwrap_or(serde_json::Value::Null);
-                Some(JsonRpcResponse::success(id, get_tools_list(self.write_allowed)))
+                Some(JsonRpcResponse::success(
+                    id,
+                    get_tools_list(self.write_allowed),
+                ))
             }
             "tools/call" => {
                 let id = id.unwrap_or(serde_json::Value::Null);
@@ -267,10 +269,7 @@ impl McpServer {
                         ));
                     }
                 };
-                let tool_name = params
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = params
                     .get("arguments")
                     .cloned()
@@ -315,7 +314,11 @@ impl McpServer {
                             ));
                         }
                         let kb = self.kb.as_mut().unwrap();
-                        let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                        let mut engine = McpEngine::with_git(
+                            kb,
+                            &self.settings,
+                            &crate::platform::SystemGitRunner,
+                        );
                         match engine.search(query, &types, &tags, limit) {
                             Ok(results) => {
                                 if self.settings.mcp_log_reads() {
@@ -342,7 +345,11 @@ impl McpServer {
                                             )
                                         })
                                         .collect();
-                                    format!("Found {} entries:\n{}", results.len(), lines.join("\n"))
+                                    format!(
+                                        "Found {} entries:\n{}",
+                                        results.len(),
+                                        lines.join("\n")
+                                    )
                                 };
                                 Some(JsonRpcResponse::success(
                                     id,
@@ -423,8 +430,18 @@ impl McpServer {
                             ));
                         }
                         let kb = self.kb.as_mut().unwrap();
-                        let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
-                        match engine.get(entry_id, resolve, &vars_map, include_code, include_full_notes) {
+                        let mut engine = McpEngine::with_git(
+                            kb,
+                            &self.settings,
+                            &crate::platform::SystemGitRunner,
+                        );
+                        match engine.get(
+                            entry_id,
+                            resolve,
+                            &vars_map,
+                            include_code,
+                            include_full_notes,
+                        ) {
                             Ok(view) => {
                                 if self.settings.mcp_log_reads() {
                                     let _ = log_mcp_operation(
@@ -488,7 +505,11 @@ impl McpServer {
                             ));
                         }
                         let kb = self.kb.as_mut().unwrap();
-                        let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                        let mut engine = McpEngine::with_git(
+                            kb,
+                            &self.settings,
+                            &crate::platform::SystemGitRunner,
+                        );
                         match engine.list_tags() {
                             Ok(tags) => {
                                 if self.settings.mcp_log_reads() {
@@ -552,7 +573,8 @@ impl McpServer {
                                 }),
                             ));
                         }
-                        let create_req: CreateEntryRequest = match serde_json::from_value(arguments) {
+                        let create_req: CreateEntryRequest = match serde_json::from_value(arguments)
+                        {
                             Ok(r) => r,
                             Err(e) => {
                                 return Some(JsonRpcResponse::success(
@@ -574,14 +596,21 @@ impl McpServer {
                             ));
                         }
                         let kb = self.kb.as_mut().unwrap();
-                        let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                        let mut engine = McpEngine::with_git(
+                            kb,
+                            &self.settings,
+                            &crate::platform::SystemGitRunner,
+                        );
                         match engine.create_entry(&create_req, self.client_name.as_deref()) {
                             Ok(resp) => {
                                 let data = serde_json::to_value(&resp).unwrap();
                                 let summary = if let Some(preview) = &resp.dry_run_content {
                                     format!("Dry run preview for {}:\n{}", resp.id, preview)
                                 } else {
-                                    format!("Created entry '{}' (version: {})", resp.id, resp.version)
+                                    format!(
+                                        "Created entry '{}' (version: {})",
+                                        resp.id, resp.version
+                                    )
                                 };
                                 Some(JsonRpcResponse::success(
                                     id,
@@ -626,7 +655,8 @@ impl McpServer {
                                 }),
                             ));
                         }
-                        let update_req: UpdateEntryRequest = match serde_json::from_value(arguments) {
+                        let update_req: UpdateEntryRequest = match serde_json::from_value(arguments)
+                        {
                             Ok(r) => r,
                             Err(e) => {
                                 return Some(JsonRpcResponse::success(
@@ -648,16 +678,26 @@ impl McpServer {
                             ));
                         }
                         let kb = self.kb.as_mut().unwrap();
-                        let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                        let mut engine = McpEngine::with_git(
+                            kb,
+                            &self.settings,
+                            &crate::platform::SystemGitRunner,
+                        );
                         match engine.update_entry(&update_req, self.client_name.as_deref()) {
                             Ok(resp) => {
                                 let data = serde_json::to_value(&resp).unwrap();
                                 let summary = if let Some(diff) = &resp.dry_run_diff {
                                     format!("Dry run diff for {}:\n{}", resp.id, diff)
                                 } else {
-                                    let mut s = format!("Updated entry '{}' (version: {})", resp.id, resp.version);
+                                    let mut s = format!(
+                                        "Updated entry '{}' (version: {})",
+                                        resp.id, resp.version
+                                    );
                                     if !resp.used_in.is_empty() {
-                                        s.push_str(&format!("\nWarning: used in runbooks: {}", resp.used_in.join(", ")));
+                                        s.push_str(&format!(
+                                            "\nWarning: used in runbooks: {}",
+                                            resp.used_in.join(", ")
+                                        ));
                                     }
                                     s
                                 };
@@ -691,15 +731,13 @@ impl McpServer {
                             }
                         }
                     }
-                    _ => {
-                        Some(JsonRpcResponse::success(
-                            id,
-                            serde_json::json!({
-                                "content": [{ "type": "text", "text": format!("Unknown tool: {tool_name}") }],
-                                "isError": true
-                            }),
-                        ))
-                    }
+                    _ => Some(JsonRpcResponse::success(
+                        id,
+                        serde_json::json!({
+                            "content": [{ "type": "text", "text": format!("Unknown tool: {tool_name}") }],
+                            "isError": true
+                        }),
+                    )),
                 }
             }
             "prompts/list" => {
@@ -719,7 +757,8 @@ impl McpServer {
                     ));
                 }
                 let kb = self.kb.as_mut().unwrap();
-                let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                let mut engine =
+                    McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
                 match engine.list_prompts() {
                     Ok(prompts) => {
                         let prompts_json: Vec<serde_json::Value> = prompts
@@ -793,7 +832,8 @@ impl McpServer {
                     ));
                 }
                 let kb = self.kb.as_mut().unwrap();
-                let mut engine = McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
+                let mut engine =
+                    McpEngine::with_git(kb, &self.settings, &crate::platform::SystemGitRunner);
                 match engine.get_prompt(name, &args_map) {
                     Ok(resolved_text) => Some(JsonRpcResponse::success(
                         id,
@@ -847,8 +887,7 @@ pub fn serve_stdio<R: BufRead, W: Write>(
         match req {
             Ok(request) => {
                 if let Some(response) = server.handle_request(request) {
-                    let out = serde_json::to_string(&response)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    let out = serde_json::to_string(&response).map_err(std::io::Error::other)?;
                     writeln!(writer, "{}", out)?;
                     writer.flush()?;
                 }
@@ -859,8 +898,7 @@ pub fn serve_stdio<R: BufRead, W: Write>(
                     -32700,
                     format!("Parse error: {e}"),
                 );
-                let out = serde_json::to_string(&resp)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                let out = serde_json::to_string(&resp).map_err(std::io::Error::other)?;
                 writeln!(writer, "{}", out)?;
                 writer.flush()?;
             }
@@ -877,10 +915,15 @@ pub fn run_mcp_setup(_root: &Path) -> ExitCode {
     println!("  claude mcp add kb -- kb mcp --allow-write");
     println!();
     println!("Generic MCP configuration (e.g. claude_desktop_config.json):");
-    println!(
-        "{}",
-        "{\n  \"mcpServers\": {\n    \"kb\": {\n      \"command\": \"kb\",\n      \"args\": [\"mcp\"]\n    }\n  }\n}"
-    );
+    let config = r#"{
+  "mcpServers": {
+    "kb": {
+      "command": "kb",
+      "args": ["mcp"]
+    }
+  }
+}"#;
+    println!("{config}");
     ExitCode::SUCCESS
 }
 
@@ -899,7 +942,12 @@ pub fn run_mcp(root: &Path, loaded: &Loaded, args: &McpArgs) -> ExitCode {
 
     let prompts_enabled = loaded.settings.mcp_prompts();
 
-    let mut server = McpServer::with_settings(root, loaded.settings.clone(), write_allowed, prompts_enabled);
+    let mut server = McpServer::with_settings(
+        root,
+        loaded.settings.clone(),
+        write_allowed,
+        prompts_enabled,
+    );
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
 
@@ -1016,7 +1064,9 @@ mod tests {
         let out_str3 = String::from_utf8(output3).unwrap();
         let search_resp: serde_json::Value = serde_json::from_str(out_str3.trim()).unwrap();
         assert_eq!(search_resp["id"], 11);
-        let content_text = search_resp["result"]["content"][0]["text"].as_str().unwrap();
+        let content_text = search_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
         let parsed_content: serde_json::Value = serde_json::from_str(content_text).unwrap();
         let results = parsed_content["results"].as_array().unwrap();
         assert!(!results.is_empty());
@@ -1058,27 +1108,37 @@ mod tests {
         let create_call = "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"tools/call\",\"params\":{\"name\":\"create\",\"arguments\":{\"title\":\"Test Entry\",\"payload\":\"echo 123\"}}}\n";
         let mut out = Vec::new();
         serve_stdio(Cursor::new(create_call), &mut out, &mut ro_server).unwrap();
-        let resp: serde_json::Value = serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+        let resp: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
         assert_eq!(resp["result"]["isError"], true);
-        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("Write tools are disabled"));
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Write tools are disabled")
+        );
 
         // 2. Call create on write_allowed server with dry_run
         let mut write_server = McpServer::new(temp.path(), true, false);
         let create_dry = "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{\"name\":\"create\",\"arguments\":{\"title\":\"Dry Run Cmd\",\"type\":\"cmd\",\"payload\":\"git status\",\"dry_run\":true}}}\n";
         let mut out2 = Vec::new();
         serve_stdio(Cursor::new(create_dry), &mut out2, &mut write_server).unwrap();
-        let resp2: serde_json::Value = serde_json::from_str(String::from_utf8(out2).unwrap().trim()).unwrap();
+        let resp2: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out2).unwrap().trim()).unwrap();
         assert_eq!(resp2["result"]["isError"], false);
-        let dry_data: serde_json::Value = serde_json::from_str(resp2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let dry_data: serde_json::Value =
+            serde_json::from_str(resp2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert!(dry_data["dry_run_content"].is_string());
 
         // 3. Call create with actual save
         let create_real = "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/call\",\"params\":{\"name\":\"create\",\"arguments\":{\"title\":\"New Created Cmd\",\"type\":\"cmd\",\"payload\":\"echo hello\",\"path\":\"cmd/new-test-cmd\"}}}\n";
         let mut out3 = Vec::new();
         serve_stdio(Cursor::new(create_real), &mut out3, &mut write_server).unwrap();
-        let resp3: serde_json::Value = serde_json::from_str(String::from_utf8(out3).unwrap().trim()).unwrap();
+        let resp3: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out3).unwrap().trim()).unwrap();
         assert_eq!(resp3["result"]["isError"], false);
-        let created_data: serde_json::Value = serde_json::from_str(resp3["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let created_data: serde_json::Value =
+            serde_json::from_str(resp3["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(created_data["id"], "cmd/new-test-cmd");
         let initial_version = created_data["version"].as_str().unwrap().to_string();
 
@@ -1097,12 +1157,20 @@ mod tests {
                     }
                 }
             }
-        })).unwrap() + "\n";
+        }))
+        .unwrap()
+            + "\n";
         let mut out4 = Vec::new();
         serve_stdio(Cursor::new(update_bad_ver), &mut out4, &mut write_server).unwrap();
-        let resp4: serde_json::Value = serde_json::from_str(String::from_utf8(out4).unwrap().trim()).unwrap();
+        let resp4: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out4).unwrap().trim()).unwrap();
         assert_eq!(resp4["result"]["isError"], true);
-        assert!(resp4["result"]["content"][0]["text"].as_str().unwrap().contains("version mismatch"));
+        assert!(
+            resp4["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("version mismatch")
+        );
 
         // 5. Call update with dry_run
         let update_dry = serde_json::to_string(&serde_json::json!({
@@ -1120,12 +1188,16 @@ mod tests {
                     }
                 }
             }
-        })).unwrap() + "\n";
+        }))
+        .unwrap()
+            + "\n";
         let mut out5 = Vec::new();
         serve_stdio(Cursor::new(update_dry), &mut out5, &mut write_server).unwrap();
-        let resp5: serde_json::Value = serde_json::from_str(String::from_utf8(out5).unwrap().trim()).unwrap();
+        let resp5: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out5).unwrap().trim()).unwrap();
         assert_eq!(resp5["result"]["isError"], false);
-        let dry_up_data: serde_json::Value = serde_json::from_str(resp5["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let dry_up_data: serde_json::Value =
+            serde_json::from_str(resp5["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
         assert!(dry_up_data["dry_run_diff"].is_string());
     }
 }

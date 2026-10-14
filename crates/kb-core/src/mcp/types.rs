@@ -1,7 +1,7 @@
 //! Core transfer and view types for the MCP server.
 
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Detailed MCP view of a KB entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

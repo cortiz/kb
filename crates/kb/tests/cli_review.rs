@@ -2,17 +2,26 @@
 
 mod support;
 
+use kb_core::mcp::review::ReviewStateTracker;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use kb_core::mcp::review::ReviewStateTracker;
 use support::kb_in;
 use support::pty::{Session, Spec};
 
 fn setup_git_repo(root: &Path) {
-    let _ = Command::new("git").args(["init"]).current_dir(root).output();
-    let _ = Command::new("git").args(["config", "user.name", "Test User"]).current_dir(root).output();
-    let _ = Command::new("git").args(["config", "user.email", "test@example.com"]).current_dir(root).output();
+    let _ = Command::new("git")
+        .args(["init"])
+        .current_dir(root)
+        .output();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(root)
+        .output();
+    let _ = Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(root)
+        .output();
 }
 
 fn setup_review_kb() -> (tempfile::TempDir, PathBuf, PathBuf) {
@@ -30,10 +39,7 @@ fn setup_review_kb() -> (tempfile::TempDir, PathBuf, PathBuf) {
 fn test_review_no_unreviewed_entries() {
     let (_dir, _home, root) = setup_review_kb();
 
-    let assert = kb_in(&root)
-        .arg("review")
-        .assert()
-        .success();
+    let assert = kb_in(&root).arg("review").assert().success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     assert!(stdout.contains("No unreviewed entries."));
@@ -50,18 +56,22 @@ fn test_review_json_output() {
     )
     .unwrap();
 
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
     let _ = Command::new("git")
-        .args(["commit", "-m", "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n"])
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
         .current_dir(&root)
         .output();
 
     ReviewStateTracker::mark_unreviewed(&root, "tail").unwrap();
 
-    let assert = kb_in(&root)
-        .args(["review", "--json"])
-        .assert()
-        .success();
+    let assert = kb_in(&root).args(["review", "--json"]).assert().success();
 
     let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
     let json_val: serde_json::Value = serde_json::from_str(&stdout).unwrap();
@@ -84,9 +94,16 @@ fn test_review_approve_all() {
     )
     .unwrap();
 
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
     let _ = Command::new("git")
-        .args(["commit", "-m", "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n"])
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
         .current_dir(&root)
         .output();
 
@@ -114,9 +131,16 @@ fn test_review_pty_approve_choice() {
     )
     .unwrap();
 
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
     let _ = Command::new("git")
-        .args(["commit", "-m", "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n"])
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
         .current_dir(&root)
         .output();
 
@@ -146,9 +170,16 @@ fn test_review_pty_skip_choice() {
     )
     .unwrap();
 
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
     let _ = Command::new("git")
-        .args(["commit", "-m", "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n"])
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: create tail\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
         .current_dir(&root)
         .output();
 
@@ -179,8 +210,14 @@ fn test_review_pty_revert_choice() {
         "---\ntitle: Human Tail\ntype: cmd\nshell: sh\n---\necho human\n",
     )
     .unwrap();
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
-    let _ = Command::new("git").args(["commit", "-m", "initial human commit"]).current_dir(&root).output();
+    let _ = Command::new("git")
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args(["commit", "-m", "initial human commit"])
+        .current_dir(&root)
+        .output();
 
     // 2. Agent update commit
     fs::write(
@@ -188,9 +225,16 @@ fn test_review_pty_revert_choice() {
         "---\ntitle: Agent Tail\ntype: cmd\nshell: sh\n---\necho agent\n",
     )
     .unwrap();
-    let _ = Command::new("git").args(["add", "tail.md"]).current_dir(&root).output();
     let _ = Command::new("git")
-        .args(["commit", "-m", "kb: update tail\n\nKb-Source: mcp\nKb-Client: claude\n"])
+        .args(["add", "tail.md"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: update tail\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
         .current_dir(&root)
         .output();
 

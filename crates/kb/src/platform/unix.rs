@@ -320,12 +320,13 @@ pub fn run_git(root: &Path, args: &[&str], timeout: Duration) -> Result<GitOutpu
 pub fn run_git_interactive(root: &Path, args: &[&str]) -> Result<ExitStatus, ToolError> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(root).args(args);
-    if let Ok(tty) = open_tty() {
-        if let (Ok(in_f), Ok(out_f), Ok(err_f)) = (tty.try_clone(), tty.try_clone(), tty.try_clone()) {
-            cmd.stdin(Stdio::from(in_f))
-                .stdout(Stdio::from(out_f))
-                .stderr(Stdio::from(err_f));
-        }
+    if let Ok(tty) = open_tty()
+        && let (Ok(in_f), Ok(out_f), Ok(err_f)) =
+            (tty.try_clone(), tty.try_clone(), tty.try_clone())
+    {
+        cmd.stdin(Stdio::from(in_f))
+            .stdout(Stdio::from(out_f))
+            .stderr(Stdio::from(err_f));
     }
     let mut child = cmd.spawn().map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => ToolError::NotFound,
@@ -450,7 +451,10 @@ pub fn parse_tmux_version(s: &str) -> Option<(u32, u32)> {
     let mut parts = text.split('.');
     let maj = parts.next()?.parse::<u32>().ok()?;
     let min_part = parts.next()?;
-    let min_digits: String = min_part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let min_digits: String = min_part
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
     let min = min_digits.parse::<u32>().ok()?;
     Some((maj, min))
 }
@@ -467,9 +471,7 @@ pub fn is_tmux_popup_supported(env: &Environment) -> bool {
         return false;
     }
     let ver_str = String::from_utf8_lossy(&output.stdout);
-    parse_tmux_version(&ver_str).map_or(false, |(maj, min)| {
-        maj > 3 || (maj == 3 && min >= 2)
-    })
+    parse_tmux_version(&ver_str).is_some_and(|(maj, min)| maj > 3 || (maj == 3 && min >= 2))
 }
 
 pub fn run_tmux_popup(
@@ -990,4 +992,3 @@ mod tests {
         assert_eq!(parse_tmux_version("invalid"), None);
     }
 }
-

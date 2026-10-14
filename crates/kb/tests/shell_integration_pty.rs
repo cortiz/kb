@@ -10,14 +10,23 @@ fn test_widget_normal_screen_rendering_and_clean_exit() {
     let (t, home, root) = kb_home("search");
     let out = t.path().join("widget_out.json");
 
-    let mut spec = Spec::new(&["pick", "--widget", "--shell", "zsh", "--buffer", "tail", "--cursor", "4"], &home, &root);
+    let mut spec = Spec::new(
+        &[
+            "pick", "--widget", "--shell", "zsh", "--buffer", "tail", "--cursor", "4",
+        ],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
 
     // Should NOT enter alternate screen (normal buffer rendering)
     s.wait_for("Search");
-    assert!(!s.alternate_screen(), "inline picker must not use alternate screen");
+    assert!(
+        !s.alternate_screen(),
+        "inline picker must not use alternate screen"
+    );
 
     // Press enter on the first entry (has variables, opens form)
     s.send(ENTER);
@@ -30,7 +39,8 @@ fn test_widget_normal_screen_rendering_and_clean_exit() {
 
     // Verify stdout received JSON IPC payload
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "picked");
     assert!(parsed["command"].is_string());
     assert!(parsed["cursor"].is_number());
@@ -54,7 +64,11 @@ fn test_widget_cancellation_exits_cleanly() {
 fn test_widget_esc_in_form_returns_to_search() {
     let (_t, home, root) = kb_home("search");
 
-    let spec = Spec::new(&["pick", "--widget", "--shell", "zsh", "--buffer", "tail"], &home, &root);
+    let spec = Spec::new(
+        &["pick", "--widget", "--shell", "zsh", "--buffer", "tail"],
+        &home,
+        &root,
+    );
     let mut s = Session::spawn(&spec);
 
     s.wait_for("Search");
@@ -76,7 +90,11 @@ fn test_widget_pick_entry_without_variables_direct() {
     let (t, home, root) = kb_home("search");
     let out = t.path().join("widget_out.json");
 
-    let mut spec = Spec::new(&["pick", "--widget", "--shell", "zsh", "--buffer", "redis"], &home, &root);
+    let mut spec = Spec::new(
+        &["pick", "--widget", "--shell", "zsh", "--buffer", "redis"],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
@@ -87,7 +105,8 @@ fn test_widget_pick_entry_without_variables_direct() {
     assert_eq!(s.wait_exit(), 0);
 
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "picked");
     assert!(parsed["command"].as_str().unwrap().contains("redis-cli"));
 }
@@ -97,7 +116,18 @@ fn test_widget_secret_with_env_resolves_to_reference() {
     let (t, home, root) = kb_home("vars");
     let out = t.path().join("widget_out.json");
 
-    let mut spec = Spec::new(&["pick", "--widget", "--shell", "zsh", "--buffer", "curl-token"], &home, &root);
+    let mut spec = Spec::new(
+        &[
+            "pick",
+            "--widget",
+            "--shell",
+            "zsh",
+            "--buffer",
+            "curl-token",
+        ],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
@@ -112,10 +142,14 @@ fn test_widget_secret_with_env_resolves_to_reference() {
     assert_eq!(s.wait_exit(), 0);
 
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "picked");
     let cmd = parsed["command"].as_str().unwrap();
-    assert!(cmd.contains("$KB_TEST_TOKEN"), "command should reference env var: {cmd}");
+    assert!(
+        cmd.contains("$KB_TEST_TOKEN"),
+        "command should reference env var: {cmd}"
+    );
 }
 
 #[test]
@@ -140,7 +174,18 @@ mycli --password {{pass}}
 "#;
     fs::write(entry_path, content).unwrap();
 
-    let mut spec = Spec::new(&["pick", "--widget", "--shell", "zsh", "--buffer", "secret-no-env"], &home, &root);
+    let mut spec = Spec::new(
+        &[
+            "pick",
+            "--widget",
+            "--shell",
+            "zsh",
+            "--buffer",
+            "secret-no-env",
+        ],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
@@ -155,7 +200,8 @@ mycli --password {{pass}}
     assert_eq!(s.wait_exit(), 1);
 
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "refused");
     assert!(parsed["message"].as_str().unwrap().contains("use kb run"));
 }
@@ -169,7 +215,10 @@ fn test_widget_small_terminal_falls_back_to_alternate_screen() {
     let mut s = Session::spawn(&spec);
 
     s.wait_for("Search");
-    assert!(s.alternate_screen(), "small terminal must use alternate screen");
+    assert!(
+        s.alternate_screen(),
+        "small terminal must use alternate screen"
+    );
 
     s.send(ESC);
     assert_eq!(s.wait_exit(), 130);
@@ -182,7 +231,16 @@ fn test_widget_multiline_buffer_preservation() {
 
     let multiline_buffer = "echo hello\necho world";
     let mut spec = Spec::new(
-        &["pick", "--widget", "--shell", "zsh", "--buffer", multiline_buffer, "--cursor", "10"],
+        &[
+            "pick",
+            "--widget",
+            "--shell",
+            "zsh",
+            "--buffer",
+            multiline_buffer,
+            "--cursor",
+            "10",
+        ],
         &home,
         &root,
     );
@@ -194,7 +252,8 @@ fn test_widget_multiline_buffer_preservation() {
     assert_eq!(s.wait_exit(), 130);
 
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "cancelled");
 }
 
@@ -237,7 +296,14 @@ echo 'agent-danger'
     kb_core::mcp::review::ReviewStateTracker::mark_unreviewed(&root, "cmd/agent-unrev").unwrap();
 
     let mut spec = Spec::new(
-        &["pick", "--widget", "--shell", "zsh", "--buffer", "agent-unrev"],
+        &[
+            "pick",
+            "--widget",
+            "--shell",
+            "zsh",
+            "--buffer",
+            "agent-unrev",
+        ],
         &home,
         &root,
     );
@@ -254,11 +320,8 @@ echo 'agent-danger'
     assert_eq!(s.wait_exit(), 0);
 
     let output = fs::read_to_string(&out).expect("failed to read widget output");
-    let parsed: serde_json::Value = serde_json::from_str(&output).expect("output must be valid JSON");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output).expect("output must be valid JSON");
     assert_eq!(parsed["status"], "picked");
     assert!(parsed["command"].as_str().unwrap().contains("agent-danger"));
 }
-
-
-
-

@@ -284,10 +284,10 @@ impl State {
 
     /// Whether `id` is recorded as an unreviewed agent change.
     pub fn is_unreviewed(&self, id: &str) -> bool {
-        if let Some(Value::Object(map)) = self.extra.get("unreviewed") {
-            if let Some(Value::Bool(b)) = map.get(id) {
-                return *b;
-            }
+        if let Some(Value::Object(map)) = self.extra.get("unreviewed")
+            && let Some(Value::Bool(b)) = map.get(id)
+        {
+            return *b;
         }
         false
     }

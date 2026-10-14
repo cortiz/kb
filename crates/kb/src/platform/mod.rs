@@ -367,12 +367,11 @@ pub struct SystemGitRunner;
 
 impl kb_core::git::GitRunner for SystemGitRunner {
     fn run_git(&self, cwd: &Path, args: &[&str]) -> Result<String, kb_core::git::GitError> {
-        let output = unix::run_git(cwd, args, Duration::from_secs(30))
-            .map_err(|e| match e {
-                ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
-                ToolError::TimedOut => kb_core::git::GitError::TimedOut,
-                _ => kb_core::git::GitError::Io(e.to_string()),
-            })?;
+        let output = unix::run_git(cwd, args, Duration::from_secs(30)).map_err(|e| match e {
+            ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
+            ToolError::TimedOut => kb_core::git::GitError::TimedOut,
+            _ => kb_core::git::GitError::Io(e.to_string()),
+        })?;
         if output.success() {
             Ok(output.stdout)
         } else {
@@ -389,12 +388,11 @@ impl kb_core::git::GitRunner for SystemGitRunner {
         args: &[&str],
         timeout: Duration,
     ) -> Result<kb_core::git::GitCommandResult, kb_core::git::GitError> {
-        let output = unix::run_git(cwd, args, timeout)
-            .map_err(|e| match e {
-                ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
-                ToolError::TimedOut => kb_core::git::GitError::TimedOut,
-                _ => kb_core::git::GitError::Io(e.to_string()),
-            })?;
+        let output = unix::run_git(cwd, args, timeout).map_err(|e| match e {
+            ToolError::NotFound => kb_core::git::GitError::NotFound("git not found".to_string()),
+            ToolError::TimedOut => kb_core::git::GitError::TimedOut,
+            _ => kb_core::git::GitError::Io(e.to_string()),
+        })?;
         Ok(kb_core::git::GitCommandResult {
             exit_code: output.code,
             stdout: output.stdout,

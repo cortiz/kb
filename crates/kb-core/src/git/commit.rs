@@ -103,11 +103,11 @@ pub fn auto_commit_operation(
         .collect();
     for p in &path_strs {
         let add_res = git.run_git(root, &["add", "-A", "--", p]);
-        if let Err(GitError::CommandFailed { stderr, .. }) = &add_res {
-            if stderr.contains("did not match any files") {
-                // The path was already removed/staged by git mv or git rm.
-                continue;
-            }
+        if let Err(GitError::CommandFailed { stderr, .. }) = &add_res
+            && stderr.contains("did not match any files")
+        {
+            // The path was already removed/staged by git mv or git rm.
+            continue;
         }
         add_res?;
     }

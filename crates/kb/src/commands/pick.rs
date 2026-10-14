@@ -27,7 +27,7 @@ pub struct PickArgs {
     #[arg(long = "tag", value_name = "TAG")]
     pub tag: Option<String>,
 
-    /// Picker height (<N> lines or <N>%).
+    /// Picker height (`<N>` lines or `<N>%`).
     #[arg(long, default_value = "40%")]
     pub height: String,
 
@@ -186,7 +186,9 @@ pub fn run_pick(
                 match args.print.as_str() {
                     "id" => println!("{id}"),
                     "raw" => {
-                        let entry = kb.entry(&id).map_err(|e| CliError::new("entry", e.to_string()))?;
+                        let entry = kb
+                            .entry(&id)
+                            .map_err(|e| CliError::new("entry", e.to_string()))?;
                         let raw = entry
                             .payload()
                             .map(|p| p.text.as_str())
@@ -194,7 +196,9 @@ pub fn run_pick(
                         println!("{}", raw.trim_end_matches('\n'));
                     }
                     "payload" => {
-                        let entry = kb.entry(&id).map_err(|e| CliError::new("entry", e.to_string()))?;
+                        let entry = kb
+                            .entry(&id)
+                            .map_err(|e| CliError::new("entry", e.to_string()))?;
                         let abs_path = root.join(entry.path());
                         match kb_core::entry_json::pick_output(
                             &entry,
@@ -209,12 +213,16 @@ pub fn run_pick(
                         }
                     }
                     "path" => {
-                        let entry = kb.entry(&id).map_err(|e| CliError::new("entry", e.to_string()))?;
+                        let entry = kb
+                            .entry(&id)
+                            .map_err(|e| CliError::new("entry", e.to_string()))?;
                         let abs_path = root.join(entry.path());
                         println!("{}", abs_path.display());
                     }
                     "json" => {
-                        let entry = kb.entry(&id).map_err(|e| CliError::new("entry", e.to_string()))?;
+                        let entry = kb
+                            .entry(&id)
+                            .map_err(|e| CliError::new("entry", e.to_string()))?;
                         let abs_path = root.join(entry.path());
                         let doc = kb_core::entry_json::entry_json(&entry, &abs_path);
                         println!("{doc}");
@@ -279,4 +287,3 @@ fn run_tmux_popup(args: &PickArgs, platform: &impl Platform) -> Result<ExitCode,
     }
     Ok(ExitCode::from(code as u8))
 }
-

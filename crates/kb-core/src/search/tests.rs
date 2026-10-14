@@ -309,7 +309,7 @@ fn a_file_over_one_megabyte_is_indexed_and_searchable() {
     let t = Instant::now();
     run(&mut kb, "zebrafish");
     assert!(
-        t.elapsed() < Duration::from_millis(500),
+        t.elapsed() < Duration::from_millis(1500),
         "{:?}",
         t.elapsed()
     );

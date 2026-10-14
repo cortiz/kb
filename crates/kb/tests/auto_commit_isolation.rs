@@ -47,7 +47,10 @@ fn git_last_commit_files(root: &Path) -> Vec<String> {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    text.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+    text.lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn git_last_commit_message(root: &Path) -> String {
@@ -104,8 +107,14 @@ fn test_auto_commit_isolation_add_mv_rm() {
 
     // 5. Verify staged and unstaged state is strictly preserved
     let status = git_porcelain(&root);
-    assert!(status.contains("A  staged.txt"), "staged.txt should remain staged: {status}");
-    assert!(status.contains("?? unstaged.txt"), "unstaged.txt should remain untracked: {status}");
+    assert!(
+        status.contains("A  staged.txt"),
+        "staged.txt should remain staged: {status}"
+    );
+    assert!(
+        status.contains("?? unstaged.txt"),
+        "unstaged.txt should remain untracked: {status}"
+    );
 
     // 6. Rename entry via kb mv
     let mv_out = kb_in(&root)
@@ -126,8 +135,14 @@ fn test_auto_commit_isolation_add_mv_rm() {
 
     // Verify staged and unstaged files still preserved
     let status2 = git_porcelain(&root);
-    assert!(status2.contains("A  staged.txt"), "staged.txt must remain staged: {status2}");
-    assert!(status2.contains("?? unstaged.txt"), "unstaged.txt must remain untracked: {status2}");
+    assert!(
+        status2.contains("A  staged.txt"),
+        "staged.txt must remain staged: {status2}"
+    );
+    assert!(
+        status2.contains("?? unstaged.txt"),
+        "unstaged.txt must remain untracked: {status2}"
+    );
 
     // 7. Remove entry via kb rm
     let rm_out = kb_in(&root)
@@ -144,8 +159,14 @@ fn test_auto_commit_isolation_add_mv_rm() {
     assert_eq!(rm_msg, "kb: rm cmd/renamed-commit");
 
     let status3 = git_porcelain(&root);
-    assert!(status3.contains("A  staged.txt"), "staged.txt must remain staged: {status3}");
-    assert!(status3.contains("?? unstaged.txt"), "unstaged.txt must remain untracked: {status3}");
+    assert!(
+        status3.contains("A  staged.txt"),
+        "staged.txt must remain staged: {status3}"
+    );
+    assert!(
+        status3.contains("?? unstaged.txt"),
+        "unstaged.txt must remain untracked: {status3}"
+    );
 }
 
 #[test]
@@ -185,7 +206,11 @@ fn test_auto_commit_missing_identity() {
         .output()
         .unwrap();
 
-    assert!(add_out.status.success(), "kb add should succeed even without identity: {:?}", add_out);
+    assert!(
+        add_out.status.success(),
+        "kb add should succeed even without identity: {:?}",
+        add_out
+    );
     let stderr = String::from_utf8_lossy(&add_out.stderr);
     assert!(
         stderr.contains("git commit skipped: author identity unknown"),
@@ -217,7 +242,11 @@ fn test_auto_commit_disabled() {
         .output()
         .unwrap();
 
-    assert!(add_out.status.success(), "kb add should succeed: {:?}", add_out);
+    assert!(
+        add_out.status.success(),
+        "kb add should succeed: {:?}",
+        add_out
+    );
     assert!(root.join("cmd/disabled.md").is_file());
 
     // git log HEAD should still be the initial commit
@@ -244,6 +273,10 @@ fn test_auto_commit_non_git_repo() {
         .output()
         .unwrap();
 
-    assert!(add_out.status.success(), "kb add should succeed in non-git directory: {:?}", add_out);
+    assert!(
+        add_out.status.success(),
+        "kb add should succeed in non-git directory: {:?}",
+        add_out
+    );
     assert!(root.join("cmd/non-git.md").is_file());
 }

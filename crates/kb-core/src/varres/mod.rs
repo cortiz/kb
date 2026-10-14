@@ -533,11 +533,7 @@ pub fn preview(plan: &VarPlan, values: &Values) -> Resolved {
 }
 
 /// Live preview with a specific resolution target.
-pub fn preview_for_target(
-    plan: &VarPlan,
-    values: &Values,
-    target: ResolutionTarget,
-) -> Resolved {
+pub fn preview_for_target(plan: &VarPlan, values: &Values, target: ResolutionTarget) -> Resolved {
     substitute_target(plan, values, true, target)
 }
 
@@ -568,7 +564,9 @@ fn substitute_target(
                                     let start = text.len();
                                     let ref_str = match state {
                                         Quote::Double => format!("${env_name}"),
-                                        Quote::None | Quote::Single => dialect.env_var_ref(env_name),
+                                        Quote::None | Quote::Single => {
+                                            dialect.env_var_ref(env_name)
+                                        }
                                     };
                                     text.push_str(&ref_str);
                                     has_secret = true;

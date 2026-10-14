@@ -2343,4 +2343,3 @@ preview = false
         assert_eq!(bad.settings.widget_buffer(), "query");
     }
 }
-

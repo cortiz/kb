@@ -369,20 +369,40 @@ fn test_show_and_search_json_mentions_unreviewed() {
     assert!(text.contains("agent (unreviewed)"), "preview text: {text}");
 
     // 2. kb search --json includes unreviewed: true
-    let search_out = kb_in(&root).args(["search", "5xx", "--json"]).output().unwrap();
+    let search_out = kb_in(&root)
+        .args(["search", "5xx", "--json"])
+        .output()
+        .unwrap();
     assert_eq!(search_out.status.code(), Some(0));
     let doc: Value = serde_json::from_slice(&search_out.stdout).unwrap();
-    let hit = doc["results"].as_array().unwrap().iter().find(|r| r["id"] == id).unwrap();
+    let hit = doc["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == id)
+        .unwrap();
     assert_eq!(hit["unreviewed"], true);
 
     // 3. kb search unreviewed:true filter works
-    let filter_out = kb_in(&root).args(["search", "unreviewed:true"]).output().unwrap();
+    let filter_out = kb_in(&root)
+        .args(["search", "unreviewed:true"])
+        .output()
+        .unwrap();
     assert_eq!(filter_out.status.code(), Some(0));
     let stdout_filter = String::from_utf8_lossy(&filter_out.stdout);
-    assert!(stdout_filter.contains(id), "unreviewed:true should match {id}");
+    assert!(
+        stdout_filter.contains(id),
+        "unreviewed:true should match {id}"
+    );
 
     // 4. kb search unreviewed:false excludes it
-    let filter_false_out = kb_in(&root).args(["search", "5xx", "unreviewed:false"]).output().unwrap();
+    let filter_false_out = kb_in(&root)
+        .args(["search", "5xx", "unreviewed:false"])
+        .output()
+        .unwrap();
     let stdout_false = String::from_utf8_lossy(&filter_false_out.stdout);
-    assert!(!stdout_false.contains(id), "unreviewed:false should not match {id}");
+    assert!(
+        !stdout_false.contains(id),
+        "unreviewed:false should not match {id}"
+    );
 }

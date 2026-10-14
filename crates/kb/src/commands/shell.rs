@@ -84,9 +84,9 @@ pub fn run_shell(
                 detect_current_shell()
             };
 
-            let home = platform.home_dir().ok_or_else(|| {
-                CliError::new("shell", "could not determine user home directory")
-            })?;
+            let home = platform
+                .home_dir()
+                .ok_or_else(|| CliError::new("shell", "could not determine user home directory"))?;
             let target_file = get_shell_startup_file(dialect, &home);
 
             let snippet = match dialect {
@@ -114,8 +114,7 @@ pub fn run_shell(
             }
 
             let existing = if target_file.exists() {
-                fs::read_to_string(&target_file)
-                    .map_err(|e| CliError::new("io", e.to_string()))?
+                fs::read_to_string(&target_file).map_err(|e| CliError::new("io", e.to_string()))?
             } else {
                 String::new()
             };
@@ -135,8 +134,7 @@ pub fn run_shell(
             if let Some(parent) = target_file.parent() {
                 let _ = fs::create_dir_all(parent);
             }
-            fs::write(&target_file, new_content)
-                .map_err(|e| CliError::new("io", e.to_string()))?;
+            fs::write(&target_file, new_content).map_err(|e| CliError::new("io", e.to_string()))?;
 
             println!(
                 "kb: installed shell integration for {} in {}",
@@ -157,21 +155,18 @@ pub fn run_shell(
                 detect_current_shell()
             };
 
-            let home = platform.home_dir().ok_or_else(|| {
-                CliError::new("shell", "could not determine user home directory")
-            })?;
+            let home = platform
+                .home_dir()
+                .ok_or_else(|| CliError::new("shell", "could not determine user home directory"))?;
             let target_file = get_shell_startup_file(dialect, &home);
 
             if !target_file.exists() {
-                println!(
-                    "kb: startup file {} does not exist",
-                    target_file.display()
-                );
+                println!("kb: startup file {} does not exist", target_file.display());
                 return Ok(ExitCode::SUCCESS);
             }
 
-            let existing = fs::read_to_string(&target_file)
-                .map_err(|e| CliError::new("io", e.to_string()))?;
+            let existing =
+                fs::read_to_string(&target_file).map_err(|e| CliError::new("io", e.to_string()))?;
 
             if !existing.contains(KB_STARTUP_BLOCK_BEGIN) {
                 println!(
@@ -205,8 +200,7 @@ pub fn run_shell(
             let _ = fs::write(backup_file, &existing);
 
             let new_content = remove_block(&existing);
-            fs::write(&target_file, new_content)
-                .map_err(|e| CliError::new("io", e.to_string()))?;
+            fs::write(&target_file, new_content).map_err(|e| CliError::new("io", e.to_string()))?;
 
             println!(
                 "kb: uninstalled shell integration from {}",
@@ -307,10 +301,7 @@ pub fn run_completions(
     Ok(ExitCode::SUCCESS)
 }
 
-pub fn generate_completions(
-    shell_name: &str,
-    cmd: &mut clap::Command,
-) -> Result<String, CliError> {
+pub fn generate_completions(shell_name: &str, cmd: &mut clap::Command) -> Result<String, CliError> {
     let dialect = ShellDialect::from_str(shell_name)
         .ok_or_else(|| CliError::new("completions", format!("unsupported shell '{shell_name}'")))?;
 
@@ -333,7 +324,7 @@ pub fn generate_completions(
 }
 
 fn dynamic_zsh() -> &'static str {
-r#"
+    r#"
 # Dynamic completion overrides for kb
 _kb_entries() {
     local -a entries
@@ -400,7 +391,7 @@ compdef _kb_custom kb
 }
 
 fn dynamic_bash() -> &'static str {
-r#"
+    r#"
 _kb_custom() {
     local cur prev words cword
     _init_completion || return
@@ -450,7 +441,7 @@ complete -F _kb_custom -o bashdefault -o default kb
 }
 
 fn dynamic_fish() -> &'static str {
-r#"
+    r#"
 # Dynamic completions for fish
 complete -c kb -n '__fish_seen_subcommand_from copy use show edit rm vars actions open run' -a '(kb __complete entries (commandline -ct) 2>/dev/null)'
 complete -c kb -l type -a '(kb __complete types (commandline -ct) 2>/dev/null)'

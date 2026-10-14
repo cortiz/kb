@@ -185,10 +185,15 @@ pub fn print_search_json(query: &str, total: usize, results: &[SearchResult]) {
             }
             obj.insert(
                 "matches".into(),
-                json!(r.matches.iter().map(|m| json!({
-                    "field": m.field.name(),
-                    "ranges": ranges_json(&m.ranges),
-                })).collect::<Vec<_>>()),
+                json!(
+                    r.matches
+                        .iter()
+                        .map(|m| json!({
+                            "field": m.field.name(),
+                            "ranges": ranges_json(&m.ranges),
+                        }))
+                        .collect::<Vec<_>>()
+                ),
             );
             obj.insert(
                 "snippet".into(),

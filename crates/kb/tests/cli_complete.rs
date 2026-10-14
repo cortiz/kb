@@ -27,7 +27,10 @@ fn test_cli_complete_types() {
         vec!["cmd", "sql", "sumo", "cw", "prompt", "link", "code"]
     );
 
-    let out_filtered = kb_in(&root).args(["__complete", "types", "c"]).output().unwrap();
+    let out_filtered = kb_in(&root)
+        .args(["__complete", "types", "c"])
+        .output()
+        .unwrap();
     assert!(out_filtered.status.success());
     let s_filtered = stdout(&out_filtered);
     let lines_filtered: Vec<&str> = s_filtered.lines().collect();
@@ -37,7 +40,10 @@ fn test_cli_complete_types() {
 #[test]
 fn test_cli_complete_entries() {
     let (_d, root) = warm_search_kb();
-    let out = kb_in(&root).args(["__complete", "entries"]).output().unwrap();
+    let out = kb_in(&root)
+        .args(["__complete", "entries"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let s = stdout(&out);
     assert!(!s.is_empty(), "must return entries");
@@ -46,7 +52,10 @@ fn test_cli_complete_entries() {
         "must format as <id>\\t<title>"
     );
 
-    let out_filtered = kb_in(&root).args(["__complete", "entries", "cmd/restart"]).output().unwrap();
+    let out_filtered = kb_in(&root)
+        .args(["__complete", "entries", "cmd/restart"])
+        .output()
+        .unwrap();
     assert!(out_filtered.status.success());
     let s_filtered = stdout(&out_filtered);
     assert!(s_filtered.contains("cmd/restart-worker\tRestart worker"));
@@ -61,7 +70,10 @@ fn test_cli_complete_tags() {
     let s = stdout(&out);
     assert!(s.lines().any(|l| l == "ops"));
 
-    let out_filtered = kb_in(&root).args(["__complete", "tags", "op"]).output().unwrap();
+    let out_filtered = kb_in(&root)
+        .args(["__complete", "tags", "op"])
+        .output()
+        .unwrap();
     assert!(out_filtered.status.success());
     let s_filtered = stdout(&out_filtered);
     assert_eq!(s_filtered.trim(), "ops");
@@ -70,13 +82,19 @@ fn test_cli_complete_tags() {
 #[test]
 fn test_cli_complete_vars() {
     let (_d, root) = warm_search_kb();
-    let out = kb_in(&root).args(["__complete", "vars", "cmd/deploy-service"]).output().unwrap();
+    let out = kb_in(&root)
+        .args(["__complete", "vars", "cmd/deploy-service"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let s = stdout(&out);
     let lines: Vec<&str> = s.lines().collect();
     assert_eq!(lines, vec!["env=", "region="]);
 
-    let out_filtered = kb_in(&root).args(["__complete", "vars", "cmd/deploy-service", "e"]).output().unwrap();
+    let out_filtered = kb_in(&root)
+        .args(["__complete", "vars", "cmd/deploy-service", "e"])
+        .output()
+        .unwrap();
     assert!(out_filtered.status.success());
     let s_filtered = stdout(&out_filtered);
     assert_eq!(s_filtered.trim(), "env=");
@@ -85,13 +103,19 @@ fn test_cli_complete_vars() {
 #[test]
 fn test_cli_complete_var_values() {
     let (_d, root) = warm_search_kb();
-    let out = kb_in(&root).args(["__complete", "var-values", "cmd/deploy-service", "env"]).output().unwrap();
+    let out = kb_in(&root)
+        .args(["__complete", "var-values", "cmd/deploy-service", "env"])
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let s = stdout(&out);
     let lines: Vec<&str> = s.lines().collect();
     assert_eq!(lines, vec!["prod", "stage"]);
 
-    let out_filtered = kb_in(&root).args(["__complete", "var-values", "cmd/deploy-service", "env", "p"]).output().unwrap();
+    let out_filtered = kb_in(&root)
+        .args(["__complete", "var-values", "cmd/deploy-service", "env", "p"])
+        .output()
+        .unwrap();
     assert!(out_filtered.status.success());
     let s_filtered = stdout(&out_filtered);
     assert_eq!(s_filtered.trim(), "prod");

@@ -4,9 +4,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use crate::author::draft::{Draft, DraftFields, DraftSource, PathChoice, VarDecl, slugify};
 use crate::author::SystemClock;
-use crate::author::detect::{detect, Confidence};
+use crate::author::detect::{Confidence, detect};
+use crate::author::draft::{Draft, DraftFields, DraftSource, PathChoice, VarDecl, slugify};
 use crate::entry::EntryType;
 use crate::lint::Severity;
 use crate::mcp::audit::log_mcp_operation;
@@ -56,38 +56,88 @@ pub fn compute_unified_diff(path: &str, old_text: &str, new_text: &str) -> Strin
     out
 }
 
-fn parse_draft_fields(entry_type: EntryType, fields: &BTreeMap<String, serde_json::Value>) -> DraftFields {
+fn parse_draft_fields(
+    entry_type: EntryType,
+    fields: &BTreeMap<String, serde_json::Value>,
+) -> DraftFields {
     match entry_type {
         EntryType::Sql => DraftFields::Sql {
-            dialect: fields.get("dialect").and_then(|v| v.as_str()).map(str::to_string),
-            database: fields.get("database").and_then(|v| v.as_str()).map(str::to_string),
+            dialect: fields
+                .get("dialect")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            database: fields
+                .get("database")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         EntryType::Sumo => DraftFields::Sumo {
-            range: fields.get("range").and_then(|v| v.as_str()).map(str::to_string),
+            range: fields
+                .get("range")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         EntryType::Cw => DraftFields::Cw {
             log_groups: fields
                 .get("log_groups")
                 .and_then(|v| v.as_array())
-                .map(|arr| arr.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default(),
-            range: fields.get("range").and_then(|v| v.as_str()).map(str::to_string),
-            region: fields.get("region").and_then(|v| v.as_str()).map(str::to_string),
+            range: fields
+                .get("range")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            region: fields
+                .get("region")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         EntryType::Cmd => DraftFields::Cmd {
-            shell: fields.get("shell").and_then(|v| v.as_str()).map(str::to_string),
-            cwd: fields.get("cwd").and_then(|v| v.as_str()).map(str::to_string),
+            shell: fields
+                .get("shell")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            cwd: fields
+                .get("cwd")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         EntryType::Link => DraftFields::Link {
-            url: fields.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            url: fields
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         },
         EntryType::Code => DraftFields::Code {
-            repo: fields.get("repo").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            git_ref: fields.get("git_ref").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            path: fields.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            repo: fields
+                .get("repo")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            git_ref: fields
+                .get("git_ref")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            path: fields
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             line: fields.get("line").and_then(|v| v.as_u64()).unwrap_or(1) as u32,
-            end_line: fields.get("end_line").and_then(|v| v.as_u64()).map(|n| n as u32),
-            symbol: fields.get("symbol").and_then(|v| v.as_str()).map(str::to_string),
+            end_line: fields
+                .get("end_line")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32),
+            symbol: fields
+                .get("symbol")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
         },
         EntryType::Prompt => DraftFields::None,
     }
@@ -119,7 +169,8 @@ impl<'a> McpEngine<'a> {
             let det = detect(&req.payload);
             if det.confidence == Confidence::Low {
                 return Err(KbError::Unreadable(
-                    "could not detect entry type with confidence; please specify 'type' explicitly".into(),
+                    "could not detect entry type with confidence; please specify 'type' explicitly"
+                        .into(),
                 ));
             }
             (det.ty, det)
@@ -153,7 +204,9 @@ impl<'a> McpEngine<'a> {
                     "cannot generate a valid path from title; specify 'path' explicitly".into(),
                 ));
             }
-            self.settings.path_template().render(entry_type, &slug, &req.tags)
+            self.settings
+                .path_template()
+                .render(entry_type, &slug, &req.tags)
         };
 
         // Check if ID is already taken
@@ -185,18 +238,18 @@ impl<'a> McpEngine<'a> {
 
         // Auto-declaration of undeclared placeholders
         for brace in scan_refs(&req.payload) {
-            if let Brace::Ref { name, .. } = brace {
-                if !vars_map.contains_key(&name) {
-                    vars_map.insert(
-                        name.clone(),
-                        VarDecl {
-                            name: name.clone(),
-                            kind: VarKind::Text,
-                            default: None,
-                            options: Vec::new(),
-                        },
-                    );
-                }
+            if let Brace::Ref { name, .. } = brace
+                && !vars_map.contains_key(&name)
+            {
+                vars_map.insert(
+                    name.clone(),
+                    VarDecl {
+                        name: name.clone(),
+                        kind: VarKind::Text,
+                        default: None,
+                        options: Vec::new(),
+                    },
+                );
             }
         }
 
@@ -259,8 +312,8 @@ impl<'a> McpEngine<'a> {
 
         // Dry run mode
         if req.dry_run {
-            let content_str = String::from_utf8(check.bytes)
-                .map_err(|e| KbError::Unreadable(e.to_string()))?;
+            let content_str =
+                String::from_utf8(check.bytes).map_err(|e| KbError::Unreadable(e.to_string()))?;
             return Ok(CreateEntryResponse {
                 id,
                 version,
@@ -270,7 +323,9 @@ impl<'a> McpEngine<'a> {
         }
 
         // Atomic file write & index refresh
-        self.kb.create_entry(&check).map_err(|e| KbError::Unreadable(e.to_string()))?;
+        self.kb
+            .create_entry(&check)
+            .map_err(|e| KbError::Unreadable(e.to_string()))?;
 
         // Git auto-commit with agent trailers
         if let Some(git) = self.git {
@@ -338,7 +393,11 @@ impl<'a> McpEngine<'a> {
         }
 
         // Construct updated values
-        let new_title = req.changes.title.as_deref().unwrap_or_else(|| entry.title().unwrap_or(""));
+        let new_title = req
+            .changes
+            .title
+            .as_deref()
+            .unwrap_or_else(|| entry.title().unwrap_or(""));
         let new_payload = req
             .changes
             .payload
@@ -429,18 +488,18 @@ impl<'a> McpEngine<'a> {
 
         // Auto-declare undeclared variable placeholders in payload
         for brace in scan_refs(&new_payload) {
-            if let Brace::Ref { name, .. } = brace {
-                if !vars_map.contains_key(&name) {
-                    vars_map.insert(
-                        name.clone(),
-                        VarDecl {
-                            name: name.clone(),
-                            kind: VarKind::Text,
-                            default: None,
-                            options: Vec::new(),
-                        },
-                    );
-                }
+            if let Brace::Ref { name, .. } = brace
+                && !vars_map.contains_key(&name)
+            {
+                vars_map.insert(
+                    name.clone(),
+                    VarDecl {
+                        name: name.clone(),
+                        kind: VarKind::Text,
+                        default: None,
+                        options: Vec::new(),
+                    },
+                );
             }
         }
 
@@ -462,10 +521,19 @@ impl<'a> McpEngine<'a> {
                     fields_map.insert("range".into(), serde_json::Value::String(r.clone()));
                 }
             }
-            crate::entry::TypeFields::Cw { log_groups, range, region } => {
+            crate::entry::TypeFields::Cw {
+                log_groups,
+                range,
+                region,
+            } => {
                 fields_map.insert(
                     "log_groups".into(),
-                    serde_json::Value::Array(log_groups.iter().map(|g| serde_json::Value::String(g.clone())).collect()),
+                    serde_json::Value::Array(
+                        log_groups
+                            .iter()
+                            .map(|g| serde_json::Value::String(g.clone()))
+                            .collect(),
+                    ),
                 );
                 if let Some(r) = range {
                     fields_map.insert("range".into(), serde_json::Value::String(r.clone()));
@@ -497,7 +565,10 @@ impl<'a> McpEngine<'a> {
                 if let Some(c) = code {
                     fields_map.insert("repo".into(), serde_json::Value::String(c.repo.clone()));
                     fields_map.insert("path".into(), serde_json::Value::String(c.path.clone()));
-                    fields_map.insert("git_ref".into(), serde_json::Value::String(c.git_ref.clone()));
+                    fields_map.insert(
+                        "git_ref".into(),
+                        serde_json::Value::String(c.git_ref.clone()),
+                    );
                     fields_map.insert("line".into(), serde_json::json!(c.line));
                     if let Some(el) = c.end_line {
                         fields_map.insert("end_line".into(), serde_json::json!(el));
@@ -590,7 +661,10 @@ impl<'a> McpEngine<'a> {
 
         // Atomic write
         let entry_file = self.kb.root().join(format!("{}.md", req.id));
-        let tmp_file = self.kb.root().join(format!("{}.md.tmp-{}", req.id, std::process::id()));
+        let tmp_file = self
+            .kb
+            .root()
+            .join(format!("{}.md.tmp-{}", req.id, std::process::id()));
         fs::write(&tmp_file, &new_text).map_err(|e| KbError::Unreadable(e.to_string()))?;
         fs::rename(&tmp_file, &entry_file).map_err(|e| KbError::Unreadable(e.to_string()))?;
 
@@ -674,7 +748,10 @@ mod tests {
         let res2 = engine.create_entry(&req, Some("test-client")).unwrap();
         assert_eq!(res2.id, "sumo/5xx-spike");
         assert!(temp.path().join("sumo/5xx-spike.md").exists());
-        assert!(ReviewStateTracker::is_unreviewed(temp.path(), "sumo/5xx-spike"));
+        assert!(ReviewStateTracker::is_unreviewed(
+            temp.path(),
+            "sumo/5xx-spike"
+        ));
 
         // 3. Creating existing ID should fail
         let err = engine.create_entry(&req, Some("test-client"));
@@ -771,7 +848,8 @@ mod tests {
         let real_res = engine.update_entry(&real_update, None).unwrap();
         assert_ne!(real_res.version, created.version);
 
-        let updated_content = fs::read_to_string(temp.path().join(format!("{}.md", created.id))).unwrap();
+        let updated_content =
+            fs::read_to_string(temp.path().join(format!("{}.md", created.id))).unwrap();
         assert!(updated_content.contains("Updated notes"));
         assert!(updated_content.contains("prod"));
     }

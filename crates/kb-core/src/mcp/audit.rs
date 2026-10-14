@@ -6,8 +6,8 @@ use std::io::Write;
 use std::path::Path;
 use std::time::SystemTime;
 
-use crate::author::render::rfc3339_utc;
 use super::types::AuditEntry;
+use crate::author::render::rfc3339_utc;
 
 /// Logs an MCP operation to `.kb/mcp.log` under the given KB root.
 ///
@@ -36,8 +36,7 @@ pub fn log_mcp_operation(
         error_code: error_code.map(str::to_string),
     };
 
-    let line = serde_json::to_string(&entry)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let line = serde_json::to_string(&entry).map_err(std::io::Error::other)?;
 
     let mut file = OpenOptions::new()
         .create(true)

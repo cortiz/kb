@@ -1,9 +1,9 @@
 //! Secret scanning gates before commit and before push.
 
-use std::path::{Path, PathBuf};
 use crate::git::{GitError, GitRunner};
 use crate::lint::RuleCode;
 use crate::lint::secrets::scan_secrets;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SecretFinding {
@@ -83,13 +83,13 @@ impl SecretGate {
         let mut report = SecretGateReport::default();
         for file in files {
             let full_path = root.join(file);
-            if full_path.is_file() {
-                if let Ok(content) = std::fs::read_to_string(&full_path) {
-                    let path_str = file.to_string_lossy();
-                    let (blocked, allowed) = Self::check_text(&path_str, &content, None);
-                    report.blocked.extend(blocked);
-                    report.allowed.extend(allowed);
-                }
+            if full_path.is_file()
+                && let Ok(content) = std::fs::read_to_string(&full_path)
+            {
+                let path_str = file.to_string_lossy();
+                let (blocked, allowed) = Self::check_text(&path_str, &content, None);
+                report.blocked.extend(blocked);
+                report.allowed.extend(allowed);
             }
         }
         Ok(report)
@@ -100,12 +100,10 @@ impl SecretGate {
         git: &impl GitRunner,
     ) -> Result<SecretGateReport, GitError> {
         let mut report = SecretGateReport::default();
-        let has_upstream = git.run_git(root, &["rev-parse", "--verify", "@{u}"]).is_ok();
-        let range = if has_upstream {
-            "@{u}..HEAD"
-        } else {
-            "HEAD"
-        };
+        let has_upstream = git
+            .run_git(root, &["rev-parse", "--verify", "@{u}"])
+            .is_ok();
+        let range = if has_upstream { "@{u}..HEAD" } else { "HEAD" };
         let rev_list = git.run_git(root, &["rev-list", range]);
         let commits_str = match rev_list {
             Ok(c) => c,
@@ -149,7 +147,11 @@ mod tests {
         let root = dir.path();
 
         let clean_path = root.join("clean.md");
-        fs::write(&clean_path, "---\nid: clean\ntitle: Clean\ntype: cmd\n---\necho hello\n").unwrap();
+        fs::write(
+            &clean_path,
+            "---\nid: clean\ntitle: Clean\ntype: cmd\n---\necho hello\n",
+        )
+        .unwrap();
 
         let leak_path = root.join("leak.md");
         fs::write(
@@ -200,13 +202,9 @@ mod tests {
                     stdout: "commit2\ncommit1\n".into(),
                     stderr: String::new(),
                 })
-            } else if args.contains(&"commit1") && args.contains(&"--name-only") {
-                Ok(GitCommandResult {
-                    exit_code: Some(0),
-                    stdout: "cmd/leak.md\n".into(),
-                    stderr: String::new(),
-                })
-            } else if args.contains(&"commit2") && args.contains(&"--name-only") {
+            } else if (args.contains(&"commit1") || args.contains(&"commit2"))
+                && args.contains(&"--name-only")
+            {
                 Ok(GitCommandResult {
                     exit_code: Some(0),
                     stdout: "cmd/leak.md\n".into(),
@@ -215,7 +213,9 @@ mod tests {
             } else if args.contains(&"show") && args.contains(&"commit1:cmd/leak.md") {
                 Ok(GitCommandResult {
                     exit_code: Some(0),
-                    stdout: "---\nid: cmd/leak\ntitle: Leak\ntype: cmd\n---\nAKIAIOSFODNN7EXAMPLE\n".into(),
+                    stdout:
+                        "---\nid: cmd/leak\ntitle: Leak\ntype: cmd\n---\nAKIAIOSFODNN7EXAMPLE\n"
+                            .into(),
                     stderr: String::new(),
                 })
             } else if args.contains(&"show") && args.contains(&"commit2:cmd/leak.md") {

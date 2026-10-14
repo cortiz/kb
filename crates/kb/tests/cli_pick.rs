@@ -55,7 +55,10 @@ fn test_pick_standalone_raw_mode() {
 
     assert_eq!(s.wait_exit(), 0);
     let output = fs::read_to_string(&out).expect("failed to read output");
-    assert_eq!(output.trim(), "./deploy.sh --env {{env}} --region {{region}}");
+    assert_eq!(
+        output.trim(),
+        "./deploy.sh --env {{env}} --region {{region}}"
+    );
 }
 
 #[test]
@@ -63,7 +66,11 @@ fn test_pick_standalone_payload_mode() {
     let (t, home, root) = kb_home("search");
     let out = t.path().join("pick_out.txt");
 
-    let mut spec = Spec::new(&["pick", "restart-worker", "--print", "payload"], &home, &root);
+    let mut spec = Spec::new(
+        &["pick", "restart-worker", "--print", "payload"],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
@@ -97,7 +104,11 @@ fn test_pick_type_and_tag_filtering() {
     let (t, home, root) = kb_home("search");
     let out = t.path().join("pick_out.txt");
 
-    let mut spec = Spec::new(&["pick", "--type", "cmd", "--tag", "ops", "--print", "id"], &home, &root);
+    let mut spec = Spec::new(
+        &["pick", "--type", "cmd", "--tag", "ops", "--print", "id"],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);
@@ -114,7 +125,11 @@ fn test_pick_tmux_outside_falls_back_gracefully() {
     let (t, home, root) = kb_home("search");
     let out = t.path().join("pick_out.txt");
 
-    let mut spec = Spec::new(&["pick", "restart-worker", "--tmux", "--print", "id"], &home, &root);
+    let mut spec = Spec::new(
+        &["pick", "restart-worker", "--tmux", "--print", "id"],
+        &home,
+        &root,
+    );
     spec.out = Some(out.clone());
 
     let mut s = Session::spawn(&spec);

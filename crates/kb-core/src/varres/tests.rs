@@ -574,7 +574,12 @@ fn test_shell_widget_secret_with_env_resolves_to_env_var_ref() {
         "mycli --token {{token}}",
     );
     let p2 = plan(&e2);
-    let r2 = resolve_for_target(&p2, &Values::new(), ResolutionTarget::ShellWidget(ShellDialect::Bash)).unwrap();
+    let r2 = resolve_for_target(
+        &p2,
+        &Values::new(),
+        ResolutionTarget::ShellWidget(ShellDialect::Bash),
+    )
+    .unwrap();
     assert_eq!(
         r2.primary().unwrap().text,
         "mycli --token \"$SUMO_TOKEN\"\n"
@@ -588,10 +593,14 @@ fn test_shell_widget_secret_without_env_returns_error() {
         "mycli --pass {{secret_no_env}}",
     );
     let p = plan(&e);
-    let errs = resolve_for_target(&p, &Values::new(), ResolutionTarget::ShellWidget(ShellDialect::Zsh)).unwrap_err();
+    let errs = resolve_for_target(
+        &p,
+        &Values::new(),
+        ResolutionTarget::ShellWidget(ShellDialect::Zsh),
+    )
+    .unwrap_err();
     assert_eq!(errs.len(), 1);
     assert_eq!(errs[0].name, "secret_no_env");
     assert!(errs[0].message.contains("no environment variable source"));
     assert!(errs[0].message.contains("use kb run"));
 }
-

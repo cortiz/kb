@@ -37,7 +37,11 @@ fn test_shell_install_creates_marked_block_in_zshrc() {
     fs::write(&zshrc, "# existing config\nexport FOO=bar\n").unwrap();
 
     let out = home.kb(&["shell", "install", "-y", "--shell", "zsh"], "/bin/zsh");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let content = fs::read_to_string(&zshrc).unwrap();
     assert!(content.contains("# >>> kb >>>"));
@@ -56,10 +60,18 @@ fn test_shell_install_creates_marked_block_in_zshrc() {
 fn test_shell_uninstall_removes_marked_block_cleanly() {
     let home = ShellHome::new();
     let zshrc = home.path().join(".zshrc");
-    fs::write(&zshrc, "# header\n\n# >>> kb >>>\neval \"$(kb shell init zsh)\"\n# <<< kb <<<\n\n# footer\n").unwrap();
+    fs::write(
+        &zshrc,
+        "# header\n\n# >>> kb >>>\neval \"$(kb shell init zsh)\"\n# <<< kb <<<\n\n# footer\n",
+    )
+    .unwrap();
 
     let out = home.kb(&["shell", "uninstall", "-y", "--shell", "zsh"], "/bin/zsh");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let content = fs::read_to_string(&zshrc).unwrap();
     assert!(!content.contains("# >>> kb >>>"));
@@ -76,8 +88,15 @@ fn test_shell_install_fish_config() {
     fs::create_dir_all(fish_config.parent().unwrap()).unwrap();
     fs::write(&fish_config, "# fish existing\n").unwrap();
 
-    let out = home.kb(&["shell", "install", "-y", "--shell", "fish"], "/usr/bin/fish");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let out = home.kb(
+        &["shell", "install", "-y", "--shell", "fish"],
+        "/usr/bin/fish",
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let content = fs::read_to_string(&fish_config).unwrap();
     assert!(content.contains("# >>> kb >>>"));
@@ -94,4 +113,3 @@ fn test_shell_init_cli_outputs_script() {
     assert!(text.contains("_kb_widget"));
     assert!(text.contains("zle reset-prompt"));
 }
-

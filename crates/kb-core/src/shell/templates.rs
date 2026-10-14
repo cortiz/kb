@@ -5,17 +5,21 @@ pub const KB_STARTUP_BLOCK_END: &str = "# <<< kb <<<";
 
 use super::dialects::ShellDialect;
 
-pub fn generate_shell_init(
-    dialect: ShellDialect,
-    widget_key: &str,
-    save_key: &str,
-) -> String {
-    let w_key = if widget_key.is_empty() { r"\ek" } else { widget_key };
-    let s_key = if save_key.is_empty() { r"\eK" } else { save_key };
+pub fn generate_shell_init(dialect: ShellDialect, widget_key: &str, save_key: &str) -> String {
+    let w_key = if widget_key.is_empty() {
+        r"\ek"
+    } else {
+        widget_key
+    };
+    let s_key = if save_key.is_empty() {
+        r"\eK"
+    } else {
+        save_key
+    };
 
     match dialect {
         ShellDialect::Zsh => format!(
-r#"# kb shell integration for zsh
+            r#"# kb shell integration for zsh
 _kb_widget() {{
   local out ret
   out=$(kb pick --widget --shell zsh --buffer "$BUFFER" --cursor "$CURSOR" 2>/dev/null)
@@ -75,7 +79,7 @@ fi
 "#
         ),
         ShellDialect::Bash => format!(
-r#"# kb shell integration for bash
+            r#"# kb shell integration for bash
 if [[ "${{BASH_VERSINFO[0]:-0}}" -lt 4 ]]; then
   _kb_widget() {{
     local out ret
@@ -148,7 +152,7 @@ fi
 "#
         ),
         ShellDialect::Fish => format!(
-r#"# kb shell integration for fish
+            r#"# kb shell integration for fish
 function _kb_widget
     set -l buf (commandline)
     set -l cur (commandline -C)
@@ -217,37 +221,85 @@ mod tests {
         assert!(script.contains("BUFFER="), "must set BUFFER");
         assert!(script.contains("CURSOR="), "must set CURSOR");
         assert!(script.contains("zle reset-prompt"), "must reset prompt");
-        assert!(script.contains("zle -N _kb_widget"), "must register ZLE widget");
+        assert!(
+            script.contains("zle -N _kb_widget"),
+            "must register ZLE widget"
+        );
         assert!(script.contains("bindkey"), "must bind keys");
-        assert!(script.contains("fc -ln -1"), "must read history for save-last");
-        assert!(script.contains("kb add --type cmd --stdin"), "must pipe to kb add --type cmd --stdin");
-        assert!(script.contains("kb completions zsh"), "must source completions");
+        assert!(
+            script.contains("fc -ln -1"),
+            "must read history for save-last"
+        );
+        assert!(
+            script.contains("kb add --type cmd --stdin"),
+            "must pipe to kb add --type cmd --stdin"
+        );
+        assert!(
+            script.contains("kb completions zsh"),
+            "must source completions"
+        );
     }
 
     #[test]
     fn test_bash_init_generation() {
         let script = generate_shell_init(ShellDialect::Bash, r"\ek", r"\eK");
         assert!(script.contains("BASH_VERSINFO"), "must check bash version");
-        assert!(script.contains("READLINE_LINE="), "must set READLINE_LINE for bash 4+");
-        assert!(script.contains("READLINE_POINT="), "must set READLINE_POINT for bash 4+");
-        assert!(script.contains("history -s"), "must push to history in bash 3.2 fallback");
+        assert!(
+            script.contains("READLINE_LINE="),
+            "must set READLINE_LINE for bash 4+"
+        );
+        assert!(
+            script.contains("READLINE_POINT="),
+            "must set READLINE_POINT for bash 4+"
+        );
+        assert!(
+            script.contains("history -s"),
+            "must push to history in bash 3.2 fallback"
+        );
         assert!(script.contains("bind -x"), "must use bind -x");
-        assert!(script.contains("fc -ln -1"), "must read history for save-last");
-        assert!(script.contains("kb add --type cmd --stdin"), "must pipe to kb add --type cmd --stdin");
-        assert!(script.contains("kb completions bash"), "must source completions");
+        assert!(
+            script.contains("fc -ln -1"),
+            "must read history for save-last"
+        );
+        assert!(
+            script.contains("kb add --type cmd --stdin"),
+            "must pipe to kb add --type cmd --stdin"
+        );
+        assert!(
+            script.contains("kb completions bash"),
+            "must source completions"
+        );
     }
 
     #[test]
     fn test_fish_init_generation() {
         let script = generate_shell_init(ShellDialect::Fish, r"\ek", r"\eK");
-        assert!(script.contains("function _kb_widget"), "must define fish function");
-        assert!(script.contains("commandline -r"), "must replace commandline");
+        assert!(
+            script.contains("function _kb_widget"),
+            "must define fish function"
+        );
+        assert!(
+            script.contains("commandline -r"),
+            "must replace commandline"
+        );
         assert!(script.contains("commandline -C"), "must set cursor");
-        assert!(script.contains("commandline -f repaint"), "must repaint prompt");
-        assert!(script.contains("history --max=1"), "must read history for save-last");
-        assert!(script.contains("kb add --type cmd --stdin"), "must pipe to kb add --type cmd --stdin");
+        assert!(
+            script.contains("commandline -f repaint"),
+            "must repaint prompt"
+        );
+        assert!(
+            script.contains("history --max=1"),
+            "must read history for save-last"
+        );
+        assert!(
+            script.contains("kb add --type cmd --stdin"),
+            "must pipe to kb add --type cmd --stdin"
+        );
         assert!(script.contains("bind"), "must bind keys");
-        assert!(script.contains("kb completions fish"), "must source completions");
+        assert!(
+            script.contains("kb completions fish"),
+            "must source completions"
+        );
     }
 
     #[test]
@@ -257,4 +309,3 @@ mod tests {
         assert!(script.contains(r"\eJ"), "must use custom save key");
     }
 }
-

@@ -4,8 +4,8 @@ use std::process::ExitCode;
 
 use clap::Args;
 use kb_core::shell::completions::{
-    complete_entries, complete_tags, complete_types, complete_vars, complete_var_values,
-    CompletionKind,
+    CompletionKind, complete_entries, complete_tags, complete_types, complete_var_values,
+    complete_vars,
 };
 
 use crate::output::CliError;

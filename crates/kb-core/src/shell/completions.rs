@@ -28,7 +28,7 @@ pub fn complete_types(prefix: Option<&str>) -> Vec<String> {
     const TYPES: [&str; 7] = ["cmd", "sql", "sumo", "cw", "prompt", "link", "code"];
     TYPES
         .iter()
-        .filter(|t| prefix.map_or(true, |p| t.starts_with(p)))
+        .filter(|t| prefix.is_none_or(|p| t.starts_with(p)))
         .map(|&s| s.to_string())
         .collect()
 }
@@ -163,14 +163,13 @@ pub fn complete_var_values(
         Err(_) => return Vec::new(),
     };
 
-    let rel_path: String = match conn.query_row(
-        "SELECT path FROM files WHERE id = ?1",
-        [entry_id],
-        |row| row.get(0),
-    ) {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
+    let rel_path: String =
+        match conn.query_row("SELECT path FROM files WHERE id = ?1", [entry_id], |row| {
+            row.get(0)
+        }) {
+            Ok(p) => p,
+            Err(_) => return Vec::new(),
+        };
 
     let file_path = root.join(rel_path);
     let bytes = match std::fs::read(&file_path) {
@@ -189,7 +188,7 @@ pub fn complete_var_values(
 
     var.options
         .iter()
-        .filter(|opt| prefix.map_or(true, |p| opt.starts_with(p)))
+        .filter(|opt| prefix.is_none_or(|p| opt.starts_with(p)))
         .cloned()
         .collect()
 }
@@ -256,7 +255,9 @@ mod tests {
             "must filter by prefix"
         );
         assert!(
-            filtered.iter().any(|(id, title)| id == "cmd/restart-worker" && title == "Restart worker"),
+            filtered
+                .iter()
+                .any(|(id, title)| id == "cmd/restart-worker" && title == "Restart worker"),
             "must include entry id and title"
         );
     }

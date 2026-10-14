@@ -91,7 +91,10 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             theme.warning(),
         ));
     }
-    let unreviewed_count = kb_core::mcp::review::ReviewStateTracker::unreviewed_entries(std::path::Path::new(&state.root)).len();
+    let unreviewed_count = kb_core::mcp::review::ReviewStateTracker::unreviewed_entries(
+        std::path::Path::new(&state.root),
+    )
+    .len();
     if unreviewed_count > 0 {
         tail.push(Span::styled(
             format!(" · ⚠ {unreviewed_count} unreviewed"),

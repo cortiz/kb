@@ -12,8 +12,8 @@ use kb_core::query::Query;
 use kb_core::root::{RootInputs, resolve_root};
 use kb_core::search::Kb;
 
-use kb_cli::commands::{self, CodeCommand, ShowMode, ShowOptions};
 use kb_cli::commands::pick::PickArgs;
+use kb_cli::commands::{self, CodeCommand, ShowMode, ShowOptions};
 use kb_cli::output::CliError;
 use kb_cli::platform::{self, Platform};
 use kb_cli::varcli::VarArgs;

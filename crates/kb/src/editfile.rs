@@ -235,10 +235,7 @@ fn finish(
             } else {
                 println!("{id}");
             }
-            let rel = path
-                .strip_prefix(kb.root())
-                .unwrap_or(&path)
-                .to_path_buf();
+            let rel = path.strip_prefix(kb.root()).unwrap_or(&path).to_path_buf();
             let outcome = kb_core::git::commit::auto_commit_operation(
                 kb.root(),
                 &crate::platform::SystemGitRunner,
@@ -247,8 +244,12 @@ fn finish(
                 id,
                 &[rel],
             );
-            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-                eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) =
+                outcome
+            {
+                eprintln!(
+                    "kb: git commit skipped: author identity unknown (set user.name and user.email)"
+                );
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -376,8 +377,13 @@ pub fn edit_entry(
                         &id,
                         &[rel],
                     );
-                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-                        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity {
+                        ..
+                    }) = outcome
+                    {
+                        eprintln!(
+                            "kb: git commit skipped: author identity unknown (set user.name and user.email)"
+                        );
                     }
                     let _ = kb_core::mcp::review::ReviewStateTracker::approve_with_git(
                         kb.root(),
@@ -441,8 +447,13 @@ pub fn edit_entry(
                         &id,
                         &[rel],
                     );
-                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-                        eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+                    if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity {
+                        ..
+                    }) = outcome
+                    {
+                        eprintln!(
+                            "kb: git commit skipped: author identity unknown (set user.name and user.email)"
+                        );
                     }
                     Ok(ExitCode::SUCCESS)
                 };

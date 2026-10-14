@@ -2227,8 +2227,11 @@ pub fn run_code_repin(
             entry.id(),
             &[rel],
         );
-        if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-            eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+        if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome
+        {
+            eprintln!(
+                "kb: git commit skipped: author identity unknown (set user.name and user.email)"
+            );
         }
 
         println!("re-pinned {}", entry.id());

@@ -24,7 +24,10 @@ impl GitCommandResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitError {
     NotFound(String),
-    CommandFailed { exit_code: Option<i32>, stderr: String },
+    CommandFailed {
+        exit_code: Option<i32>,
+        stderr: String,
+    },
     Io(String),
     TimedOut,
 }
@@ -71,13 +74,12 @@ pub trait GitRunner: Send + Sync {
     }
 }
 
-
-
 type FakeHandler = dyn Fn(&Path, &[&str]) -> Result<GitCommandResult, GitError> + Send + Sync;
+pub type GitCallRecord = (PathBuf, Vec<String>);
 
 #[derive(Clone)]
 pub struct FakeGitRunner {
-    pub calls: Arc<Mutex<Vec<(PathBuf, Vec<String>)>>>,
+    pub calls: Arc<Mutex<Vec<GitCallRecord>>>,
     handler: Option<Arc<FakeHandler>>,
 }
 

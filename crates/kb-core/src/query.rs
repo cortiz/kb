@@ -204,7 +204,9 @@ impl Query {
                     match fold(value).as_str() {
                         "true" | "1" | "yes" => self.unreviewed = Some(true),
                         "false" | "0" | "no" => self.unreviewed = Some(false),
-                        _ => self.hints.push(Hint::UnknownFilter(format!("unreviewed:{value}"))),
+                        _ => self
+                            .hints
+                            .push(Hint::UnknownFilter(format!("unreviewed:{value}"))),
                     }
                     return;
                 }

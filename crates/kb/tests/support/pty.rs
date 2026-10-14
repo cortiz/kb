@@ -185,7 +185,8 @@ impl Session {
         let parser = Arc::new(Mutex::new(vt100::Parser::new(spec.size.1, spec.size.0, 0)));
         let raw = Arc::new(Mutex::new(Vec::new()));
         {
-            let (parser, raw, writer) = (Arc::clone(&parser), Arc::clone(&raw), Arc::clone(&writer));
+            let (parser, raw, writer) =
+                (Arc::clone(&parser), Arc::clone(&raw), Arc::clone(&writer));
             std::thread::spawn(move || {
                 let mut buf = [0u8; 8192];
                 while let Ok(n) = reader.read(&mut buf) {
@@ -315,7 +316,11 @@ impl Session {
                 pixel_height: 0,
             })
             .expect("resize");
-        self.parser.lock().unwrap().screen_mut().set_size(rows, cols);
+        self.parser
+            .lock()
+            .unwrap()
+            .screen_mut()
+            .set_size(rows, cols);
     }
 
     pub fn pid(&self) -> Option<u32> {

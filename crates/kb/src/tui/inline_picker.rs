@@ -69,11 +69,7 @@ pub fn calculate_viewport(
         .min(term_rows - 1);
 
     let available_below = term_rows.saturating_sub(cursor_row + 1);
-    let scrolled_lines = if available_below < clamped_height {
-        clamped_height - available_below
-    } else {
-        0
-    };
+    let scrolled_lines = clamped_height.saturating_sub(available_below);
 
     let prompt_row = cursor_row.saturating_sub(scrolled_lines);
 
@@ -173,13 +169,7 @@ pub fn run_inline_picker(
     let (term_cols, term_rows) = size().unwrap_or((80, 24));
     let (cursor_x, cursor_y) = (0, 0);
 
-    let viewport = calculate_viewport(
-        term_cols,
-        term_rows,
-        cursor_x,
-        cursor_y,
-        &options.height,
-    );
+    let viewport = calculate_viewport(term_cols, term_rows, cursor_x, cursor_y, &options.height);
 
     enable_raw_mode()?;
 
@@ -197,7 +187,7 @@ pub fn run_inline_picker(
     }
 
     let mut mem_terminal = Terminal::new(TestBackend::new(term_cols, viewport.picker_height))
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
     let mut alt_terminal = if viewport.use_alternate_screen {
         Some(Terminal::new(CrosstermBackend::new(tty.try_clone()?))?)
     } else {
@@ -281,7 +271,7 @@ pub fn run_inline_picker(
                     viewport.picker_height,
                 );
             }
-            res.map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))
+            res.map_err(|e| io::Error::other(e.to_string()))
         };
 
         if let Err(e) = draw_res {
@@ -289,143 +279,146 @@ pub fn run_inline_picker(
         }
 
         // Wait for event
-        if event::poll(Duration::from_millis(100)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                if let Some((unrev_id, unrev_cmd, unrev_vars)) = confirming_unreviewed.take() {
-                    match key.code {
-                        KeyCode::Char('y') | KeyCode::Char('Y') => {
-                            break InlinePickerResult::Picked {
-                                id: unrev_id,
-                                resolved_command: unrev_cmd,
-                                variables: unrev_vars,
-                            };
-                        }
-                        _ => {
-                            break InlinePickerResult::Cancelled;
-                        }
+        if event::poll(Duration::from_millis(100)).unwrap_or(false)
+            && let Ok(Event::Key(key)) = event::read()
+        {
+            if let Some((unrev_id, unrev_cmd, unrev_vars)) = confirming_unreviewed.take() {
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        break InlinePickerResult::Picked {
+                            id: unrev_id,
+                            resolved_command: unrev_cmd,
+                            variables: unrev_vars,
+                        };
                     }
-                } else if let Some(form) = active_form.as_mut() {
-                    match form.handle_key(key) {
-                        InlineFormEvent::Cancel => {
-                            active_form = None;
-                        }
-                        InlineFormEvent::Submit(values) => {
-                            let entry_id = form.entry_id.clone();
-                            let entry = match kb.entry(&entry_id) {
-                                Ok(e) => e,
-                                Err(err) => {
-                                    break InlinePickerResult::Refused(err.to_string());
-                                }
-                            };
-
-                            // Resolve variables using varres
-                            let plan = kb_core::varres::plan_vars(&entry);
-                            let mut val_map = kb_core::varres::Values::new();
-                            for (k, v) in &values {
-                                val_map.insert(k.clone(), kb_core::varres::Value::plain(v));
-                            }
-
-                            match kb_core::varres::resolve_for_target(
-                                &plan,
-                                &val_map,
-                                kb_core::varres::ResolutionTarget::ShellWidget(dialect),
-                            ) {
-                                Ok(resolved) => {
-                                    let cmd = resolved
-                                        .primary()
-                                        .map(|o| o.text.clone())
-                                        .unwrap_or_default();
-                                    let is_unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &entry_id);
-                                    if is_unreviewed {
-                                        confirming_unreviewed = Some((entry_id, cmd, values));
-                                        active_form = None;
-                                    } else {
-                                        break InlinePickerResult::Picked {
-                                            id: entry_id,
-                                            resolved_command: cmd,
-                                            variables: values,
-                                        };
-                                    }
-                                }
-                                Err(errs) => {
-                                    let msg = errs
-                                        .into_iter()
-                                        .map(|e| e.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join("; ");
-                                    break InlinePickerResult::Refused(msg);
-                                }
-                            }
-                        }
-                        InlineFormEvent::None => {}
+                    _ => {
+                        break InlinePickerResult::Cancelled;
                     }
-                } else {
-                    // Search list navigation
-                    match key.code {
-                        KeyCode::Esc => {
-                            break InlinePickerResult::Cancelled;
-                        }
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            break InlinePickerResult::Cancelled;
-                        }
-                        KeyCode::Up => {
-                            if selected_idx > 0 {
-                                selected_idx -= 1;
+                }
+            } else if let Some(form) = active_form.as_mut() {
+                match form.handle_key(key) {
+                    InlineFormEvent::Cancel => {
+                        active_form = None;
+                    }
+                    InlineFormEvent::Submit(values) => {
+                        let entry_id = form.entry_id.clone();
+                        let entry = match kb.entry(&entry_id) {
+                            Ok(e) => e,
+                            Err(err) => {
+                                break InlinePickerResult::Refused(err.to_string());
                             }
+                        };
+
+                        // Resolve variables using varres
+                        let plan = kb_core::varres::plan_vars(&entry);
+                        let mut val_map = kb_core::varres::Values::new();
+                        for (k, v) in &values {
+                            val_map.insert(k.clone(), kb_core::varres::Value::plain(v));
                         }
-                        KeyCode::Down => {
-                            if !entries.is_empty() && selected_idx + 1 < entries.len() {
-                                selected_idx += 1;
-                            }
-                        }
-                        KeyCode::Tab => {
-                            selected_type = match selected_type {
-                                Some(EntryType::Cmd) => None,
-                                None => Some(EntryType::Cmd),
-                                Some(_) => Some(EntryType::Cmd),
-                            };
-                            selected_idx = 0;
-                        }
-                        KeyCode::Enter => {
-                            if let Some(entry) = entries.get(selected_idx) {
-                                let vars = entry.vars();
-                                if vars.is_empty() {
-                                    let resolved_command = entry
-                                        .payload()
-                                        .map(|p| p.text.clone())
-                                        .unwrap_or_else(|| entry.notes().to_string());
-                                    let id = entry.id().to_string();
-                                    let is_unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
-                                    if is_unreviewed {
-                                        confirming_unreviewed = Some((id, resolved_command, BTreeMap::new()));
-                                    } else {
-                                        break InlinePickerResult::Picked {
-                                            id,
-                                            resolved_command,
-                                            variables: BTreeMap::new(),
-                                        };
-                                    }
+
+                        match kb_core::varres::resolve_for_target(
+                            &plan,
+                            &val_map,
+                            kb_core::varres::ResolutionTarget::ShellWidget(dialect),
+                        ) {
+                            Ok(resolved) => {
+                                let cmd = resolved
+                                    .primary()
+                                    .map(|o| o.text.clone())
+                                    .unwrap_or_default();
+                                let is_unreviewed =
+                                    kb_core::mcp::review::ReviewStateTracker::is_unreviewed(
+                                        kb.root(),
+                                        &entry_id,
+                                    );
+                                if is_unreviewed {
+                                    confirming_unreviewed = Some((entry_id, cmd, values));
+                                    active_form = None;
                                 } else {
-                                    // Open inline form
-                                    let (mem, _) = kb.remembered(entry.id());
-                                    active_form = Some(InlineForm::new(
-                                        entry,
-                                        dialect,
-                                        &mem,
-                                    ));
+                                    break InlinePickerResult::Picked {
+                                        id: entry_id,
+                                        resolved_command: cmd,
+                                        variables: values,
+                                    };
                                 }
                             }
+                            Err(errs) => {
+                                let msg = errs
+                                    .into_iter()
+                                    .map(|e| e.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join("; ");
+                                break InlinePickerResult::Refused(msg);
+                            }
                         }
-                        KeyCode::Backspace => {
-                            query.pop();
-                            selected_idx = 0;
-                        }
-                        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            query.push(c);
-                            selected_idx = 0;
-                        }
-                        _ => {}
                     }
+                    InlineFormEvent::None => {}
+                }
+            } else {
+                // Search list navigation
+                match key.code {
+                    KeyCode::Esc => {
+                        break InlinePickerResult::Cancelled;
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        break InlinePickerResult::Cancelled;
+                    }
+                    KeyCode::Up => {
+                        selected_idx = selected_idx.saturating_sub(1);
+                    }
+                    KeyCode::Down => {
+                        if !entries.is_empty() && selected_idx + 1 < entries.len() {
+                            selected_idx += 1;
+                        }
+                    }
+                    KeyCode::Tab => {
+                        selected_type = match selected_type {
+                            Some(EntryType::Cmd) => None,
+                            None => Some(EntryType::Cmd),
+                            Some(_) => Some(EntryType::Cmd),
+                        };
+                        selected_idx = 0;
+                    }
+                    KeyCode::Enter => {
+                        if let Some(entry) = entries.get(selected_idx) {
+                            let vars = entry.vars();
+                            if vars.is_empty() {
+                                let resolved_command = entry
+                                    .payload()
+                                    .map(|p| p.text.clone())
+                                    .unwrap_or_else(|| entry.notes().to_string());
+                                let id = entry.id().to_string();
+                                let is_unreviewed =
+                                    kb_core::mcp::review::ReviewStateTracker::is_unreviewed(
+                                        kb.root(),
+                                        &id,
+                                    );
+                                if is_unreviewed {
+                                    confirming_unreviewed =
+                                        Some((id, resolved_command, BTreeMap::new()));
+                                } else {
+                                    break InlinePickerResult::Picked {
+                                        id,
+                                        resolved_command,
+                                        variables: BTreeMap::new(),
+                                    };
+                                }
+                            } else {
+                                // Open inline form
+                                let (mem, _) = kb.remembered(entry.id());
+                                active_form = Some(InlineForm::new(entry, dialect, &mem));
+                            }
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        query.pop();
+                        selected_idx = 0;
+                    }
+                    KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        query.push(c);
+                        selected_idx = 0;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -449,6 +442,7 @@ pub fn run_inline_picker(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_inline_ui(
     f: &mut ratatui::Frame,
     query: &str,
@@ -472,7 +466,9 @@ fn render_inline_ui(
         let lines = vec![
             Line::from(Span::styled(
                 "WARNING: This entry was changed by an agent and has not been reviewed.",
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
             Line::from("Insert this command? [y/N]"),
@@ -505,7 +501,9 @@ fn render_inline_ui(
             let is_active = i == form.focus;
             let cursor_mark = if is_active { "> " } else { "  " };
             let name_style = if is_active {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::White)
             };
@@ -585,7 +583,9 @@ fn render_inline_ui(
                 let is_selected = i == selected_idx;
                 let prefix = if is_selected { "> " } else { "  " };
                 let style = if is_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -753,4 +753,3 @@ mod tests {
         assert!(seq_str.contains("\x1b[6;13H"));
     }
 }
-

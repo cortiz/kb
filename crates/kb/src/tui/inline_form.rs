@@ -1,11 +1,11 @@
 //! Inline variable form for compact parameter input.
 
-use std::collections::BTreeMap;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kb_core::entry::Entry;
 use kb_core::shell::ShellDialect;
 use kb_core::varres::{self, ResolutionTarget, Value, Values, VarPlan};
 use kb_core::vars::{VarKind, Variable};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InlineFormEvent {
@@ -67,11 +67,7 @@ pub struct InlineForm {
 }
 
 impl InlineForm {
-    pub fn new(
-        entry: &Entry,
-        dialect: ShellDialect,
-        prefill: &BTreeMap<String, String>,
-    ) -> Self {
+    pub fn new(entry: &Entry, dialect: ShellDialect, prefill: &BTreeMap<String, String>) -> Self {
         let plan = varres::plan_vars(entry);
         let fields: Vec<InlineFormField> = plan
             .vars
@@ -121,7 +117,9 @@ impl InlineForm {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> InlineFormEvent {
         // Ctrl-C or Esc cancels
-        if key.code == KeyCode::Esc || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')) {
+        if key.code == KeyCode::Esc
+            || (key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c'))
+        {
             return InlineFormEvent::Cancel;
         }
 
@@ -184,7 +182,6 @@ impl InlineForm {
         InlineFormEvent::None
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -295,10 +292,7 @@ mod tests {
 
     #[test]
     fn test_inline_form_submission_and_cancellation() {
-        let entry = make_test_entry(
-            "  env: { kind: text, default: prod }\n",
-            "status {{env}}",
-        );
+        let entry = make_test_entry("  env: { kind: text, default: prod }\n", "status {{env}}");
 
         let mut form = InlineForm::new(
             &entry,
@@ -324,5 +318,3 @@ mod tests {
         assert_eq!(ev, InlineFormEvent::Cancel);
     }
 }
-
-

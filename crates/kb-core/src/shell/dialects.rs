@@ -8,6 +8,7 @@ pub enum ShellDialect {
 }
 
 impl ShellDialect {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "zsh" => Some(ShellDialect::Zsh),
@@ -88,17 +89,32 @@ mod tests {
 
     #[test]
     fn env_var_reference_rules() {
-        assert_eq!(ShellDialect::Zsh.env_var_ref("SUMO_TOKEN"), "\"$SUMO_TOKEN\"");
-        assert_eq!(ShellDialect::Bash.env_var_ref("SUMO_TOKEN"), "\"$SUMO_TOKEN\"");
-        assert_eq!(ShellDialect::Fish.env_var_ref("SUMO_TOKEN"), "\"$SUMO_TOKEN\"");
-        assert_eq!(ShellDialect::Zsh.env_var_ref("AWS_REGION"), "\"$AWS_REGION\"");
+        assert_eq!(
+            ShellDialect::Zsh.env_var_ref("SUMO_TOKEN"),
+            "\"$SUMO_TOKEN\""
+        );
+        assert_eq!(
+            ShellDialect::Bash.env_var_ref("SUMO_TOKEN"),
+            "\"$SUMO_TOKEN\""
+        );
+        assert_eq!(
+            ShellDialect::Fish.env_var_ref("SUMO_TOKEN"),
+            "\"$SUMO_TOKEN\""
+        );
+        assert_eq!(
+            ShellDialect::Zsh.env_var_ref("AWS_REGION"),
+            "\"$AWS_REGION\""
+        );
     }
 
     #[test]
     fn quote_arg_safe_and_escaped() {
         // Safe characters do not require quotes
         assert_eq!(ShellDialect::Zsh.quote_arg("simple"), "simple");
-        assert_eq!(ShellDialect::Bash.quote_arg("file_name-1.2.txt"), "file_name-1.2.txt");
+        assert_eq!(
+            ShellDialect::Bash.quote_arg("file_name-1.2.txt"),
+            "file_name-1.2.txt"
+        );
         assert_eq!(ShellDialect::Fish.quote_arg("path/to/dir"), "path/to/dir");
 
         // Empty string requires quotes
@@ -119,9 +135,17 @@ mod tests {
 
     #[test]
     fn eval_init_command_formatting() {
-        assert_eq!(ShellDialect::Zsh.init_eval_command(), "eval \"$(kb shell init zsh)\"");
-        assert_eq!(ShellDialect::Bash.init_eval_command(), "eval \"$(kb shell init bash)\"");
-        assert_eq!(ShellDialect::Fish.init_eval_command(), "kb shell init fish | source");
+        assert_eq!(
+            ShellDialect::Zsh.init_eval_command(),
+            "eval \"$(kb shell init zsh)\""
+        );
+        assert_eq!(
+            ShellDialect::Bash.init_eval_command(),
+            "eval \"$(kb shell init bash)\""
+        );
+        assert_eq!(
+            ShellDialect::Fish.init_eval_command(),
+            "kb shell init fish | source"
+        );
     }
 }
-

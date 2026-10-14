@@ -68,10 +68,10 @@ impl<'a> McpEngine<'a> {
         query.limit = limit;
 
         for t in types {
-            if let Some(et) = EntryType::from_name(t) {
-                if !query.types.contains(&et) {
-                    query.types.push(et);
-                }
+            if let Some(et) = EntryType::from_name(t)
+                && !query.types.contains(&et)
+            {
+                query.types.push(et);
             }
         }
 
@@ -129,7 +129,11 @@ impl<'a> McpEngine<'a> {
         if self.settings.is_type_excluded(type_name) {
             return Err(KbError::NotFound(id.to_string()));
         }
-        if entry.tags().iter().any(|t| self.settings.is_tag_excluded(t)) {
+        if entry
+            .tags()
+            .iter()
+            .any(|t| self.settings.is_tag_excluded(t))
+        {
             return Err(KbError::NotFound(id.to_string()));
         }
 
@@ -241,13 +245,13 @@ impl<'a> McpEngine<'a> {
         }
 
         // Findings
-        let parsed = crate::entry::parse_entry(
-            id,
-            entry.path(),
-            entry.source().text().as_bytes().to_vec(),
-        );
-        let mut findings_view: Vec<FindingView> =
-            parsed.findings.iter().map(FindingView::from_finding).collect();
+        let parsed =
+            crate::entry::parse_entry(id, entry.path(), entry.source().text().as_bytes().to_vec());
+        let mut findings_view: Vec<FindingView> = parsed
+            .findings
+            .iter()
+            .map(FindingView::from_finding)
+            .collect();
 
         for v in entry.vars() {
             if v.kind == VarKind::Secret && v.env.is_none() {
@@ -313,16 +317,22 @@ impl<'a> McpEngine<'a> {
         // 2. Pre-fill defaults for variables not supplied
         for pv in &plan.vars {
             let var = &pv.var;
-            if !values.contains_key(&var.name) {
-                if let Some(def) = &var.default {
-                    values.insert(var.name.clone(), Value::new(def.clone(), false));
-                }
+            if !values.contains_key(&var.name)
+                && let Some(def) = &var.default
+            {
+                values.insert(var.name.clone(), Value::new(def.clone(), false));
             }
         }
 
-        let resolved = resolve_for_target(&plan, &values, ResolutionTarget::Mcp)
-            .map_err(|errors| {
-                KbError::Unreadable(errors.iter().map(|e| e.message.clone()).collect::<Vec<_>>().join(", "))
+        let resolved =
+            resolve_for_target(&plan, &values, ResolutionTarget::Mcp).map_err(|errors| {
+                KbError::Unreadable(
+                    errors
+                        .iter()
+                        .map(|e| e.message.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
             })?;
 
         let resolved_payload = resolved
@@ -337,7 +347,10 @@ impl<'a> McpEngine<'a> {
 
         match entry.fields() {
             TypeFields::Sumo { range } => {
-                let res_range = resolved.get(&Target::Range).map(|o| o.text.clone()).or_else(|| range.clone());
+                let res_range = resolved
+                    .get(&Target::Range)
+                    .map(|o| o.text.clone())
+                    .or_else(|| range.clone());
                 if let Some(r) = &res_range {
                     resolved_fields.insert("range".into(), serde_json::Value::String(r.clone()));
                 }
@@ -375,15 +388,19 @@ impl<'a> McpEngine<'a> {
                             .collect(),
                     ),
                 );
-                let res_range = resolved.get(&Target::Range).map(|o| o.text.clone()).or_else(|| range.clone());
+                let res_range = resolved
+                    .get(&Target::Range)
+                    .map(|o| o.text.clone())
+                    .or_else(|| range.clone());
                 if let Some(r) = &res_range {
                     resolved_fields.insert("range".into(), serde_json::Value::String(r.clone()));
                 }
                 let default_reg = self.settings.aws_default_region().unwrap_or("us-east-1");
-                let res_reg = region
-                    .as_deref()
-                    .unwrap_or(default_reg);
-                resolved_fields.insert("region".into(), serde_json::Value::String(res_reg.to_string()));
+                let res_reg = region.as_deref().unwrap_or(default_reg);
+                resolved_fields.insert(
+                    "region".into(),
+                    serde_json::Value::String(res_reg.to_string()),
+                );
 
                 if let Ok(link) = ConsoleService::build_cw_link(
                     res_reg,
@@ -395,7 +412,10 @@ impl<'a> McpEngine<'a> {
                 }
             }
             TypeFields::Link { url } => {
-                let res_u = resolved.get(&Target::Url).map(|o| o.text.clone()).or_else(|| url.clone());
+                let res_u = resolved
+                    .get(&Target::Url)
+                    .map(|o| o.text.clone())
+                    .or_else(|| url.clone());
                 if let Some(u) = res_u {
                     resolved_fields.insert("url".into(), serde_json::Value::String(u.clone()));
                     link_url = Some(u);
@@ -411,7 +431,10 @@ impl<'a> McpEngine<'a> {
                         crate::entry::Shell::Fish => "fish".into(),
                     }),
                 );
-                let res_c = resolved.get(&Target::Cwd).map(|o| o.text.clone()).or_else(|| cwd.clone());
+                let res_c = resolved
+                    .get(&Target::Cwd)
+                    .map(|o| o.text.clone())
+                    .or_else(|| cwd.clone());
                 if let Some(c) = res_c {
                     resolved_fields.insert("cwd".into(), serde_json::Value::String(c));
                 }
@@ -421,7 +444,8 @@ impl<'a> McpEngine<'a> {
                     resolved_fields.insert("dialect".into(), serde_json::Value::String(d.clone()));
                 }
                 if let Some(db) = database {
-                    resolved_fields.insert("database".into(), serde_json::Value::String(db.clone()));
+                    resolved_fields
+                        .insert("database".into(), serde_json::Value::String(db.clone()));
                 }
             }
             TypeFields::Code { code } => {
@@ -606,7 +630,13 @@ mod tests {
 
         // Get authorizer entry
         let entry = engine
-            .get("sumo/5xx-by-authorizer", false, &HashMap::new(), false, false)
+            .get(
+                "sumo/5xx-by-authorizer",
+                false,
+                &HashMap::new(),
+                false,
+                false,
+            )
             .unwrap();
         assert_eq!(entry.id, "sumo/5xx-by-authorizer");
         assert_eq!(entry.entry_type, "sumo");
@@ -625,7 +655,11 @@ mod tests {
 
         // Search excluding lambda
         let results = engine.search("authorizer", &[], &[], 10).unwrap();
-        assert!(!results.iter().any(|r| r.tags.contains(&"lambda".to_string())));
+        assert!(
+            !results
+                .iter()
+                .any(|r| r.tags.contains(&"lambda".to_string()))
+        );
     }
 
     #[test]
@@ -644,15 +678,22 @@ mod tests {
         let mut engine = McpEngine::new(&mut kb, &settings);
 
         // 1. Resolve with default env -> env=dev, token=$SUMO_TOKEN
-        let view = engine.get("sumo/test-query", true, &HashMap::new(), false, false).unwrap();
+        let view = engine
+            .get("sumo/test-query", true, &HashMap::new(), false, false)
+            .unwrap();
         let res_payload = view.resolved_payload.unwrap();
         assert_eq!(res_payload.trim(), "_sourceCategory=dev token=$SUMO_TOKEN");
 
         // 2. Resolve with custom env -> env=prod
         let mut vars = HashMap::new();
         vars.insert("env".into(), "prod".into());
-        let view2 = engine.get("sumo/test-query", true, &vars, false, false).unwrap();
-        assert_eq!(view2.resolved_payload.unwrap().trim(), "_sourceCategory=prod token=$SUMO_TOKEN");
+        let view2 = engine
+            .get("sumo/test-query", true, &vars, false, false)
+            .unwrap();
+        assert_eq!(
+            view2.resolved_payload.unwrap().trim(),
+            "_sourceCategory=prod token=$SUMO_TOKEN"
+        );
 
         // 3. Supplying secret value MUST fail
         let mut bad_vars = HashMap::new();
@@ -719,15 +760,26 @@ mod tests {
         );
 
         // Excluded prompt should not be retrievable
-        assert!(engine.get_prompt("prompt-secret-prompt", &HashMap::new()).is_err());
-        assert!(engine.get_prompt("prompt-internal-only", &HashMap::new()).is_err());
+        assert!(
+            engine
+                .get_prompt("prompt-secret-prompt", &HashMap::new())
+                .is_err()
+        );
+        assert!(
+            engine
+                .get_prompt("prompt-internal-only", &HashMap::new())
+                .is_err()
+        );
 
         // When prompts disabled in settings
         let mut disabled_settings = Settings::default();
         disabled_settings.set_text("mcp.prompts", "false");
         let mut disabled_engine = McpEngine::new(&mut kb, &disabled_settings);
         assert!(disabled_engine.list_prompts().unwrap().is_empty());
-        assert!(disabled_engine.get_prompt("prompt-investigate-5xx", &args).is_err());
+        assert!(
+            disabled_engine
+                .get_prompt("prompt-investigate-5xx", &args)
+                .is_err()
+        );
     }
 }
-

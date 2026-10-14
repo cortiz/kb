@@ -160,7 +160,7 @@ pub fn percent_encode(s: &str) -> String {
     out
 }
 
-/// Encodes query for CloudWatch Logs Insights console using AWS rison-like format (*<HEX>).
+/// Encodes query for CloudWatch Logs Insights console using AWS rison-like format (`*<HEX>`).
 pub fn encode_cw_query(query: &str) -> String {
     let mut out = String::with_capacity(query.len() * 2);
     for &b in query.as_bytes() {

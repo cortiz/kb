@@ -51,7 +51,10 @@ pub fn run_review(
                 "diff": diff,
             }));
         }
-        println!("{}", serde_json::to_string_pretty(&entries_json).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&entries_json).unwrap_or_default()
+        );
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -87,9 +90,8 @@ pub fn run_review(
             }
         }
 
-        let mut tty = TtyAsk::open(platform).ok_or_else(|| {
-            CliError::new("io", "cannot open terminal for interactive review")
-        })?;
+        let mut tty = TtyAsk::open(platform)
+            .ok_or_else(|| CliError::new("io", "cannot open terminal for interactive review"))?;
 
         loop {
             let answer = tty
@@ -129,7 +131,9 @@ pub fn run_review(
                     break;
                 }
                 _ => {
-                    eprintln!("Please enter 'a' to approve, 'r' to revert, 'e' to edit, or 's' to skip.");
+                    eprintln!(
+                        "Please enter 'a' to approve, 'r' to revert, 'e' to edit, or 's' to skip."
+                    );
                 }
             }
         }

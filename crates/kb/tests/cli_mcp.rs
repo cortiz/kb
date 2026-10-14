@@ -2,11 +2,11 @@
 
 mod support;
 
+use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use serde_json::{json, Value};
-use support::{pty, search_kb, NOWHERE};
+use support::{NOWHERE, pty, search_kb};
 
 fn kb_mcp_cmd_with_args(root: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new(pty::KB);
@@ -206,7 +206,12 @@ fn test_mcp_search_authorizer() {
     assert!(!results.is_empty());
     assert_eq!(results[0]["id"], "sumo/5xx-by-authorizer");
     assert_eq!(results[0]["type"], "sumo");
-    assert!(results[0]["snippet"].as_str().unwrap().contains("authorizer"));
+    assert!(
+        results[0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("authorizer")
+    );
 
     // Check FR-010: human-readable form present in content[1]
     let human_summary = resp["result"]["content"][1]["text"].as_str().unwrap();
@@ -252,7 +257,12 @@ fn test_mcp_get_authorizer_with_resolve() {
     assert!(parsed["resolved_payload"].as_str().unwrap().contains("500"));
 
     // Check action link generation
-    assert!(parsed["links"]["console_url"].as_str().unwrap().contains("sumologic.com"));
+    assert!(
+        parsed["links"]["console_url"]
+            .as_str()
+            .unwrap()
+            .contains("sumologic.com")
+    );
 
     client.close();
 }
@@ -328,7 +338,8 @@ fn test_mcp_secrets_isolation() {
     let resp = client.recv();
     assert_eq!(resp["id"], 2);
     assert_eq!(resp["result"]["isError"], false);
-    let parsed: Value = serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let parsed: Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let payload = parsed["resolved_payload"].as_str().unwrap();
     assert!(payload.contains("$SUMO_TOKEN"));
 
@@ -377,8 +388,14 @@ fn test_mcp_secrets_isolation() {
     let resp4 = client.recv();
     assert_eq!(resp4["id"], 4);
     assert_eq!(resp4["result"]["isError"], false);
-    let parsed4: Value = serde_json::from_str(resp4["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert!(parsed4["resolved_payload"].as_str().unwrap().contains("{{api_key}}"));
+    let parsed4: Value =
+        serde_json::from_str(resp4["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(
+        parsed4["resolved_payload"]
+            .as_str()
+            .unwrap()
+            .contains("{{api_key}}")
+    );
     let findings = parsed4["findings"].as_array().unwrap();
     assert!(findings.iter().any(|f| f["rule"] == "secret_without_env"));
 
@@ -415,7 +432,10 @@ fn test_doctor_mcp_check() {
     assert_eq!(out.status.code(), Some(0));
     let parsed: Value = serde_json::from_slice(&out.stdout).unwrap();
     let checks = parsed["checks"].as_array().unwrap();
-    let mcp_check = checks.iter().find(|c| c["id"] == "mcp").expect("mcp check in doctor output");
+    let mcp_check = checks
+        .iter()
+        .find(|c| c["id"] == "mcp")
+        .expect("mcp check in doctor output");
     assert_eq!(mcp_check["status"], "pass");
     assert_eq!(mcp_check["summary"], "stdio server responsive");
     let details: Vec<&str> = mcp_check["details"]
@@ -428,15 +448,34 @@ fn test_doctor_mcp_check() {
     assert!(details.iter().any(|d| d.contains("prompts: enabled")));
 }
 
-
 #[test]
 fn test_mcp_create_entry() {
     let (_dir, root) = search_kb();
-    let _ = Command::new("git").args(["init"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.name", "Test Agent"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.email", "agent@example.com"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["add", "-A"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(&root).output().unwrap();
+    let _ = Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "Test Agent"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.email", "agent@example.com"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["commit", "-m", "initial commit"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     // 1. Read-only server rejects create
     let mut ro_client = McpClient::spawn(kb_mcp_cmd(&root));
@@ -462,7 +501,12 @@ fn test_mcp_create_entry() {
     let ro_resp = ro_client.recv();
     assert_eq!(ro_resp["id"], 2);
     assert_eq!(ro_resp["result"]["isError"], true);
-    assert!(ro_resp["result"]["content"][0]["text"].as_str().unwrap().contains("Write tools are disabled"));
+    assert!(
+        ro_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Write tools are disabled")
+    );
     ro_client.close();
 
     // 2. Server with --allow-write
@@ -498,7 +542,8 @@ fn test_mcp_create_entry() {
     let dry_resp = client.recv();
     assert_eq!(dry_resp["id"], 11);
     assert_eq!(dry_resp["result"]["isError"], false);
-    let dry_parsed: Value = serde_json::from_str(dry_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let dry_parsed: Value =
+        serde_json::from_str(dry_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert!(dry_parsed["dry_run_content"].is_string());
     assert!(!root.join("cmd/dry-run-cmd.md").exists());
 
@@ -543,18 +588,30 @@ fn test_mcp_create_entry() {
     let create_resp = client.recv();
     assert_eq!(create_resp["id"], 13);
     assert_eq!(create_resp["result"]["isError"], false);
-    let create_parsed: Value = serde_json::from_str(create_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let create_parsed: Value = serde_json::from_str(
+        create_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     assert_eq!(create_parsed["id"], "cmd/tail-auth");
     assert!(root.join("cmd/tail-auth.md").exists());
 
     // Verify git auto-commit with agent trailers
-    let git_out = Command::new("git").args(["log", "-1", "--pretty=%B"]).current_dir(&root).output().unwrap();
+    let git_out = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
     let commit_msg = String::from_utf8(git_out.stdout).unwrap();
     assert!(commit_msg.contains("Kb-Source: mcp"));
     assert!(commit_msg.contains("Kb-Client: claude-code"));
 
     // Verify marked unreviewed
-    assert!(kb_core::mcp::ReviewStateTracker::is_unreviewed(&root, "cmd/tail-auth"));
+    assert!(kb_core::mcp::ReviewStateTracker::is_unreviewed(
+        &root,
+        "cmd/tail-auth"
+    ));
 
     client.close();
 }
@@ -562,11 +619,31 @@ fn test_mcp_create_entry() {
 #[test]
 fn test_mcp_update_entry() {
     let (_dir, root) = search_kb();
-    let _ = Command::new("git").args(["init"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.name", "Test Agent"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.email", "agent@example.com"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["add", "-A"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(&root).output().unwrap();
+    let _ = Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "Test Agent"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.email", "agent@example.com"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["commit", "-m", "initial commit"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     let mut client = McpClient::spawn(kb_mcp_cmd_with_args(&root, &["--allow-write"]));
     client.send(json!({
@@ -595,7 +672,8 @@ fn test_mcp_update_entry() {
     }));
     let get_resp = client.recv();
     assert_eq!(get_resp["id"], 2);
-    let get_parsed: Value = serde_json::from_str(get_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let get_parsed: Value =
+        serde_json::from_str(get_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let current_version = get_parsed["version"].as_str().unwrap().to_string();
 
     // 2. Update with wrong version is rejected
@@ -617,7 +695,12 @@ fn test_mcp_update_entry() {
     let bad_ver_resp = client.recv();
     assert_eq!(bad_ver_resp["id"], 3);
     assert_eq!(bad_ver_resp["result"]["isError"], true);
-    assert!(bad_ver_resp["result"]["content"][0]["text"].as_str().unwrap().contains("version mismatch"));
+    assert!(
+        bad_ver_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("version mismatch")
+    );
 
     // 3. Update with dry_run
     client.send(json!({
@@ -639,7 +722,8 @@ fn test_mcp_update_entry() {
     let dry_resp = client.recv();
     assert_eq!(dry_resp["id"], 4);
     assert_eq!(dry_resp["result"]["isError"], false);
-    let dry_parsed: Value = serde_json::from_str(dry_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let dry_parsed: Value =
+        serde_json::from_str(dry_resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let diff = dry_parsed["dry_run_diff"].as_str().unwrap();
     assert!(diff.contains("incident-2026"));
     let disk_content = std::fs::read_to_string(root.join("sumo/5xx-by-authorizer.md")).unwrap();
@@ -668,13 +752,20 @@ fn test_mcp_update_entry() {
     assert!(updated_disk.contains("incident-2026"));
 
     // Verify git auto-commit with agent trailers
-    let git_out = Command::new("git").args(["log", "-1", "--pretty=%B"]).current_dir(&root).output().unwrap();
+    let git_out = Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
     let commit_msg = String::from_utf8(git_out.stdout).unwrap();
     assert!(commit_msg.contains("Kb-Source: mcp"));
     assert!(commit_msg.contains("Kb-Client: claude-code"));
 
     // Verify marked unreviewed
-    assert!(kb_core::mcp::ReviewStateTracker::is_unreviewed(&root, "sumo/5xx-by-authorizer"));
+    assert!(kb_core::mcp::ReviewStateTracker::is_unreviewed(
+        &root,
+        "sumo/5xx-by-authorizer"
+    ));
 
     client.close();
 }
@@ -727,14 +818,20 @@ fn test_mcp_prompts_list_and_get() {
         let list_resp = client.recv();
         assert_eq!(list_resp["id"], 2);
         let prompts = list_resp["result"]["prompts"].as_array().unwrap();
-        let prompt_names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+        let prompt_names: Vec<&str> = prompts
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
 
         // Custom prompt is present
         assert!(prompt_names.contains(&"prompt-incident-summary"));
         // Secret prompt is excluded
         assert!(!prompt_names.contains(&"prompt-secret-prompt"));
 
-        let inc_prompt = prompts.iter().find(|p| p["name"] == "prompt-incident-summary").unwrap();
+        let inc_prompt = prompts
+            .iter()
+            .find(|p| p["name"] == "prompt-incident-summary")
+            .unwrap();
         assert_eq!(inc_prompt["description"], "Custom Incident Summary");
         let args = inc_prompt["arguments"].as_array().unwrap();
         let target_arg = args.iter().find(|a| a["name"] == "target").unwrap();
@@ -760,7 +857,10 @@ fn test_mcp_prompts_list_and_get() {
         assert_eq!(get_resp["id"], 3);
         let msg = &get_resp["result"]["messages"][0];
         assert_eq!(msg["role"], "user");
-        assert_eq!(msg["content"]["text"].as_str().unwrap().trim(), "Analyze 5xx on authorizer in prod.");
+        assert_eq!(
+            msg["content"]["text"].as_str().unwrap().trim(),
+            "Analyze 5xx on authorizer in prod."
+        );
 
         // prompts/get with defaults
         client.send(json!({
@@ -777,7 +877,10 @@ fn test_mcp_prompts_list_and_get() {
         let get_resp2 = client.recv();
         assert_eq!(get_resp2["id"], 4);
         let msg2 = &get_resp2["result"]["messages"][0];
-        assert_eq!(msg2["content"]["text"].as_str().unwrap().trim(), "Analyze 5xx on auth-service in dev.");
+        assert_eq!(
+            msg2["content"]["text"].as_str().unwrap().trim(),
+            "Analyze 5xx on auth-service in dev."
+        );
 
         // prompts/get for excluded or nonexistent prompt -> error
         client.send(json!({
@@ -821,4 +924,3 @@ fn test_mcp_prompts_list_and_get() {
         client.close();
     }
 }
-

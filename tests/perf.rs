@@ -282,7 +282,10 @@ fn perf_mcp_startup_under_150ms() {
     let kb_root = temp.path().join("kb");
     fs::create_dir_all(&kb_root).unwrap();
 
-    let bin_path = AssertCommand::cargo_bin("kb").unwrap().get_program().to_os_string();
+    let bin_path = AssertCommand::cargo_bin("kb")
+        .unwrap()
+        .get_program()
+        .to_os_string();
 
     // Warm binary in OS cache
     let _ = Command::new(&bin_path).arg("--version").output();
@@ -302,7 +305,11 @@ fn perf_mcp_startup_under_150ms() {
     let stdout = child.stdout.take().expect("stdout");
     let mut reader = std::io::BufReader::new(stdout);
 
-    writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}").unwrap();
+    writeln!(
+        stdin,
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}"
+    )
+    .unwrap();
     stdin.flush().unwrap();
 
     let mut line = String::new();
@@ -342,7 +349,10 @@ fn perf_mcp_search_under_50ms() {
         .arg("reindex");
     assert!(reindex_cmd.output().unwrap().status.success());
 
-    let bin_path = AssertCommand::cargo_bin("kb").unwrap().get_program().to_os_string();
+    let bin_path = AssertCommand::cargo_bin("kb")
+        .unwrap()
+        .get_program()
+        .to_os_string();
     let mut child = Command::new(&bin_path)
         .env("HOME", &home)
         .env("KB_ROOT", &kb_root)
@@ -358,7 +368,11 @@ fn perf_mcp_search_under_50ms() {
     let mut reader = std::io::BufReader::new(stdout);
 
     // Initialize first
-    writeln!(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}").unwrap();
+    writeln!(
+        stdin,
+        "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}}"
+    )
+    .unwrap();
     stdin.flush().unwrap();
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
@@ -393,4 +407,3 @@ fn perf_mcp_search_under_50ms() {
         elapsed
     );
 }
-

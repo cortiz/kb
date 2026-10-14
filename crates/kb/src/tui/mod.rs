@@ -533,11 +533,26 @@ pub fn run(
                             if is_signing {
                                 let _ = guard.resume();
                                 if let Ok(size) = terminal.size() {
-                                    let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                                    let _ = terminal.resize(ratatui::layout::Rect::new(
+                                        0,
+                                        0,
+                                        size.width,
+                                        size.height,
+                                    ));
                                 }
                             }
-                            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-                                state.say("Git identity unset: commit skipped", crate::tui::app::MessageKind::Warning, Instant::now(), true);
+                            if let Ok(
+                                kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity {
+                                    ..
+                                },
+                            ) = outcome
+                            {
+                                state.say(
+                                    "Git identity unset: commit skipped",
+                                    crate::tui::app::MessageKind::Warning,
+                                    Instant::now(),
+                                    true,
+                                );
                             }
                             if let Ok(cv) =
                                 code_view::load_code_view_state(&ui_kb, &id, &settings, false)
@@ -798,11 +813,26 @@ pub fn run(
                             if is_signing {
                                 let _ = guard.resume();
                                 if let Ok(size) = terminal.size() {
-                                    let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                                    let _ = terminal.resize(ratatui::layout::Rect::new(
+                                        0,
+                                        0,
+                                        size.width,
+                                        size.height,
+                                    ));
                                 }
                             }
-                            if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-                                state.say("Git identity unset: commit skipped", crate::tui::app::MessageKind::Warning, Instant::now(), true);
+                            if let Ok(
+                                kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity {
+                                    ..
+                                },
+                            ) = outcome
+                            {
+                                state.say(
+                                    "Git identity unset: commit skipped",
+                                    crate::tui::app::MessageKind::Warning,
+                                    Instant::now(),
+                                    true,
+                                );
                             }
                             Action::Saved(saved.id)
                         }
@@ -821,7 +851,13 @@ pub fn run(
                     if is_signing {
                         guard.suspend();
                     }
-                    let action = match crate::author::move_entry(platform, &mut ui_kb, &from, &to, &state.options.settings) {
+                    let action = match crate::author::move_entry(
+                        platform,
+                        &mut ui_kb,
+                        &from,
+                        &to,
+                        &state.options.settings,
+                    ) {
                         Ok((renamed, _)) => Action::Renamed {
                             from: renamed.from,
                             to: renamed.to,
@@ -831,7 +867,12 @@ pub fn run(
                     if is_signing {
                         let _ = guard.resume();
                         if let Ok(size) = terminal.size() {
-                            let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                            let _ = terminal.resize(ratatui::layout::Rect::new(
+                                0,
+                                0,
+                                size.width,
+                                size.height,
+                            ));
                         }
                     }
                     pending.extend(state.update(action, Instant::now()));
@@ -845,14 +886,24 @@ pub fn run(
                     if is_signing {
                         guard.suspend();
                     }
-                    let action = match crate::author::delete_entry(platform, &mut ui_kb, &id, &state.options.settings) {
+                    let action = match crate::author::delete_entry(
+                        platform,
+                        &mut ui_kb,
+                        &id,
+                        &state.options.settings,
+                    ) {
                         Ok(_) => Action::Removed(id),
                         Err(e) => Action::OpFailed(e.to_string()),
                     };
                     if is_signing {
                         let _ = guard.resume();
                         if let Ok(size) = terminal.size() {
-                            let _ = terminal.resize(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                            let _ = terminal.resize(ratatui::layout::Rect::new(
+                                0,
+                                0,
+                                size.width,
+                                size.height,
+                            ));
                         }
                     }
                     pending.extend(state.update(action, Instant::now()));
