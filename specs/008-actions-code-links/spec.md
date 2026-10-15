@@ -230,6 +230,8 @@ Carlos wants SQL entries for the `reporting` database to run in `psql` and promp
 ### TUI
 
 - **FR-037**: New keys in the main list: Ctrl-O primary open (for `code`, the code view); Ctrl-G run (for `cmd`); Alt-A or F2 action menu. These MUST be added to the M3 KeyMap without clashing with existing bindings (Ctrl-N, Ctrl-R, Ctrl-X from M6; Ctrl-E, Ctrl-Y from M3).
+  *Amended by spec 013: in the vim keymap's normal mode these are `o` open, `!` run, `m` or `.` action menu (the Ctrl and Alt keys keep working). The keys are defaults and can be changed in `[tui.keys.<context>]` (013 FR-018).*
+
 - **FR-038**: The key bar MUST show only the actions available for the selected entry.
 - **FR-039**: The code view (screen 3) MUST support: Enter or primary open key to launch the default open target (configured `code.default_open`, or `web`), `g` web, `v` VS Code, `i` IntelliJ, `y` copy `path:line`, `Y` copy permalink, `u` re-pin, `F` fetch then recheck, `Ctrl-E` edit the entry, Esc back to the list.
 - **FR-040**: `tui.enter` from M4 MUST additionally accept `primary`, which makes Enter run the type's primary open action instead of copy. The default stays `copy`. Enter MUST never run a command.

@@ -228,6 +228,8 @@ Carlos wants to see when a snippet changed, compare against an earlier revision,
 
 - **FR-028**: The M3 header MUST show the sync status from FR-025 when the KB is a git repository.
 - **FR-029**: New keys in the main list: Alt-S sync, Alt-H history of the selected entry. They MUST be added to the M3 KeyMap without clashes.
+  *Amended by spec 013: in the vim keymap's normal mode these are `s` sync and `H` history (Alt-S and Alt-H keep working). The keys are defaults and can be changed in `[tui.keys.<context>]` (013 FR-018).*
+
 - **FR-030**: The conflict screen keys: `m` mine, `t` theirs, `e` edit merged, `b` keep both, `d` delete (edit/delete conflicts), ↑/↓ or `n`/`p` between conflicts, Esc abort (with confirmation).
 
 ### CLI and exit codes

@@ -53,6 +53,11 @@ pub enum CodeViewEvent {
 }
 
 impl CodeViewState {
+    /// The re-pin question takes `y` / `n` / Esc as they are, whatever the keymap says.
+    pub fn takes_raw_keys(&self) -> bool {
+        self.repin_confirm.is_some()
+    }
+
     pub fn handle_key(&mut self, key: Key) -> CodeViewEvent {
         if let Some(report) = self.repin_confirm.clone() {
             return match key.code {

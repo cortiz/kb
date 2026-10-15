@@ -65,7 +65,7 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
         super::history_view::draw_history(h, theme, area, buf);
     }
     if state.overlay == Overlay::Help {
-        draw_help(theme, area, buf);
+        draw_help(state, theme, area, buf);
     }
 }
 
@@ -75,10 +75,23 @@ fn line(buf: &mut Buffer, x: u16, y: u16, spans: Vec<Span<'_>>, max: u16) {
 
 fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     let w = usize::from(r.width);
+    let badge_w = if state.keymap.keymap == kb_core::keys::Keymap::Vim {
+        7
+    } else {
+        0
+    };
     let mut spans = vec![Span::styled(
         " kb",
         theme.text().add_modifier(Modifier::BOLD),
     )];
+    if state.keymap.keymap == kb_core::keys::Keymap::Vim {
+        // text, not colour alone, so it survives NO_COLOR
+        let badge = if state.normal { " NORMAL" } else { " SEARCH" };
+        spans.push(Span::styled(
+            badge,
+            theme.warning().add_modifier(Modifier::BOLD),
+        ));
+    }
     let known = state.loaded || state.status.last_refresh.is_some();
     let mut rest = format!(" · {}", state.root);
     let mut tail = Vec::new();
@@ -127,7 +140,7 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         tail.push(Span::styled(" · refreshing…", theme.muted()));
     }
     let tail_w: usize = tail.iter().map(|s| width(&s.content)).sum();
-    let room = w.saturating_sub(3 + tail_w);
+    let room = w.saturating_sub(3 + badge_w + tail_w);
     rest = truncate_middle(&rest, room);
     spans.push(Span::styled(rest, theme.muted()));
     spans.extend(tail);
@@ -162,7 +175,7 @@ fn draw_search(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         if used + w > avail {
             break;
         }
-        let style = if i == cursor {
+        let style = if i == cursor && !state.normal {
             theme.cursor()
         } else {
             theme.text()
@@ -171,7 +184,7 @@ fn draw_search(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         x += w as u16;
         used += w;
     }
-    if cursor >= chars.len() && used < avail + 1 {
+    if cursor >= chars.len() && used < avail + 1 && !state.normal {
         buf.set_string(x, r.y, " ", theme.cursor());
     }
     let cx = r.x + r.width.saturating_sub(counter_w);
@@ -808,7 +821,10 @@ fn preview_scrolls(state: &AppState) -> bool {
 
 /// The key bar for the current state, fitted to `width` columns.
 pub fn key_bar_text(state: &AppState, width: usize) -> String {
-    keys::key_bar(bar_kind(state), width)
+    if let Some((first, _)) = state.pending {
+        return format!("{}…", first.display());
+    }
+    keys::key_bar(&state.keymap, state.normal, bar_kind(state), width)
 }
 
 fn bar_kind(state: &AppState) -> BarKind {
@@ -818,7 +834,7 @@ fn bar_kind(state: &AppState) -> BarKind {
         Mode::Form => BarKind::TooSmall,
         Mode::Help => BarKind::Help,
         Mode::FullPreview => BarKind::FullPreview,
-        Mode::Search => {
+        Mode::Search | Mode::Normal => {
             if state.empty_kb {
                 BarKind::EmptyKb
             } else if state.results.is_empty() {
@@ -840,10 +856,19 @@ fn bar_kind(state: &AppState) -> BarKind {
 
 /// The help overlay: every binding, from the same table that drives the keys. When the full
 /// list does not fit the height it is drawn as two columns of short lines.
-fn draw_help(theme: &Theme, area: Rect, buf: &mut Buffer) {
-    let long = keys::help_lines();
-    let fits = long.len() + 2 <= usize::from(area.height).saturating_sub(2);
-    let groups: Vec<&str> = keys::Group::ALL.iter().map(|g| g.title()).collect();
+fn draw_help(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
+    let room = usize::from(area.height).saturating_sub(2);
+    // both modes of the vim keymap if they fit, else the current one, else the short lines
+    let mut long = keys::help_lines(&state.keymap, state.normal, true);
+    if long.len() + 2 > room {
+        long = keys::help_lines(&state.keymap, state.normal, false);
+    }
+    let fits = long.len() + 2 <= room;
+    let groups: Vec<&str> = keys::Group::ALL
+        .iter()
+        .map(|g| g.title())
+        .chain(keys::MODE_TITLES)
+        .collect();
     let max_w = usize::from(area.width).saturating_sub(4);
     if fits {
         let want_w = long.iter().map(|l| width(l)).max().unwrap_or(40) + 4;
@@ -867,7 +892,7 @@ fn draw_help(theme: &Theme, area: Rect, buf: &mut Buffer) {
         }
         return;
     }
-    let compact = keys::help_compact();
+    let compact = keys::help_compact(&state.keymap, state.normal);
     let note = keys::help_note();
     let rows_per_col = compact.len().div_ceil(2);
     let h = ((rows_per_col + note.len() + 3) as u16)

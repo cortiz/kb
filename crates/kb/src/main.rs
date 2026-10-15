@@ -27,6 +27,10 @@ struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     root: Option<PathBuf>,
 
+    /// The UI keymap for this run: emacs or vim (default: `tui.keymap`, then emacs).
+    #[arg(long, global = true, value_name = "NAME", value_parser = ["emacs", "vim"])]
+    keymap: Option<String>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -385,6 +389,8 @@ enum Command {
     /// Create, inspect and change the config file.
     #[command(subcommand)]
     Config(ConfigCommand),
+    /// Show the key bindings in effect, check them, or print the defaults.
+    Keys(commands::keys::KeysArgs),
     /// Check the machine: root, index, config, clipboard, editor and opener, with fixes.
     Doctor(DoctorArgs),
     /// Check, re-pin or inspect code links.
@@ -529,9 +535,9 @@ fn insert_tui(args: Vec<std::ffi::OsString>) -> Vec<std::ffi::OsString> {
         let Some(a) = args[i].to_str() else {
             break;
         };
-        if a == "--root" {
+        if a == "--root" || a == "--keymap" {
             i += 2;
-        } else if a.starts_with("--root=") {
+        } else if a.starts_with("--root=") || a.starts_with("--keymap=") {
             i += 1;
         } else {
             break;
@@ -571,6 +577,7 @@ fn main() -> ExitCode {
         Command::Mv(a) => a.json,
         Command::Rm(a) => a.json,
         Command::Doctor(a) => a.json,
+        Command::Keys(a) => a.json(),
         Command::Config(c) => match c {
             ConfigCommand::Init(a) | ConfigCommand::List(a) => a.json,
             ConfigCommand::Path(a) => a.json,
@@ -611,6 +618,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
     let platform = platform::current();
     let flags = Flags {
         root: cli.root.as_ref().map(|p| p.to_string_lossy().into_owned()),
+        keymap: cli.keymap.clone(),
         clipboard_method: match &cli.command {
             Command::Copy(a) => a.method.clone(),
             Command::Use(a) => a.method.clone(),
@@ -724,6 +732,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             }
             ConfigCommand::List(a) => commands::config_list(&loaded, a.json),
         },
+        Command::Keys(args) => commands::keys::run_keys(&loaded, &args),
         Command::Code(args) => commands::run_code(&platform, &root, &loaded, &args),
         Command::Pick(args) => commands::pick::run_pick(&platform, &root, &loaded, &args),
         Command::Shell(args) => commands::shell::run_shell(&platform, &loaded, &args),

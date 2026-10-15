@@ -213,6 +213,33 @@ fn check_index(root: &Path) -> Check {
     }
 }
 
+/// `kb keys check`: the `[tui.keys.*]` overrides are sound.
+fn check_keys(loaded: &Loaded) -> Check {
+    let map = crate::commands::keys::effective(loaded);
+    let problems = crate::commands::keys::problems(loaded, &map);
+    if problems.is_empty() {
+        return Check::new(
+            "keys",
+            Status::Pass,
+            format!(
+                "keymap {}, {} override(s) active",
+                map.keymap.name(),
+                map.active_overrides
+            ),
+        );
+    }
+    let mut check = Check::new(
+        "keys",
+        Status::Warn,
+        format!("{} problem(s) in the key bindings", problems.len()),
+    )
+    .hint("run `kb keys check`; the ignored overrides fall back to the keymap's keys");
+    for p in problems {
+        check = check.detail(p);
+    }
+    check
+}
+
 fn check_config(platform: &impl Platform, loaded: &Loaded) -> Check {
     let described = match &loaded.file {
         Some(p) => p.display().to_string(),
@@ -632,6 +659,7 @@ pub fn run(platform: &impl Platform, root: &Path, loaded: &Loaded) -> Report {
     }
     checks.extend([
         check_config(platform, loaded),
+        check_keys(loaded),
         check_display(&env),
         check_session(&env),
         clipboard_check,
@@ -730,6 +758,7 @@ mod tests {
                 "root-writable",
                 "index",
                 "config",
+                "keys",
                 "display",
                 "session",
                 "clipboard",

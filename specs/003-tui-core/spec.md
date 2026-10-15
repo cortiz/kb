@@ -163,6 +163,8 @@ While reading a preview, Carlos notices a mistake, presses Ctrl-E, edits the fil
   | Esc | clear query, or exit when empty |
   | Ctrl-C | exit immediately |
 
+  *Amended by spec 013 (vim keymap): with `tui.keymap = "vim"` every key here still works in both modes, and normal mode adds single-letter equivalents (`j`/`k` select, `gg`/`G` first/last, `h`/`l` type filter, `y` copy, `o` open, `e` edit, `/` and `i` back to search). The keys are defaults and can be changed in `[tui.keys.<context>]` (013 FR-018).*
+
 - **FR-011**: The search line MUST support standard line editing: Left/Right to move the cursor, Ctrl-A to jump to the start of the line, Ctrl-W to delete the previous word, and Ctrl-U to clear the line. Ctrl-E is reserved for editing the entry (US4), so the End key jumps to the end of the line (and Home to the start). No binding may be listed twice in the KeyMap; the build MUST fail if it is.
 - **FR-012**: Results MUST update on every keystroke. If a search is still running when the next key arrives, the older search MUST be discarded rather than drawn.
 - **FR-013**: Mouse support is optional in this milestone. If included, wheel scrolling and click-to-select MUST be the only behaviors, and it MUST be possible to turn mouse capture off in config so terminal text selection still works.

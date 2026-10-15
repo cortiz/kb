@@ -189,6 +189,8 @@ Carlos pastes a Sumo query that contains `_sourceCategory=prod/lambda/authorizer
   | Esc | discard (with confirmation if changed) |
 
 - **FR-027**: New keys in the main list: Ctrl-N add, Ctrl-R rename, Ctrl-X delete. `Ctrl-N` is removed from the "next result" binding (`↓` and `Ctrl-J` keep it). Ctrl-E (edit) stays as in M3. The M3 KeyMap rule against duplicate bindings still applies.
+  *Amended by spec 013: in the vim keymap's normal mode these are `n` add, `R` rename, `D` delete (the Ctrl keys keep working). The keys are defaults and can be changed in `[tui.keys.<context>]` (013 FR-018).*
+
 
 ### Commands
 
