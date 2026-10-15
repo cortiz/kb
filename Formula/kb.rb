@@ -5,23 +5,23 @@ class Kb < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/cortiz/kb/releases/download/v0.3.1/kb-0.3.1-macos-apple-silicon.tar.gz"
-      sha256 "f65992e7c871b09cdbdbdba326d1be70b8f702e1626b1121088dd6349384d1fe"
+      url "https://github.com/cortiz/kb/releases/download/v0.4.0/kb-0.4.0-macos-apple-silicon.tar.gz"
+      sha256 "7db7be83fd19d68e20d3baf950514d5c4554b000c663332d144b65d98f43cc16"
     end
     on_intel do
-      url "https://github.com/cortiz/kb/releases/download/v0.3.1/kb-0.3.1-macos-intel.tar.gz"
-      sha256 "a430ff5c46f64a30be2af1d43e94e0faf036d14199dc9c2b15d601c9f3f5ffb6"
+      url "https://github.com/cortiz/kb/releases/download/v0.4.0/kb-0.4.0-macos-intel.tar.gz"
+      sha256 "db0c138174c322f0e94b42221b4675608ee6b79240f0ce875591dd21cb573224"
     end
   end
 
   on_linux do
     on_arm do
-      url "https://github.com/cortiz/kb/releases/download/v0.3.1/kb-0.3.1-linux-arm64.tar.gz"
-      sha256 "27e5b419a3643397c07d0cbdd4509a2fc6d0bb8db8646368031f92940286a3f7"
+      url "https://github.com/cortiz/kb/releases/download/v0.4.0/kb-0.4.0-linux-arm64.tar.gz"
+      sha256 "37f9c59b6cecc72e4476a8793d00afa678e5417eb31c2a95f3e2fb1eb067b0f8"
     end
     on_intel do
-      url "https://github.com/cortiz/kb/releases/download/v0.3.1/kb-0.3.1-linux-x86_64.tar.gz"
-      sha256 "725fae2d93b27184f58f6581b408067ec23ad7264e4935c323e28da2fd5b6695"
+      url "https://github.com/cortiz/kb/releases/download/v0.4.0/kb-0.4.0-linux-x86_64.tar.gz"
+      sha256 "b04540d9d937883c3c7a0609c801394d4262c4b542198f85f8734761aa40ed4d"
     end
   end
 
