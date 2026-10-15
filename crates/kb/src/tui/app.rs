@@ -60,6 +60,8 @@ pub enum ListPrompt {
     Rename { from: String, editor: LineEditor },
     /// `Delete <id>? (y/N)`.
     Delete { id: String },
+    /// `New runbook title: <title>`.
+    NewRunbook { editor: LineEditor },
 }
 
 impl ListPrompt {
@@ -74,6 +76,13 @@ impl ListPrompt {
                 format!("Rename to: {head}▌{tail}")
             }
             ListPrompt::Delete { id } => format!("Delete {id}? (y/N)"),
+            ListPrompt::NewRunbook { editor } => {
+                let chars: Vec<char> = editor.text().chars().collect();
+                let at = editor.cursor().min(chars.len());
+                let head: String = chars[..at].iter().collect();
+                let tail: String = chars[at..].iter().collect();
+                format!("New runbook title: {head}▌{tail}")
+            }
         }
     }
 }
@@ -320,6 +329,11 @@ pub enum Effect {
     RemoveEntry {
         id: String,
     },
+    /// Create a new runbook from marked entries.
+    CreateRunbookFromMarks {
+        title: String,
+        entries: Vec<String>,
+    },
     Quit(i32),
 }
 
@@ -376,6 +390,8 @@ pub struct AppState {
     pub started_by_add: bool,
     /// The question on the key bar, when Ctrl-R or Ctrl-X asked one.
     pub prompt: Option<ListPrompt>,
+    /// Entries marked in the TUI list for runbook creation.
+    pub marks: Vec<String>,
     /// The keys: the preset plus the user's overrides, built once at startup.
     pub keymap: std::sync::Arc<kb_core::keys::EffectiveKeymap>,
     /// Vim's normal mode: letters are commands (never true with the emacs keymap).
@@ -447,6 +463,7 @@ impl AppState {
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
+            marks: Vec::new(),
         }
     }
 
@@ -984,6 +1001,26 @@ impl AppState {
                         Vec::new()
                     } else {
                         vec![Effect::RenameEntry { from, to }]
+                    }
+                }
+                _ => {
+                    super::add::line_key(editor, key);
+                    Vec::new()
+                }
+            },
+            ListPrompt::NewRunbook { editor } => match (key.code, key.mods) {
+                (keys::Code::Esc, 0) => {
+                    self.prompt = None;
+                    Vec::new()
+                }
+                (keys::Code::Enter, 0) => {
+                    let title = editor.text().trim().to_string();
+                    self.prompt = None;
+                    if title.is_empty() {
+                        Vec::new()
+                    } else {
+                        let entries = std::mem::take(&mut self.marks);
+                        vec![Effect::CreateRunbookFromMarks { title, entries }]
                     }
                 }
                 _ => {
@@ -1593,13 +1630,47 @@ impl AppState {
                 self.say("Syncing…", MessageKind::Info, now, true);
                 vec![Effect::Sync]
             }
+            Command::MarkEntry => {
+                if let Some(r) = self.selected_result() {
+                    let id = r.id.clone();
+                    if let Some(pos) = self.marks.iter().position(|m| m == &id) {
+                        self.marks.remove(pos);
+                    } else {
+                        self.marks.push(id);
+                    }
+                } else {
+                    self.say("Nothing to mark", MessageKind::Info, now, true);
+                }
+                Vec::new()
+            }
+            Command::NewRunbookFromMarks => {
+                if self.marks.is_empty() {
+                    self.say(
+                        "mark entries first with Alt-M (or v)",
+                        MessageKind::Info,
+                        now,
+                        true,
+                    );
+                    Vec::new()
+                } else {
+                    self.prompt = Some(ListPrompt::NewRunbook {
+                        editor: LineEditor::new(""),
+                    });
+                    Vec::new()
+                }
+            }
             Command::Esc => {
                 if self.layout_mode == LayoutMode::FullPreview {
                     self.layout_mode = LayoutMode::Split;
                     self.ensure_visible();
                     Vec::new()
                 } else if self.input.is_blank() {
-                    vec![Effect::Quit(130)]
+                    if self.normal && !self.marks.is_empty() {
+                        self.marks.clear();
+                        Vec::new()
+                    } else {
+                        vec![Effect::Quit(130)]
+                    }
                 } else {
                     self.input.clear_all();
                     self.query_changed()
@@ -1836,7 +1907,7 @@ pub(crate) mod tests {
         );
         assert_eq!(s.results, before);
         let mut p = page(&["n1", "n2", "n3"]);
-        p.type_counts = [3, 0, 0, 0, 0, 0, 0, 0];
+        p.type_counts = [3, 0, 0, 0, 0, 0, 0, 0, 0];
         p.indexed = 50;
         p.skipped = 2;
         let g = s.search_gen;
@@ -2280,7 +2351,9 @@ pub(crate) mod tests {
     fn tab_cycles_through_the_types_and_back_to_all() {
         let mut s = loaded(&["a"]);
         let now = Instant::now();
-        let order = ["sql", "sumo", "cw", "cmd", "prompt", "link", "code", "note"];
+        let order = [
+            "sql", "sumo", "cw", "cmd", "prompt", "link", "code", "note", "runbook",
+        ];
         for ty in order {
             let e = s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
             assert_eq!(type_chips(&s), vec![ty]);
@@ -2297,6 +2370,8 @@ pub(crate) mod tests {
     fn shift_tab_goes_the_other_way() {
         let mut s = loaded(&["a"]);
         let now = Instant::now();
+        s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
+        assert_eq!(type_chips(&s), vec!["runbook"]);
         s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
         assert_eq!(type_chips(&s), vec!["note"]);
         s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
@@ -2390,10 +2465,10 @@ pub(crate) mod tests {
         let now = Instant::now();
         s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
         let mut p = page(&["x"]);
-        p.type_counts = [4, 3, 2, 1, 0, 0, 0, 0];
+        p.type_counts = [4, 3, 2, 1, 0, 0, 0, 0, 0];
         let g = s.search_gen;
         s.update(Action::Results(g, p), now);
-        assert_eq!(s.type_counts, [4, 3, 2, 1, 0, 0, 0, 0]);
+        assert_eq!(s.type_counts, [4, 3, 2, 1, 0, 0, 0, 0, 0]);
     }
 
     // ---- editing (US4) ----

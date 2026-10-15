@@ -1,6 +1,6 @@
  kb · ~/kb · 32 entries
  › latency                                                                                                       3 / 32
-  all 4   sql 0   sumo 1   cw 3   cmd 0   prompt 0   link 0   code 0   note 0
+  all 4   sql 0   sumo 1   cw 3   cmd 0   prompt 0   link 0   code 0   note 0   runbook 0
 ┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
 │ cw     Latency p99 production                ││ Latency p99 production                                               │
 │        #prod #latency                        ││ cw · #prod #latency · edited 2026-08-29                              │
@@ -51,6 +51,7 @@
 2:52..60 fg=240
 2:61..69 fg=240
 2:70..78 fg=240
+2:79..90 fg=240
 3:0..1 fg=240
 3:1..10 fg=245
 3:10..49 fg=240

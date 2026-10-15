@@ -35,6 +35,11 @@ pub enum FsError {
     TooLarge,
     /// The edit can't be made in place (for example an unsupported `kb_format`).
     Unsupported(String),
+    /// The entry is referenced by runbooks and cannot be deleted without force.
+    ReferencedByRunbooks {
+        id: String,
+        runbooks: Vec<String>,
+    },
     Io {
         path: PathBuf,
         message: String,
@@ -58,6 +63,11 @@ impl fmt::Display for FsError {
             ),
             FsError::TooLarge => write!(f, "entries are limited to {MAX_FILE_BYTES} bytes"),
             FsError::Unsupported(why) => write!(f, "{why}"),
+            FsError::ReferencedByRunbooks { id, runbooks } => write!(
+                f,
+                "cannot delete '{id}': referenced by runbook(s) ({})",
+                runbooks.join(", ")
+            ),
             FsError::Io { path, message } => write!(f, "{}: {message}", path.display()),
         }
     }
@@ -272,6 +282,39 @@ impl Kb {
                 continue;
             };
             let rewritten = format!("{}{}{}", &text[..body.start], body_text, &text[body.end..]);
+            let tmp = temp_path(&path);
+            write_temp(&tmp, rewritten.as_bytes()).map_err(|e| io_err(&tmp, &e))?;
+            if let Err(e) = std::fs::rename(&tmp, &path) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(io_err(&path, &e));
+            }
+            changed.push(id.clone());
+        }
+        if !changed.is_empty() {
+            let _ = self.refresh();
+        }
+        Ok(changed)
+    }
+
+    /// Points `entry: old` in runbooks `sources` at `new`, changing nothing else in them
+    /// (not even `updated`). Returns the runbooks that changed.
+    pub fn retarget_runbook_steps(
+        &mut self,
+        sources: &[String],
+        old: &str,
+        new: &str,
+    ) -> Result<Vec<String>, FsError> {
+        let mut changed = Vec::new();
+        for id in sources {
+            let path = self.id_path(id)?;
+            let bytes = read_entry(&path, id)?;
+            let Ok(text) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let Some(rewritten) = crate::runbook::retarget_runbook_step_references(&text, old, new)
+            else {
+                continue;
+            };
             let tmp = temp_path(&path);
             write_temp(&tmp, rewritten.as_bytes()).map_err(|e| io_err(&tmp, &e))?;
             if let Err(e) = std::fs::rename(&tmp, &path) {

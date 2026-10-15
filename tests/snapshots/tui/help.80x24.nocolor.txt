@@ -30,7 +30,6 @@
 1:4..9 dim
 1:72..80 dim
 2:1..9 bold+reverse
-2:71..79 dim
 3:1..10 dim
 4:1..2 reverse
 4:2..8 bold+reverse

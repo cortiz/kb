@@ -501,3 +501,77 @@ fn note_body_words_are_not_typo_candidates_but_titles_and_headings_are() {
     // a typo of a body-only word is not
     assert!(ids(&root, &["quokkaward"]).is_empty());
 }
+
+#[test]
+fn runbook_search_indexing_and_filters() {
+    let (_d, root) = search_kb();
+    fs::create_dir_all(root.join("deploy")).unwrap();
+    fs::write(
+        root.join("deploy/authorizer.md"),
+        r#"---
+kb_format: 1
+type: runbook
+title: Deploy Authorizer Runbook
+tags: [deployrunbook]
+steps:
+  - id: step-1
+    title: Check baseline
+    entry: sumo/5xx-by-authorizer
+  - id: step-2
+    title: Deploy command
+    entry: cmd/deploy-service
+  - id: step-3
+    title: Manual verification
+    do: Verify telemetry dashboards
+---
+Special instructions for deployment operations.
+"#,
+    )
+    .unwrap();
+
+    // 1. Matches on title
+    let found = ids(&root, &["Deploy", "Authorizer", "Runbook"]);
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on title: {found:?}"
+    );
+
+    // 2. Matches on tag
+    let found = ids(&root, &["tag:deployrunbook"]);
+    assert_eq!(found, vec!["deploy/authorizer"]);
+
+    // 3. Matches on step title
+    let found = ids(&root, &["baseline"]);
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on step title: {found:?}"
+    );
+
+    // 4. Matches on manual step text
+    let found = ids(&root, &["telemetry", "dashboards"]);
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on do text: {found:?}"
+    );
+
+    // 5. Matches on notes
+    let found = ids(&root, &["special", "deployment", "operations"]);
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on notes: {found:?}"
+    );
+
+    // 6. type:runbook filter
+    let found = ids(&root, &["type:runbook"]);
+    assert_eq!(found, vec!["deploy/authorizer"]);
+
+    // 7. runbook:<id> filter returns referenced entries in step order
+    let found = ids(&root, &["runbook:deploy/authorizer"]);
+    assert_eq!(found, vec!["sumo/5xx-by-authorizer", "cmd/deploy-service"]);
+
+    // 8. used-by:runbook filter returns entries referenced by runbooks
+    let found = ids(&root, &["used-by:runbook"]);
+    assert!(found.contains(&"sumo/5xx-by-authorizer".to_string()));
+    assert!(found.contains(&"cmd/deploy-service".to_string()));
+    assert!(!found.contains(&"deploy/authorizer".to_string()));
+}

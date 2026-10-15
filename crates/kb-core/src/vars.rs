@@ -160,6 +160,26 @@ pub(crate) fn collect(
     targets: &[ScanTarget],
     sink: &mut Sink<'_>,
 ) -> Vec<Variable> {
+    collect_internal(tree, text, targets, sink, false)
+}
+
+/// Variant of `collect` for runbooks that suppresses KB048-unused-var (runbooks use KB092).
+pub(crate) fn collect_runbook(
+    tree: &Node,
+    text: &str,
+    targets: &[ScanTarget],
+    sink: &mut Sink<'_>,
+) -> Vec<Variable> {
+    collect_internal(tree, text, targets, sink, true)
+}
+
+fn collect_internal(
+    tree: &Node,
+    text: &str,
+    targets: &[ScanTarget],
+    sink: &mut Sink<'_>,
+    is_runbook: bool,
+) -> Vec<Variable> {
     let (mut vars, key_offsets) = declarations(tree, sink);
     let mut reported_undeclared = Vec::new();
     for target in targets {
@@ -204,17 +224,19 @@ pub(crate) fn collect(
             }
         }
     }
-    for (var, offset) in vars.iter().zip(&key_offsets) {
-        if var.references.is_empty() {
-            sink.push(
-                RuleCode::UnusedVar,
-                *offset,
-                format!("variable `{}` is declared but never used", var.name),
-                Some(format!(
-                    "remove it from `vars`, or reference it as `{{{{{}}}}}`",
-                    var.name
-                )),
-            );
+    if !is_runbook {
+        for (var, offset) in vars.iter().zip(&key_offsets) {
+            if var.references.is_empty() {
+                sink.push(
+                    RuleCode::UnusedVar,
+                    *offset,
+                    format!("variable `{}` is declared but never used", var.name),
+                    Some(format!(
+                        "remove it from `vars`, or reference it as `{{{{{}}}}}`",
+                        var.name
+                    )),
+                );
+            }
         }
     }
     vars

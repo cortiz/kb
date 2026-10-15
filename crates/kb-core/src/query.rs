@@ -14,7 +14,7 @@ pub const STOP_WORDS: [&str; 17] = [
 ];
 
 /// The filter keys, for hints.
-pub const FILTER_KEYS: &str = "type, tag, -tag, var, repo, in, unreviewed";
+pub const FILTER_KEYS: &str = "type, tag, -tag, var, repo, in, unreviewed, runbook, used-by";
 
 /// An indexed field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -74,6 +74,10 @@ pub struct Query {
     pub scope: Option<Field>,
     /// Filter by review status (agent-authored entries).
     pub unreviewed: Option<bool>,
+    /// Filter to entries used by this runbook ID.
+    pub runbook: Option<String>,
+    /// Filter to entries used by at least one runbook.
+    pub used_by_runbook: bool,
     /// `0` means no limit.
     pub limit: usize,
     /// All free text as typed (stop words included), for the exact-title rule.
@@ -116,6 +120,8 @@ impl Default for Query {
             repos: Vec::new(),
             scope: None,
             unreviewed: None,
+            runbook: None,
+            used_by_runbook: false,
             limit: DEFAULT_LIMIT,
             raw_text: String::new(),
             hints: Vec::new(),
@@ -207,6 +213,19 @@ impl Query {
                         _ => self
                             .hints
                             .push(Hint::UnknownFilter(format!("unreviewed:{value}"))),
+                    }
+                    return;
+                }
+                "runbook" => {
+                    self.runbook = Some(value.to_string());
+                    return;
+                }
+                "used-by" | "used_by" => {
+                    if fold(value) == "runbook" {
+                        self.used_by_runbook = true;
+                    } else {
+                        self.hints
+                            .push(Hint::UnknownFilter(format!("used-by:{value}")));
                     }
                     return;
                 }
@@ -333,6 +352,9 @@ mod tests {
         assert!(q.is_empty());
         let q = Query::parse("in:title in:notes x");
         assert_eq!(q.scope, Some(Field::Notes));
+        let q = Query::parse("runbook:deploy/authorizer used-by:runbook");
+        assert_eq!(q.runbook, Some("deploy/authorizer".into()));
+        assert!(q.used_by_runbook);
     }
 
     #[test]

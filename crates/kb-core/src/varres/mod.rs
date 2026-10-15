@@ -127,6 +127,13 @@ pub fn plan_vars(entry: &Entry) -> VarPlan {
         _ => {}
     }
     let mut used: Vec<(String, Vec<Target>)> = Vec::new();
+    if entry.entry_type() == Some(EntryType::Runbook) {
+        for v in entry.vars() {
+            if !used.iter().any(|(n, _)| n == &v.name) {
+                used.push((v.name.clone(), vec![Target::Payload]));
+            }
+        }
+    }
     for t in &templates {
         for piece in &t.pieces {
             if let Piece::Ref(name) = piece {

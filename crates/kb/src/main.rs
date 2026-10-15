@@ -164,14 +164,26 @@ struct ShowArgs {
     #[arg(required = true, num_args = 1..)]
     query: Vec<String>,
     /// Print only the payload (or the URL, or `path:line`).
-    #[arg(long, conflicts_with_all = ["json", "file"])]
+    #[arg(long, conflicts_with_all = ["json", "file", "checklist"])]
     raw: bool,
     /// Print the entry as JSON.
-    #[arg(long, conflicts_with_all = ["raw", "file"])]
+    #[arg(long, conflicts_with_all = ["raw", "file", "checklist"])]
     json: bool,
     /// Print the absolute path of the entry's file.
-    #[arg(long, conflicts_with_all = ["raw", "json"])]
+    #[arg(long, conflicts_with_all = ["raw", "json", "checklist"])]
     file: bool,
+    /// Format runbook as a Markdown checklist.
+    #[arg(long, conflicts_with_all = ["raw", "json", "file"])]
+    checklist: bool,
+    /// Resolve variables in runbook checklist.
+    #[arg(long, requires = "checklist")]
+    resolve: bool,
+    /// Give a variable's value: `--var env=prod`. Repeatable.
+    #[arg(long = "var", value_name = "NAME=VALUE")]
+    vars: Vec<String>,
+    /// Never ask: use the pre-filled value of every variable not given with --var.
+    #[arg(short = 'y', long)]
+    yes: bool,
     /// No colors, even on a terminal.
     #[arg(long)]
     no_color: bool,
@@ -181,17 +193,41 @@ struct ShowArgs {
 }
 
 impl ShowArgs {
-    fn options(&self) -> ShowOptions {
-        let mode = match (self.raw, self.json, self.file) {
-            (true, _, _) => ShowMode::Raw,
-            (_, true, _) => ShowMode::Json,
-            (_, _, true) => ShowMode::File,
+    fn options(&self) -> Result<ShowOptions, CliError> {
+        let mut flags = Vec::new();
+        for raw in &self.vars {
+            let Some((name, value)) = raw.split_once('=') else {
+                return Err(CliError::new(
+                    "usage",
+                    format!("--var {raw:?}: expected NAME=VALUE"),
+                ));
+            };
+            if !kb_core::vars::is_valid_name(name) {
+                return Err(CliError::new(
+                    "usage",
+                    format!(
+                        "--var {raw:?}: {name:?} is not a variable name (lowercase letters, digits and `_`)"
+                    ),
+                ));
+            }
+            flags.push((name.to_string(), value.to_string()));
+        }
+
+        let mode = match (self.checklist, self.raw, self.json, self.file) {
+            (true, _, _, _) => ShowMode::Checklist {
+                resolve: self.resolve,
+            },
+            (_, true, _, _) => ShowMode::Raw,
+            (_, _, true, _) => ShowMode::Json,
+            (_, _, _, true) => ShowMode::File,
             _ => ShowMode::Preview,
         };
-        ShowOptions {
+        Ok(ShowOptions {
             mode,
             no_color: self.no_color,
-        }
+            flags,
+            yes: self.yes,
+        })
     }
 }
 
@@ -288,6 +324,9 @@ struct RmArgs {
     /// Do not ask for confirmation.
     #[arg(short = 'y', long)]
     yes: bool,
+    /// Force deletion even if referenced by runbooks.
+    #[arg(short = 'f', long)]
+    force: bool,
     /// Print what happened as JSON.
     #[arg(long)]
     json: bool,
@@ -429,6 +468,9 @@ enum Command {
     /// Manage git hooks that keep secrets out of commits.
     #[command(subcommand)]
     Git(commands::hooks::GitCommand),
+    /// Manage and create runbooks.
+    #[command(subcommand)]
+    Runbook(commands::runbook::RunbookCommand),
 }
 
 #[derive(Subcommand)]
@@ -502,6 +544,12 @@ struct LintArgs {
     /// Run only the secret scan, on the staged files or the given paths.
     #[arg(long)]
     secrets_only: bool,
+    /// Offer to fix broken references and auto-fixable findings.
+    #[arg(long)]
+    fix: bool,
+    /// Apply fixes without confirmation.
+    #[arg(short = 'y', long)]
+    yes: bool,
 }
 
 /// `-tag:x` in a query is `--not-tag x`, but clap would take it for a flag, so it is rewritten
@@ -609,6 +657,7 @@ fn main() -> ExitCode {
         Command::Restore(_) => false,
         Command::Clone(_) => false,
         Command::Sync(a) => a.json(),
+        Command::Runbook(commands::runbook::RunbookCommand::New(a)) => a.json,
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -659,7 +708,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
     }
     match cli.command {
         Command::Init(args) => run_init(&root, platform.config_write_path().as_deref(), &args),
-        Command::Lint(args) => run_lint(&root, &args),
+        Command::Lint(args) => run_lint(&root, &args, &loaded.settings),
         Command::Search(args) => run_search(&root, &args),
         Command::Reindex(args) => run_reindex(&root, &args),
         Command::Index(IndexCommand::Status(args)) => run_index_status(&root, &args),
@@ -715,7 +764,7 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             &root,
             &loaded,
             &join_query(&args.query, &args.not_tags),
-            args.options(),
+            args.options()?,
         ),
         Command::Edit(args) => kb_cli::editfile::edit_entry(
             &platform,
@@ -727,9 +776,9 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Mv(args) => {
             kb_cli::author::run_mv(&platform, &root, &loaded, &args.id, &args.new_id, args.json)
         }
-        Command::Rm(args) => {
-            kb_cli::author::run_rm(&platform, &root, &loaded, &args.id, args.yes, args.json)
-        }
+        Command::Rm(args) => kb_cli::author::run_rm(
+            &platform, &root, &loaded, &args.id, args.yes, args.force, args.json,
+        ),
         Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
         Command::Note(args) => {
             use std::io::IsTerminal;
@@ -761,6 +810,9 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Restore(args) => commands::history::run_restore(&root, &loaded, &args),
         Command::Clone(args) => commands::clone::run_clone(&platform, &loaded, &args),
         Command::Sync(args) => commands::sync::run_sync(&platform, &root, &loaded, &args),
+        Command::Runbook(commands::runbook::RunbookCommand::New(args)) => {
+            commands::runbook::run_runbook_new(&platform, &root, &loaded, args)
+        }
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }
 }
@@ -854,13 +906,25 @@ fn run_secrets_only(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode,
     Ok(ExitCode::from(u8::from(!report.is_clean())))
 }
 
-fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliError> {
+fn run_lint(
+    root: &std::path::Path,
+    args: &LintArgs,
+    settings: &kb_core::config::Settings,
+) -> Result<ExitCode, CliError> {
     if args.secrets_only || args.staged {
         return run_secrets_only(root, args);
     }
     let cwd = std::env::current_dir().map_err(|e| CliError::new("io", e.to_string()))?;
     let scope = resolve_scope(root, &cwd, &args.paths).map_err(lint_error)?;
-    let report = lint(root, &scope).map_err(lint_error)?;
+    let mut report = lint(root, &scope).map_err(lint_error)?;
+
+    if args.fix {
+        let modified = apply_lint_fixes(root, &report, args.yes, settings)?;
+        if !modified.is_empty() {
+            report = lint(root, &scope).map_err(lint_error)?;
+        }
+    }
+
     if args.json {
         println!("{}", report.to_json(args.strict));
     } else {
@@ -869,6 +933,66 @@ fn run_lint(root: &std::path::Path, args: &LintArgs) -> Result<ExitCode, CliErro
     Ok(ExitCode::from(
         u8::try_from(report.exit_code(args.strict)).unwrap_or(1),
     ))
+}
+
+fn apply_lint_fixes(
+    root: &std::path::Path,
+    report: &kb_core::lint::LintReport,
+    yes: bool,
+    settings: &kb_core::config::Settings,
+) -> Result<Vec<PathBuf>, CliError> {
+    use std::io::Write;
+
+    let mut modified = Vec::new();
+    for finding in &report.findings {
+        if finding.code == kb_core::lint::RuleCode::StepMissingEntry {
+            let Some(ref fix) = finding.fix else { continue };
+            let Some(old_id) = finding.message.split('`').nth(1) else {
+                continue;
+            };
+            let Some(new_id) = fix.split('`').nth(1) else {
+                continue;
+            };
+
+            if !yes {
+                eprint!(
+                    "Update reference in {} from `{}` to `{}`? [y/N] ",
+                    finding.path, old_id, new_id
+                );
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                if std::io::stdin().read_line(&mut line).is_err()
+                    || !line.trim().eq_ignore_ascii_case("y")
+                {
+                    continue;
+                }
+            }
+
+            let full_path = root.join(&finding.path);
+            if let Ok(content) = std::fs::read_to_string(&full_path)
+                && let Some(updated) =
+                    kb_core::runbook::retarget_runbook_step_references(&content, old_id, new_id)
+                && std::fs::write(&full_path, updated).is_ok()
+            {
+                modified.push(full_path);
+            }
+        }
+    }
+
+    if !modified.is_empty() {
+        modified.sort();
+        modified.dedup();
+        let git = kb_cli::platform::SystemGitRunner;
+        let _ = kb_core::git::commit::auto_commit_paths_with_message(
+            root,
+            &git,
+            settings,
+            "fix: update broken runbook references",
+            &modified,
+        );
+    }
+
+    Ok(modified)
 }
 
 fn lint_error(e: LintError) -> CliError {

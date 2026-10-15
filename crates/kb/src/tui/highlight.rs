@@ -52,7 +52,11 @@ pub fn lang_for(ty: EntryType) -> Lang {
         EntryType::Cmd => Lang::Bash,
         EntryType::Sumo => Lang::Sumo,
         EntryType::Cw => Lang::Cwi,
-        EntryType::Prompt | EntryType::Link | EntryType::Code | EntryType::Note => Lang::Plain,
+        EntryType::Prompt
+        | EntryType::Link
+        | EntryType::Code
+        | EntryType::Note
+        | EntryType::Runbook => Lang::Plain,
     }
 }
 

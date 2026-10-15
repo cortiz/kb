@@ -697,8 +697,21 @@ mod tests {
         script(dir, name, body)
     }
 
+    /// Retries while a parallel test's fork still holds the freshly written script open (ETXTBSY).
+    fn retry_busy<T>(mut f: impl FnMut() -> Result<T, ToolError>) -> Result<T, ToolError> {
+        for _ in 0..50 {
+            match f() {
+                Err(ToolError::Io(m)) if m.contains("busy") => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
+                other => return other,
+            }
+        }
+        f()
+    }
+
     fn run_script(script_path: &Path, text: &str, ms: u64) -> Result<(), ToolError> {
-        run_tool(Command::new(script_path), text, Duration::from_millis(ms))
+        retry_busy(|| run_tool(Command::new(script_path), text, Duration::from_millis(ms)))
     }
 
     #[test]
@@ -879,7 +892,7 @@ mod tests {
     fn read_script(body: &str, timeout_ms: u64) -> Result<Vec<u8>, ToolError> {
         let d = tempfile::tempdir().unwrap();
         let p = script(d.path(), "reader", body);
-        run_read(Command::new(p), Duration::from_millis(timeout_ms))
+        retry_busy(|| run_read(Command::new(&p), Duration::from_millis(timeout_ms)))
     }
 
     #[test]

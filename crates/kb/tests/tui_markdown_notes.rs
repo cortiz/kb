@@ -113,10 +113,6 @@ fn the_preview_pane_draws_a_note_and_scrolls_it_smoothly() {
         "the note is longer than the pane:\n{screen}"
     );
     // each Shift-Down moves the view by one line
-    let before = s.rows();
-    s.send(SHIFT_DOWN);
-    s.wait_until("one line of scroll", |screen| screen.contains("↑ more"));
-    let after = s.rows();
     let pane = |rows: &[String]| -> Vec<String> {
         rows.iter()
             .skip(5)
@@ -124,6 +120,12 @@ fn the_preview_pane_draws_a_note_and_scrolls_it_smoothly() {
             .map(|r| r.chars().skip(80).collect::<String>())
             .collect()
     };
+    let before = s.rows();
+    s.send(SHIFT_DOWN);
+    s.wait_until("one line of scroll", |screen| {
+        screen.contains("↑ more") && pane(&s.rows()) != pane(&before)
+    });
+    let after = s.rows();
     assert_ne!(pane(&before), pane(&after));
     for _ in 0..30 {
         s.send(SHIFT_DOWN);

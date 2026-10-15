@@ -95,6 +95,77 @@ fn type_fields(fields: &DraftFields, out: &mut String) {
                 out.push_str(&format!("  symbol: {}\n", scalar(symbol)));
             }
         }
+        DraftFields::Runbook { steps } => {
+            if !steps.is_empty() {
+                out.push_str("steps:\n");
+                for step_val in steps {
+                    if let Some(obj) = step_val.as_object() {
+                        let mut first = true;
+                        let emit_kv = |out: &mut String, key: &str, val: &str, is_first: bool| {
+                            let prefix = if is_first { "  - " } else { "    " };
+                            out.push_str(&format!("{}{}: {}\n", prefix, key, scalar(val)));
+                        };
+                        if let Some(id) = obj.get("id").and_then(|v| v.as_str()) {
+                            emit_kv(out, "id", id, first);
+                            first = false;
+                        }
+                        if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
+                            emit_kv(out, "title", title, first);
+                            first = false;
+                        }
+                        if let Some(entry) = obj.get("entry").and_then(|v| v.as_str()) {
+                            emit_kv(out, "entry", entry, first);
+                            first = false;
+                        }
+                        if let Some(do_val) = obj.get("do") {
+                            let prefix = if first { "  - " } else { "    " };
+                            first = false;
+                            if let Some(s) = do_val.as_str() {
+                                if s.contains('\n') {
+                                    out.push_str(&format!("{}do: |\n", prefix));
+                                    for line in s.lines() {
+                                        out.push_str(&format!("      {}\n", line));
+                                    }
+                                } else {
+                                    out.push_str(&format!("{}do: {}\n", prefix, scalar(s)));
+                                }
+                            }
+                        }
+                        if let Some(note) = obj.get("note").and_then(|v| v.as_str()) {
+                            emit_kv(out, "note", note, first);
+                            first = false;
+                        }
+                        if let Some(vars_val) = obj.get("vars").and_then(|v| v.as_object()) {
+                            let prefix = if first { "  - " } else { "    " };
+                            first = false;
+                            out.push_str(&format!("{}vars: {{", prefix));
+                            let mut vfirst = true;
+                            for (vk, vv) in vars_val {
+                                if !vfirst {
+                                    out.push_str(", ");
+                                }
+                                vfirst = false;
+                                let val_str = match vv {
+                                    serde_json::Value::String(s) => scalar(s),
+                                    _ => vv.to_string(),
+                                };
+                                out.push_str(&format!("{}: {}", vk, val_str));
+                            }
+                            out.push_str("}\n");
+                        }
+                        if let Some(opt) = obj.get("optional").and_then(|v| v.as_bool()) {
+                            let prefix = if first { "  - " } else { "    " };
+                            first = false;
+                            out.push_str(&format!("{}optional: {}\n", prefix, opt));
+                        }
+                        if let Some(conf) = obj.get("confirm").and_then(|v| v.as_bool()) {
+                            let prefix = if first { "  - " } else { "    " };
+                            out.push_str(&format!("{}confirm: {}\n", prefix, conf));
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -310,6 +381,19 @@ impl Draft {
                 "# title: optional when the body starts with a \"# Heading\"",
                 "# Add \"private\" to tags to exclude this note from AI agents",
             ],
+            EntryType::Runbook => &[
+                "# steps:",
+                "#   - id: baseline              # optional: unique slug [a-z0-9-]",
+                "#     title: Check error rate   # mandatory: 1-120 chars, {{var}} allowed",
+                "#     entry: sumo/5xx           # one of entry or do",
+                "#     vars: { minutes: 30 }     # optional: bindings to literals or {{runbook_var}}",
+                "#     confirm: true             # optional: require confirmation in R2",
+                "#     optional: true            # optional: can be skipped in R2",
+                "#     note: Guidance text       # optional: multi-line note",
+                "#   - id: manual-step",
+                "#     title: Manual check",
+                "#     do: Check the dashboard   # manual instruction text",
+            ],
         };
         let at = text
             .find("\nvars:")
@@ -494,6 +578,7 @@ mod tests {
                 EntryType::Code => "# symbol: ",
                 EntryType::Prompt => "type: prompt",
                 EntryType::Note => "# Add \"private\" to tags",
+                EntryType::Runbook => "# steps:",
             };
             assert!(t.contains(optional), "{}:\n{t}", ty.name());
             assert_eq!(t.contains("```"), ty.has_payload(), "{}:\n{t}", ty.name());

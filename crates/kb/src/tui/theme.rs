@@ -70,7 +70,7 @@ pub struct Theme {
 }
 
 /// Fixed per type, readable on light and dark backgrounds (ANSI-256 indexes).
-pub const TYPE_COLORS: [(EntryType, u8); 7] = [
+pub const TYPE_COLORS: [(EntryType, u8); 8] = [
     (EntryType::Sql, 33),
     (EntryType::Sumo, 208),
     (EntryType::Cw, 106),
@@ -78,6 +78,7 @@ pub const TYPE_COLORS: [(EntryType, u8); 7] = [
     (EntryType::Prompt, 127),
     (EntryType::Link, 30),
     (EntryType::Code, 131),
+    (EntryType::Runbook, 178),
 ];
 
 /// The RGB value of an xterm-256 palette index.
@@ -369,6 +370,7 @@ mod tests {
             (EntryType::Prompt, 127),
             (EntryType::Link, 30),
             (EntryType::Code, 131),
+            (EntryType::Runbook, 178),
         ];
         for theme in [Theme::dark(), Theme::light()] {
             for (ty, idx) in expect {

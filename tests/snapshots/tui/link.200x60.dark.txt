@@ -1,6 +1,6 @@
  kb · ~/kb · 8 entries
  ›                                                                                                                                                                                                8 / 8
-  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0   runbook 0
 ┌ results ─────────────────────────────────────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ cmd    Deploy with secret token                                              ││ Very long documentation link                                                                                         │
 │        #deploy #prod                                                         ││ https://wiki.example.com/engineering/operations/runbooks/payments/incident-response/escalation-policy-and-contacts-f │
@@ -66,6 +66,7 @@
 1:194..200 fg=245
 2:1..8 fg=255 bg=24 bold
 2:70..78 fg=240
+2:79..90 fg=240
 3:0..1 fg=240
 3:1..10 fg=245
 3:10..81 fg=240

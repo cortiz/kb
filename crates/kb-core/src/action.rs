@@ -423,7 +423,7 @@ impl ActionService {
                     ));
                 }
             }
-            Some(EntryType::Sql) | Some(EntryType::Prompt) | None => {
+            Some(EntryType::Sql) | Some(EntryType::Prompt) | Some(EntryType::Runbook) | None => {
                 actions.push(Action::builtin(
                     "copy",
                     "Copy Payload",

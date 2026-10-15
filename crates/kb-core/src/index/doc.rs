@@ -18,6 +18,8 @@ pub struct Doc {
     pub updated: Option<String>,
     /// The entries a note links to with `[[id]]`, without repeats.
     pub links: Vec<String>,
+    /// Runbook steps: (step_index, step_id, entry_id) for runbook entries.
+    pub runbook_steps: Vec<(usize, String, Option<String>)>,
     /// FTS columns: title, tags, id, meta, payload, notes.
     pub cols: [String; 6],
 }
@@ -173,12 +175,21 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
             meta.extend(c.symbol.iter().cloned());
             code_repo = Some(fold(&c.repo));
         }
+        TypeFields::Runbook { steps } => {
+            for step in steps {
+                meta.push(step.id.clone());
+                meta.push(step.title.clone());
+                if let crate::runbook::StepTarget::Entry(ref entry_id) = step.target {
+                    meta.push(entry_id.clone());
+                }
+            }
+        }
         _ => {}
     }
     let id = entry.id();
     let tags: Vec<String> = entry.tags().to_vec();
     let mut links: Vec<String> = Vec::new();
-    let (payload, notes) = if ty == EntryType::Note {
+    let (payload, notes, runbook_steps) = if ty == EntryType::Note {
         for link in crate::entry::link::extract_links(entry.notes()) {
             if !links.contains(&link.target_id) {
                 links.push(link.target_id);
@@ -186,11 +197,31 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
         }
         let note = note_columns(entry.notes());
         meta.extend(note.meta);
-        (note.payload, String::new())
+        (note.payload, String::new(), Vec::new())
+    } else if ty == EntryType::Runbook {
+        let mut step_payload = Vec::new();
+        let mut rb_steps = Vec::new();
+        if let TypeFields::Runbook { steps } = entry.fields() {
+            for (idx, step) in steps.iter().enumerate() {
+                if let crate::runbook::StepTarget::Do(ref text) = step.target {
+                    step_payload.push(text.clone());
+                }
+                if let Some(ref note) = step.note {
+                    step_payload.push(note.clone());
+                }
+                rb_steps.push((
+                    idx,
+                    step.id.clone(),
+                    step.target.entry_id().map(str::to_string),
+                ));
+            }
+        }
+        (step_payload.join("\n"), entry.notes().to_string(), rb_steps)
     } else {
         (
             entry.payload().map(|p| p.text.clone()).unwrap_or_default(),
             entry.notes().to_string(),
+            Vec::new(),
         )
     };
     Some(Doc {
@@ -213,6 +244,7 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
         code_repo,
         updated: entry.updated().map(str::to_string),
         links,
+        runbook_steps,
     })
 }
 

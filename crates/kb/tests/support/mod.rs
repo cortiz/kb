@@ -73,6 +73,22 @@ pub fn notes_kb() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
+/// The runbook fixtures in `crates/kb/tests/fixtures/runbooks`.
+pub fn runbook_fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runbooks")
+}
+
+pub fn add_runbooks(root: &Path) {
+    copy_dir(&runbook_fixtures(), &root.join("runbook"));
+}
+
+/// `search_kb()` plus the runbook fixtures.
+pub fn runbooks_kb() -> (tempfile::TempDir, PathBuf) {
+    let (dir, root) = search_kb();
+    add_runbooks(&root);
+    (dir, root)
+}
+
 /// A home that does not exist: tests that do not care about config get no config.
 pub const NOWHERE: &str = "/nonexistent-kb-test-home";
 

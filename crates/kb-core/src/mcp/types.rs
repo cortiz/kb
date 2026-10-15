@@ -24,7 +24,7 @@ pub struct EntryView {
     pub vars: BTreeMap<String, VarDeclarationView>,
     pub version: String,
     pub unreviewed: bool,
-    pub used_in: Vec<String>,
+    pub used_in: Vec<UsedInEntry>,
     pub findings: Vec<FindingView>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_payload: Option<String>,
@@ -32,6 +32,17 @@ pub struct EntryView {
     pub resolved_fields: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<EntryLinksView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steps: Option<Vec<serde_json::Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding_table: Option<Vec<serde_json::Value>>,
+}
+
+/// A reference from a runbook to this entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UsedInEntry {
+    pub id: String,
+    pub title: String,
 }
 
 /// Representation of a declared variable in an entry.
@@ -107,6 +118,8 @@ pub struct ChangeSet {
     pub set_vars: Option<BTreeMap<String, VarDeclarationView>>,
     #[serde(default)]
     pub remove_vars: Option<Vec<String>>,
+    #[serde(default)]
+    pub steps: Option<Vec<serde_json::Value>>,
 }
 
 /// Review state tracking for an entry.
@@ -184,6 +197,8 @@ pub struct CreateEntryRequest {
     #[serde(default)]
     pub fields: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
+    pub steps: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
     pub dry_run: bool,
@@ -215,7 +230,7 @@ pub struct UpdateEntryResponse {
     pub id: String,
     pub version: String,
     pub findings: Vec<FindingView>,
-    pub used_in: Vec<String>,
+    pub used_in: Vec<UsedInEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run_diff: Option<String>,
 }
@@ -245,6 +260,8 @@ mod tests {
             resolved_payload: None,
             resolved_fields: None,
             links: None,
+            steps: None,
+            binding_table: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         let back: EntryView = serde_json::from_str(&json).unwrap();

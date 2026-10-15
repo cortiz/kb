@@ -4,8 +4,8 @@ use std::process::ExitCode;
 
 use clap::Args;
 use kb_core::shell::completions::{
-    CompletionKind, complete_entries, complete_tags, complete_types, complete_var_values,
-    complete_vars,
+    CompletionKind, complete_entries, complete_runbooks, complete_tags, complete_types,
+    complete_var_values, complete_vars,
 };
 
 use crate::output::CliError;
@@ -69,6 +69,13 @@ pub fn run_complete(
                 for val in values {
                     println!("{val}");
                 }
+            }
+        }
+        CompletionKind::Runbooks => {
+            let prefix = args.args.first().map(|s| s.as_str());
+            let runbooks = complete_runbooks(root, prefix);
+            for (id, title) in runbooks {
+                println!("{id}\t{title}");
             }
         }
     }

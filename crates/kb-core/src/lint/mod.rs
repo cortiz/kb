@@ -105,6 +105,21 @@ rule_codes! {
     NoteOversized = 72, "note-oversized", Warning;
     NoteEmpty = 73, "note-empty", Info;
     EntryLinkBroken = 74, "entry-link-broken", Warning;
+    RunbookNoSteps = 80, "runbook-no-steps", Error;
+    StepEntryAndDo = 81, "step-entry-and-do", Error;
+    StepMissingEntry = 82, "step-missing-entry", Error;
+    StepIsRunbook = 83, "step-is-runbook", Error;
+    DuplicateStepId = 84, "duplicate-step-id", Error;
+    InvalidStepId = 85, "invalid-step-id", Error;
+    InvalidBinding = 86, "invalid-binding", Error;
+    BindingUnknownVar = 87, "binding-unknown-var", Error;
+    BindingNotInEntry = 88, "binding-not-in-entry", Error;
+    TooManySteps = 89, "too-many-steps", Error;
+    LongRunbook = 90, "long-runbook", Warning;
+    StepEntryHasErrors = 91, "step-entry-has-errors", Warning;
+    UnusedRunbookVar = 92, "unused-runbook-var", Warning;
+    UnboundStepVar = 93, "unbound-step-var", Info;
+    ImplicitStepId = 94, "implicit-step-id", Info;
 }
 
 impl fmt::Display for RuleCode {
@@ -117,11 +132,19 @@ impl std::str::FromStr for RuleCode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        RuleCode::ALL
-            .iter()
-            .copied()
-            .find(|c| c.to_string() == s)
-            .ok_or_else(|| format!("unknown rule code {s:?}"))
+        if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.to_string() == s) {
+            return Ok(c);
+        }
+        if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == s) {
+            return Ok(c);
+        }
+        if let Some(rest) = s.strip_prefix("KB0")
+            && let Some((_, slug)) = rest.split_once('-')
+            && let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == slug)
+        {
+            return Ok(c);
+        }
+        Err(format!("unknown rule code {s:?}"))
     }
 }
 
@@ -277,22 +300,39 @@ pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
         ..Default::default()
     };
     let mut linking_notes = Vec::new();
+    let mut runbooks = Vec::new();
     for file in &walked.files {
         let bytes = std::fs::read(&file.abs_path).map_err(|e| LintError::Io {
             path: file.abs_path.clone(),
             message: e.to_string(),
         })?;
-        if let Some(entry) = lint_file(file, bytes, &mut report)
-            && entry.entry_type() == Some(crate::entry::EntryType::Note)
-            && entry.notes().contains("[[")
-        {
-            linking_notes.push(entry);
+        if let Some(entry) = lint_file(file, bytes, &mut report) {
+            if entry.entry_type() == Some(crate::entry::EntryType::Note)
+                && entry.notes().contains("[[")
+            {
+                linking_notes.push(entry);
+            } else if entry.entry_type() == Some(crate::entry::EntryType::Runbook) {
+                runbooks.push(entry);
+            }
         }
     }
+    let files_with_errors: std::collections::HashSet<String> = report
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .filter_map(|f| f.id.clone())
+        .collect();
     if !linking_notes.is_empty() {
         report
             .findings
             .extend(broken_links(&report.root.clone(), &linking_notes));
+    }
+    if !runbooks.is_empty() {
+        report.findings.extend(crate::runbook::lint::check_runbooks(
+            &report.root.clone(),
+            &runbooks,
+            &files_with_errors,
+        ));
     }
     report
         .findings
@@ -646,7 +686,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture produces {code}"));
             assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
         }
-        assert_eq!(errors.len(), 41);
+        assert_eq!(errors.len(), 51);
     }
 
     #[test]
@@ -670,7 +710,7 @@ mod tests {
                 code.number()
             );
         }
-        assert_eq!(RuleCode::ALL.len(), 54);
+        assert_eq!(RuleCode::ALL.len(), 69);
     }
 
     #[test]

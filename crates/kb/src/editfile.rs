@@ -209,6 +209,71 @@ pub fn add_with_editor(
     }
 }
 
+pub fn edit_and_save_runbook(
+    platform: &impl Platform,
+    kb: &mut Kb,
+    settings: &kb_core::config::Settings,
+    template: &str,
+    target_id: &str,
+    json: bool,
+) -> Result<ExitCode, CliError> {
+    let tty = platform
+        .open_tty()
+        .map_err(|_| CliError::new("usage", "no terminal to run the editor on"))?;
+    let signals = Signals::register();
+    let temp = platform
+        .private_temp_file("md", template.as_bytes())
+        .map_err(|e| CliError::new("io", format!("could not make a temporary file: {e}")))?;
+    let editor = platform.resolve_editor(settings.editor());
+    loop {
+        let status = platform
+            .run_editor(&editor, temp.path(), &tty, &|| signals.received().is_some())
+            .map_err(|e| CliError::new("io", format!("could not start the editor: {e}")))?;
+        let Some(status) = status else {
+            return Ok(ExitCode::from(
+                u8::try_from(exit_code_for_signal(signals.received().unwrap_or(15))).unwrap_or(130),
+            ));
+        };
+        if !status.success() {
+            eprintln!("kb: the editor exited with an error; nothing was saved");
+            return Ok(ExitCode::from(130));
+        }
+        let bytes = temp
+            .read_bytes()
+            .map_err(|e| CliError::new("io", format!("could not read the edited file: {e}")))?;
+        if bytes == template.as_bytes() {
+            eprintln!("kb: nothing changed; nothing was saved");
+            return Ok(ExitCode::from(130));
+        }
+        let findings = check_text(target_id, bytes.clone());
+        let too_large = bytes.len() > MAX_FILE_BYTES;
+        let secrets = findings.iter().any(is_secret);
+        let errors = findings.iter().any(|f| f.severity == Severity::Error);
+        if !errors && !secrets && !too_large {
+            print_findings(&findings);
+            return finish(kb, &tty, target_id, bytes, findings, json, settings);
+        }
+        print_findings(&findings);
+        if too_large {
+            eprintln!(
+                "kb: the entry is {} bytes; entries are limited to {MAX_FILE_BYTES}",
+                bytes.len()
+            );
+        }
+        let allow_save = !secrets && !too_large;
+        match prompt_choice(&tty, &signals, allow_save) {
+            Choice::Edit => {}
+            Choice::Discard => return Ok(ExitCode::from(130)),
+            Choice::Save => {
+                eprintln!(
+                    "kb: saved {target_id} with errors; it stays out of search until they are fixed"
+                );
+                return finish(kb, &tty, target_id, bytes, findings, json, settings);
+            }
+        }
+    }
+}
+
 fn finish(
     kb: &mut Kb,
     _tty: &File,

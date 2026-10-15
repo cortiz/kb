@@ -541,6 +541,78 @@ impl Kb {
         found
     }
 
+    /// The runbooks that reference `id`, by ID. The index is brought up to date first and answers;
+    /// without one the runbooks are walked.
+    pub fn runbooks_referencing(&mut self, id: &str) -> Vec<String> {
+        let _ = self.refresh();
+        let from_index = self.held.as_ref().and_then(|index| {
+            let mut stmt = index
+                .conn
+                .prepare(
+                    "SELECT DISTINCT runbook_id FROM runbook_steps WHERE entry_id = ?1 ORDER BY runbook_id",
+                )
+                .ok()?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0)).ok()?;
+            Some(rows.flatten().collect::<Vec<_>>())
+        });
+        if let Some(found) = from_index {
+            return found;
+        }
+        let mut found = Vec::new();
+        for file in self.walk().map(|w| w.files).unwrap_or_default() {
+            let Ok(bytes) = self.reader.read(&file.abs_path) else {
+                continue;
+            };
+            if let Some(entry) = parse_entry(&file.id, &file.rel_path, bytes).entry
+                && entry.entry_type() == Some(EntryType::Runbook)
+                && let Some(steps) = entry.runbook_steps()
+                && steps.iter().any(|s| s.target.entry_id() == Some(id))
+            {
+                found.push(file.id.clone());
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// The runbook steps that reference `id`, returning (runbook_id, step_id) pairs.
+    pub fn runbook_step_references(&mut self, id: &str) -> Vec<(String, String)> {
+        let _ = self.refresh();
+        let from_index = self.held.as_ref().and_then(|index| {
+            let mut stmt = index
+                .conn
+                .prepare(
+                    "SELECT runbook_id, step_id FROM runbook_steps WHERE entry_id = ?1 ORDER BY runbook_id, position",
+                )
+                .ok()?;
+            let rows = stmt
+                .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+                .ok()?;
+            Some(rows.flatten().collect::<Vec<_>>())
+        });
+        if let Some(found) = from_index {
+            return found;
+        }
+        let mut found = Vec::new();
+        for file in self.walk().map(|w| w.files).unwrap_or_default() {
+            let Ok(bytes) = self.reader.read(&file.abs_path) else {
+                continue;
+            };
+            if let Some(entry) = parse_entry(&file.id, &file.rel_path, bytes).entry
+                && entry.entry_type() == Some(EntryType::Runbook)
+                && let Some(steps) = entry.runbook_steps()
+            {
+                for s in steps {
+                    if s.target.entry_id() == Some(id) {
+                        found.push((file.id.clone(), s.id.clone()));
+                    }
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// The errors `kb lint` would report for this entry's file (empty when it is valid).
     pub fn lint_entry(&self, id: &str) -> Result<Vec<crate::lint::Finding>, KbError> {
         let (path, rel) = self.entry_file(id)?;
@@ -689,12 +761,29 @@ impl Kb {
         if let Some(want_unreviewed) = q.unreviewed {
             cands.retain(|c| state.is_unreviewed(&c.id) == want_unreviewed);
         }
-        cands.sort_by(|a, b| {
-            a.tier
-                .cmp(&b.tier)
-                .then(b.score.total_cmp(&a.score))
-                .then(a.id.cmp(&b.id))
-        });
+        if let Some(ref rb_id) = q.runbook {
+            let mut step_order: HashMap<String, usize> = HashMap::new();
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT entry_id, min(position) FROM runbook_steps WHERE runbook_id = ? GROUP BY entry_id",
+            )
+                && let Ok(rows) = stmt.query_map([rb_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))) {
+                    for r in rows.flatten() {
+                        step_order.insert(r.0, r.1);
+                    }
+                }
+            cands.sort_by(|a, b| {
+                let pos_a = step_order.get(&a.id).copied().unwrap_or(usize::MAX);
+                let pos_b = step_order.get(&b.id).copied().unwrap_or(usize::MAX);
+                pos_a.cmp(&pos_b).then_with(|| a.id.cmp(&b.id))
+            });
+        } else {
+            cands.sort_by(|a, b| {
+                a.tier
+                    .cmp(&b.tier)
+                    .then(b.score.total_cmp(&a.score))
+                    .then(a.id.cmp(&b.id))
+            });
+        }
         let total = cands.len();
         if let Some(hook) = &self.after_query {
             hook();
@@ -835,6 +924,13 @@ fn filters(q: &Query) -> (String, Vec<Value>) {
     for r in &q.repos {
         conds.push("e.code_repo = ?".into());
         params.push(Value::Text(r.clone()));
+    }
+    if let Some(rb) = &q.runbook {
+        conds.push("EXISTS (SELECT 1 FROM runbook_steps rs WHERE rs.runbook_id = ? AND rs.entry_id = e.id)".into());
+        params.push(Value::Text(rb.clone()));
+    }
+    if q.used_by_runbook {
+        conds.push("EXISTS (SELECT 1 FROM runbook_steps rs WHERE rs.entry_id = e.id)".into());
     }
     (conds.join(" AND "), params)
 }

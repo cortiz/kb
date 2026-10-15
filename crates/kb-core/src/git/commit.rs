@@ -85,6 +85,30 @@ pub fn auto_commit_operation(
     id: &str,
     paths: &[PathBuf],
 ) -> Result<AutoCommitOutcome, GitError> {
+    let message = format_commit_message(settings.git_commit_template(), action, id);
+    let is_add = action == AutoCommitAction::Add;
+    auto_commit_paths_internal(root, git, settings, &message, paths, is_add)
+}
+
+/// Performs a path-limited auto-commit with a custom commit message.
+pub fn auto_commit_paths_with_message(
+    root: &Path,
+    git: &impl GitRunner,
+    settings: &Settings,
+    message: &str,
+    paths: &[PathBuf],
+) -> Result<AutoCommitOutcome, GitError> {
+    auto_commit_paths_internal(root, git, settings, message, paths, false)
+}
+
+fn auto_commit_paths_internal(
+    root: &Path,
+    git: &impl GitRunner,
+    settings: &Settings,
+    message: &str,
+    paths: &[PathBuf],
+    is_add: bool,
+) -> Result<AutoCommitOutcome, GitError> {
     if !settings.git_auto_commit() {
         return Ok(AutoCommitOutcome::SkippedDisabled);
     }
@@ -100,10 +124,7 @@ pub fn auto_commit_operation(
         return Ok(AutoCommitOutcome::SkippedMissingIdentity { error: err });
     }
 
-    // 3. Format message
-    let message = format_commit_message(settings.git_commit_template(), action, id);
-
-    // 4. Commit exactly the given paths (`--only`), leaving everything else staged or not alone.
+    // 3. Commit exactly the given paths (`--only`), leaving everything else staged or not alone.
     //    New files must be added first; for the rest `--only` reads the working tree itself, so
     //    the `git add` process is only spent when git says it does not know a path.
     let path_strs: Vec<String> = paths
@@ -123,14 +144,14 @@ pub fn auto_commit_operation(
             other => other.map(|_| ()),
         }
     };
-    let mut commit_args = vec!["commit", "--only", "-m", &message, "--"];
+    let mut commit_args = vec!["commit", "--only", "-m", message, "--"];
     commit_args.extend(path_strs.iter().map(String::as_str));
-    if action == AutoCommitAction::Add {
+    if is_add {
         add(&path_strs)?;
     }
     let out = match git.run_git(root, &commit_args) {
         Err(GitError::CommandFailed { stderr, .. })
-            if action != AutoCommitAction::Add && stderr.contains("did not match any file") =>
+            if !is_add && stderr.contains("did not match any file") =>
         {
             add(&path_strs)?;
             git.run_git(root, &commit_args)?
@@ -138,7 +159,7 @@ pub fn auto_commit_operation(
         other => other?,
     };
 
-    // 5. The new commit's hash is in git's own summary line: `[main abc1234] message`
+    // 4. The new commit's hash is in git's own summary line: `[main abc1234] message`
     let from_summary = out
         .lines()
         .find_map(|l| l.strip_prefix('[')?.split_once(']'))
@@ -153,7 +174,7 @@ pub fn auto_commit_operation(
 
     Ok(AutoCommitOutcome::Committed {
         commit_hash,
-        message,
+        message: message.to_string(),
     })
 }
 

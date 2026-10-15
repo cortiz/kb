@@ -1,5 +1,5 @@
  New entry · from clipboard · detected cw (high)
- Type      sql sumo [cw] cmd prompt link code note
+ Type      sql sumo [cw] cmd prompt link code note runbook
 
 ▸Title     Authorizer p99 latency
  Tags      lambda
@@ -39,6 +39,7 @@
 1:36..40 fg=245
 1:41..45 fg=245
 1:46..50 fg=245
+1:51..58 fg=245
 3:0..6 bold
 3:33..34 reverse
 4:0..5 fg=245

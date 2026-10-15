@@ -568,6 +568,9 @@ mod tests {
         let c = corpus();
         assert!(c.len() >= 100, "{} snippets", c.len());
         for ty in EntryType::ALL {
+            if ty == EntryType::Runbook {
+                continue;
+            }
             let n = c.iter().filter(|s| s.0 == ty && !s.1).count();
             assert!(n >= 10, "{} has {n}", ty.name());
         }

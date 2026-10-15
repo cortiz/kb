@@ -180,6 +180,7 @@ fn delete_entry(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM entry_tags WHERE id = ?1", [id])?;
     conn.execute("DELETE FROM entry_vars WHERE id = ?1", [id])?;
     conn.execute("DELETE FROM entry_links WHERE source_id = ?1", [id])?;
+    conn.execute("DELETE FROM runbook_steps WHERE runbook_id = ?1", [id])?;
     Ok(())
 }
 
@@ -237,6 +238,14 @@ fn insert_doc(conn: &Connection, id: &str, doc: &Doc, vocab: bool) -> rusqlite::
             "INSERT OR IGNORE INTO entry_vars(id, name) VALUES (?1,?2)",
             params![id, v],
         )?;
+    }
+    for (idx, step_id, entry_id) in &doc.runbook_steps {
+        if let Some(target) = entry_id {
+            conn.execute(
+                "INSERT INTO runbook_steps(runbook_id, step_id, position, entry_id) VALUES (?1,?2,?3,?4)",
+                params![id, step_id, *idx as i64, target],
+            )?;
+        }
     }
     Ok(())
 }

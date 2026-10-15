@@ -79,7 +79,7 @@ fn unknown_type_is_reported_with_fix() {
     .unwrap();
     let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
     assert!(
-        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code, note\n  fix: use \"sumo\"\n"),
+        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code, note, runbook\n  fix: use \"sumo\"\n"),
         "{out}"
     );
     assert!(out.ends_with(", 1 error, 0 warnings\n"), "{out}");
@@ -390,5 +390,143 @@ fn broken_entry_links_in_notes_are_warnings_with_a_suggestion() {
     assert!(
         out.contains("2 warnings") && !out.contains("5xx-by-authorizer]]"),
         "{out}"
+    );
+}
+
+#[test]
+fn runbook_lint_rules_reported_and_exit_1() {
+    let (_d, root) = valid_kb();
+    fs::write(
+        root.join("runbook-bad.md"),
+        r#"---
+kb_format: 1
+type: runbook
+title: Bad Runbook
+steps:
+  - id: step-1
+    title: Bad step
+    entry: nonexistent/missing-entry
+---
+"#,
+    )
+    .unwrap();
+    let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
+    assert_eq!(code, 1);
+    assert!(out.contains("KB082-step-missing-entry"), "{out}");
+    assert!(
+        out.contains("referenced entry `nonexistent/missing-entry` does not exist"),
+        "{out}"
+    );
+}
+
+#[test]
+fn runbook_lint_json_output() {
+    let (_d, root) = valid_kb();
+    fs::write(
+        root.join("runbook-bad.md"),
+        r#"---
+kb_format: 1
+type: runbook
+title: Bad Runbook
+steps:
+  - id: step-1
+    title: Bad step
+    entry: nonexistent/missing-entry
+---
+"#,
+    )
+    .unwrap();
+    let (out, code) = stdout(kb().arg("--root").arg(&root).args(["lint", "--json"]));
+    assert_eq!(code, 1);
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["summary"]["failed"], true);
+    let finding = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["code"] == "KB082-step-missing-entry")
+        .expect("finding for KB082-step-missing-entry");
+    assert_eq!(finding["severity"], "error");
+    assert_eq!(finding["path"], "runbook-bad.md");
+}
+
+#[test]
+fn runbook_lint_fix_broken_reference_with_auto_commit() {
+    let (_d, root) = valid_kb();
+    // Initialize git repo in root
+    std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.name", "Tester"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["config", "user.email", "tester@example.com"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .args(["commit", "-m", "initial"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+
+    // Create a runbook with a typo pointing near an existing entry in valid_kb: sumo/5xx-by-authorizer
+    let rb_path = root.join("deploy.md");
+    fs::write(
+        &rb_path,
+        r#"---
+kb_format: 1
+type: runbook
+title: Deploy
+steps:
+  - id: check
+    title: Check error rate
+    # Notice comment
+    entry: sumo/5xx-by-authorzer
+---
+Notes.
+"#,
+    )
+    .unwrap();
+
+    // Lint should fail with suggestion
+    let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
+    assert_eq!(code, 1);
+    assert!(out.contains("KB082-step-missing-entry"));
+    assert!(out.contains("did you mean `sumo/5xx-by-authorizer`?"));
+
+    // Run kb lint --fix --yes
+    let (out_fix, code_fix) = stdout(
+        kb().arg("--root")
+            .arg(&root)
+            .args(["lint", "--fix", "--yes"]),
+    );
+    assert_eq!(code_fix, 0, "fixed runbook should pass lint: {out_fix}");
+
+    // Check file content updated preserving comments
+    let updated_content = fs::read_to_string(&rb_path).unwrap();
+    assert!(updated_content.contains("entry: sumo/5xx-by-authorizer"));
+    assert!(updated_content.contains("# Notice comment"));
+
+    // Check git commit message
+    let git_log = std::process::Command::new("git")
+        .args(["log", "-1", "--pretty=%B"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let commit_msg = String::from_utf8(git_log.stdout).unwrap();
+    assert!(
+        commit_msg.contains("fix: update broken runbook references"),
+        "commit msg: {commit_msg}"
     );
 }

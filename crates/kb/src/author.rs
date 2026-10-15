@@ -376,13 +376,22 @@ fn git_tracks(platform: &impl Platform, root: &Path, rel: &str) -> bool {
 /// rename; usage and remembered values follow. The `[[old]]` links of notes are pointed at the new
 /// ID, and the rename and those edits are one commit. Returns what happened and how, and the notes
 /// whose links changed.
+#[allow(clippy::type_complexity)]
 pub fn move_entry(
     platform: &impl Platform,
     kb: &mut Kb,
     old: &str,
     new: &str,
     settings: &kb_core::config::Settings,
-) -> Result<(kb_core::author::fsops::Renamed, &'static str, Vec<String>), FsError> {
+) -> Result<
+    (
+        kb_core::author::fsops::Renamed,
+        &'static str,
+        Vec<String>,
+        Vec<String>,
+    ),
+    FsError,
+> {
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("rename");
     let mover = |from: &Path, to: &Path| -> io::Result<()> {
@@ -407,6 +416,9 @@ pub fn move_entry(
     // notes that linked to the old ID (the renamed note too, when it linked to itself)
     let linkers = kb.notes_linking_to(old);
     let relinked = kb.retarget_links(&linkers, old, new)?;
+    let referencing_rbs = kb.runbooks_referencing(old);
+    let updated_runbooks = kb.retarget_runbook_steps(&referencing_rbs, old, new)?;
+
     let old_rel = PathBuf::from(format!("{old}.md"));
     let new_rel = PathBuf::from(format!("{new}.md"));
     let mv_id = format!("{old} -> {new}");
@@ -417,18 +429,48 @@ pub fn move_entry(
             paths.push(rel);
         }
     }
-    let outcome = kb_core::git::commit::auto_commit_operation(
-        &root,
-        &crate::platform::SystemGitRunner,
-        settings,
-        kb_core::git::commit::AutoCommitAction::Mv,
-        &mv_id,
-        &paths,
-    );
+    for id in &updated_runbooks {
+        let rel = PathBuf::from(format!("{id}.md"));
+        if !paths.contains(&rel) {
+            paths.push(rel);
+        }
+    }
+    let outcome = if !updated_runbooks.is_empty() {
+        let subject = kb_core::git::commit::format_commit_message(
+            settings.git_commit_template(),
+            kb_core::git::commit::AutoCommitAction::Mv,
+            &mv_id,
+        );
+        let body = format!(
+            "\n\nUpdated references in:\n{}",
+            updated_runbooks
+                .iter()
+                .map(|rb| format!("- {rb}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let msg = format!("{subject}{body}");
+        kb_core::git::commit::auto_commit_paths_with_message(
+            &root,
+            &crate::platform::SystemGitRunner,
+            settings,
+            &msg,
+            &paths,
+        )
+    } else {
+        kb_core::git::commit::auto_commit_operation(
+            &root,
+            &crate::platform::SystemGitRunner,
+            settings,
+            kb_core::git::commit::AutoCommitAction::Mv,
+            &mv_id,
+            &paths,
+        )
+    };
     if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
         eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
     }
-    Ok((renamed, method.get(), relinked))
+    Ok((renamed, method.get(), relinked, updated_runbooks))
 }
 
 /// Deletes an entry with `git rm` when it is tracked, else (or when git fails) from the disk.
@@ -436,8 +478,18 @@ pub fn delete_entry(
     platform: &impl Platform,
     kb: &mut Kb,
     id: &str,
+    force: bool,
     settings: &kb_core::config::Settings,
 ) -> Result<&'static str, FsError> {
+    if !force {
+        let rbs = kb.runbooks_referencing(id);
+        if !rbs.is_empty() {
+            return Err(FsError::ReferencedByRunbooks {
+                id: id.to_string(),
+                runbooks: rbs,
+            });
+        }
+    }
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("delete");
     let remover = |path: &Path| -> io::Result<()> {
@@ -488,11 +540,18 @@ pub fn run_mv(
         return Ok(ExitCode::SUCCESS);
     }
     match move_entry(platform, &mut kb, old, new, &loaded.settings) {
-        Ok((renamed, method, relinked)) => {
+        Ok((renamed, method, relinked, updated_runbooks)) => {
             if json {
                 println!(
                     "{}",
-                    serde_json::json!({ "id": renamed.to, "from": renamed.from, "to": renamed.to, "method": method, "links_updated": relinked })
+                    serde_json::json!({
+                        "id": renamed.to,
+                        "from": renamed.from,
+                        "to": renamed.to,
+                        "method": method,
+                        "links_updated": relinked,
+                        "runbooks_updated": updated_runbooks,
+                    })
                 );
             } else {
                 println!("renamed {} -> {} ({method})", renamed.from, renamed.to);
@@ -502,6 +561,14 @@ pub fn run_mv(
                         relinked.len(),
                         if relinked.len() == 1 { "" } else { "s" },
                         relinked.join(", ")
+                    );
+                }
+                if !updated_runbooks.is_empty() {
+                    println!(
+                        "updated references in {} runbook{}: {}",
+                        updated_runbooks.len(),
+                        if updated_runbooks.len() == 1 { "" } else { "s" },
+                        updated_runbooks.join(", ")
                     );
                 }
             }
@@ -522,6 +589,7 @@ pub fn run_rm(
     loaded: &Loaded,
     id: &str,
     yes: bool,
+    force: bool,
     json: bool,
 ) -> Result<ExitCode, CliError> {
     let mut kb = Kb::open(root).map_err(io_error)?;
@@ -529,6 +597,30 @@ pub fn run_rm(
     if kb.entry_path(id).is_err() {
         eprintln!("kb: no entry with ID \"{id}\"");
         return Ok(ExitCode::from(1));
+    }
+    let runbook_refs = kb.runbook_step_references(id);
+    if !runbook_refs.is_empty() {
+        if !force {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "error": format!("entry '{id}' is referenced by runbook(s); use --force to delete"),
+                        "runbooks": runbook_refs.iter().map(|(rb, step)| {
+                            serde_json::json!({ "runbook": rb, "step": step })
+                        }).collect::<Vec<_>>()
+                    })
+                );
+            } else {
+                eprintln!("kb: cannot delete '{id}': referenced by runbook(s):");
+                for (rb, step) in &runbook_refs {
+                    eprintln!("  - {rb} (step: {step})");
+                }
+            }
+            return Ok(ExitCode::from(1));
+        } else {
+            eprintln!("kb: warning: '{id}' is referenced by runbook(s); deleting anyway");
+        }
     }
     // notes that link here would be left with a broken `[[link]]`
     let referenced_by: Vec<String> = kb
@@ -574,7 +666,7 @@ pub fn run_rm(
             return Ok(ExitCode::from(130));
         }
     }
-    match delete_entry(platform, &mut kb, id, &loaded.settings) {
+    match delete_entry(platform, &mut kb, id, force, &loaded.settings) {
         Ok(method) => {
             if json {
                 println!("{}", serde_json::json!({ "id": id, "method": method }));

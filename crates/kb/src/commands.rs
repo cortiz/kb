@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod note;
 pub mod pick;
 pub mod review;
+pub mod runbook;
 pub mod shell;
 pub mod sync;
 
@@ -52,12 +53,16 @@ pub enum ShowMode {
     Json,
     /// The absolute path of the entry's file.
     File,
+    /// Runbook checklist.
+    Checklist { resolve: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ShowOptions {
     pub mode: ShowMode,
     pub no_color: bool,
+    pub flags: Vec<(String, String)>,
+    pub yes: bool,
 }
 
 /// What happens to the entry the UI returns.
@@ -203,6 +208,43 @@ fn finish_use(kb: &Kb, settings: &Settings, id: &str, used: &[varcli::Used], rem
 const SECRET_NOTICE: &str =
     "kb: the clipboard now holds a secret; clipboard managers may keep a history";
 
+pub fn resolve_runbook_checklist(
+    kb: &Kb,
+    runbook: &kb_core::entry::Entry,
+    runbook_values: &std::collections::HashMap<String, String>,
+) -> Result<String, CliError> {
+    let checklist = kb_core::runbook::checklist::generate_resolved_checklist(
+        runbook,
+        runbook_values,
+        |entry_id, step_vars| {
+            let step_entry = kb.entry(entry_id).ok()?;
+            let fence = kb_core::runbook::checklist::entry_fence_info(&step_entry);
+            let step_plan = varres::plan_vars(&step_entry);
+            let mut values_map = varres::Values::new();
+            for planned in &step_plan.vars {
+                if planned.var.kind == kb_core::vars::VarKind::Secret {
+                    continue;
+                }
+                if let Some(val) = step_vars.get(&planned.var.name) {
+                    values_map.insert(planned.var.name.clone(), varres::Value::plain(val.clone()));
+                } else if let Some(ref def) = planned.var.default {
+                    values_map.insert(planned.var.name.clone(), varres::Value::plain(def.clone()));
+                }
+            }
+            if let Ok(resolved) =
+                varres::resolve_for_target(&step_plan, &values_map, varres::ResolutionTarget::Mcp)
+            {
+                resolved.primary().map(|o| (o.text.clone(), fence))
+            } else if let Some(p) = step_entry.payload() {
+                Some((p.text.clone(), fence))
+            } else {
+                None
+            }
+        },
+    );
+    Ok(checklist)
+}
+
 /// Resolves the variables of `id`, then copies or prints the result and records the use (`kb use`,
 /// `kb copy`, and Enter in a UI that returned an entry with variables).
 fn deliver(
@@ -219,7 +261,11 @@ fn deliver(
     let mut used = Vec::new();
     let mut fields = Vec::new();
     let text = if plan.is_empty() {
-        kb.pick(id, PrintMode::Payload).map_err(io_error)?
+        if entry.entry_type() == Some(EntryType::Runbook) {
+            resolve_runbook_checklist(kb, &entry, &std::collections::HashMap::new())?
+        } else {
+            kb.pick(id, PrintMode::Payload).map_err(io_error)?
+        }
     } else {
         let (memory, _) = kb.remembered(id);
         let mut tty = if opts.yes || !platform.has_terminal() {
@@ -245,10 +291,18 @@ fn deliver(
                 secret = resolved.has_secret;
                 used = report;
                 fields = other_fields(&resolved);
-                resolved
-                    .primary()
-                    .map(|o| o.text.clone())
-                    .ok_or_else(|| CliError::new("io", format!("{id} has nothing to copy")))?
+                if entry.entry_type() == Some(EntryType::Runbook) {
+                    let mut runbook_vals = std::collections::HashMap::new();
+                    for (k, v) in &values {
+                        runbook_vals.insert(k.clone(), v.reveal().to_string());
+                    }
+                    resolve_runbook_checklist(kb, &entry, &runbook_vals)?
+                } else {
+                    resolved
+                        .primary()
+                        .map(|o| o.text.clone())
+                        .ok_or_else(|| CliError::new("io", format!("{id} has nothing to copy")))?
+                }
             }
         }
     };
@@ -466,7 +520,13 @@ pub fn run_pick(
             Ok(ExitCode::SUCCESS)
         }
         PostPick::Show(options) => {
-            write_stdout(&show_entry(platform, &kb, &loaded.settings, id, *options)?);
+            write_stdout(&show_entry(
+                platform,
+                &kb,
+                &loaded.settings,
+                id,
+                options.clone(),
+            )?);
             Ok(ExitCode::SUCCESS)
         }
     }
@@ -487,6 +547,16 @@ fn show_entry(
     options: ShowOptions,
 ) -> Result<String, CliError> {
     match options.mode {
+        ShowMode::Checklist { .. } => {
+            let entry = kb.entry(id).map_err(io_error)?;
+            if entry.entry_type() != Some(EntryType::Runbook) {
+                return Err(CliError::new(
+                    "usage",
+                    format!("{id}: only runbooks can be displayed as checklists"),
+                ));
+            }
+            Ok(kb_core::runbook::checklist::generate_checklist(&entry))
+        }
         ShowMode::Raw => kb.pick(id, PrintMode::Payload).map_err(io_error),
         ShowMode::Json => kb.pick(id, PrintMode::Json).map_err(io_error),
         ShowMode::File => kb.pick(id, PrintMode::Path).map_err(io_error),
@@ -1310,6 +1380,42 @@ pub fn run_show(
     let json = options.mode == ShowMode::Json;
     match resolve_or_report(platform, &mut kb, text, json)? {
         Next::Entry(id) => {
+            if let ShowMode::Checklist { resolve: true } = options.mode {
+                let entry = kb.entry(&id).map_err(io_error)?;
+                if entry.entry_type() != Some(EntryType::Runbook) {
+                    return Err(CliError::new(
+                        "usage",
+                        format!("{id}: only runbooks can be displayed as checklists"),
+                    ));
+                }
+                let plan = varres::plan_vars(&entry);
+                varcli::check_flag_names(&plan, &options.flags)?;
+                let values = if plan.is_empty() {
+                    std::collections::HashMap::new()
+                } else {
+                    let (memory, _) = kb.remembered(&id);
+                    let mut tty = if options.yes || !platform.has_terminal() {
+                        None
+                    } else {
+                        TtyAsk::open(platform)
+                    };
+                    let ask = tty.as_mut().map(|t| t as &mut dyn Ask);
+                    let env = |name: &str| std::env::var(name).ok();
+                    match varcli::collect(&plan, &options.flags, &env, Some(&memory), ask)? {
+                        Collected::Stop(code) => return Ok(code),
+                        Collected::Ready(vals, _report) => {
+                            let mut m = std::collections::HashMap::new();
+                            for (k, v) in vals {
+                                m.insert(k, v.reveal().to_string());
+                            }
+                            m
+                        }
+                    }
+                };
+                let text = resolve_runbook_checklist(&kb, &entry, &values)?;
+                write_stdout(&text);
+                return Ok(ExitCode::SUCCESS);
+            }
             write_stdout(&show_entry(platform, &kb, &loaded.settings, &id, options)?);
             Ok(ExitCode::SUCCESS)
         }

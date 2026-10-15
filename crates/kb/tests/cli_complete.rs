@@ -24,7 +24,9 @@ fn test_cli_complete_types() {
     let lines: Vec<&str> = s.lines().collect();
     assert_eq!(
         lines,
-        vec!["cmd", "sql", "sumo", "cw", "prompt", "link", "code"]
+        vec![
+            "cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook",
+        ]
     );
 
     let out_filtered = kb_in(&root)

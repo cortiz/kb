@@ -49,6 +49,26 @@ const ALLOWED: &[(&str, &str)] = &[
         "kb-core/src/mcp/write.rs",
         "lists references in create/update to auto-declare undeclared variables under vars; never substitutes a value",
     ),
+    (
+        "kb-core/src/author/runbook_new.rs",
+        "generates runbook template with {{var}} references",
+    ),
+    (
+        "kb-core/src/runbook/checklist.rs",
+        "renders checklist with secret placeholder or {{var}} text",
+    ),
+    (
+        "kb-core/src/runbook/mod.rs",
+        "parses runbook step title and bindings with {{var}} references",
+    ),
+    (
+        "kb-core/src/runbook/lint.rs",
+        "checks {{var}} references in step titles and manual do text",
+    ),
+    (
+        "kb-core/src/mcp/engine.rs",
+        "formats {{var}} references in runbook steps and interpolates step titles",
+    ),
 ];
 
 const NEEDLES: &[&str] = &[

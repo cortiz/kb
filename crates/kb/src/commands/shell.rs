@@ -353,6 +353,12 @@ _kb_custom() {
         tags=($(kb __complete tags "$p" 2>/dev/null))
         compadd "${tags[@]}"
         return
+    elif [[ "$cur" == runbook:* ]]; then
+        local p="${cur#runbook:}"
+        local -a rbs
+        rbs=($(kb __complete runbooks "$p" 2>/dev/null | cut -f1))
+        compadd -P "runbook:" "${rbs[@]}"
+        return
     elif [[ "$prev" == "--var" ]]; then
         local entry_id=""
         local i
@@ -376,6 +382,11 @@ _kb_custom() {
             fi
             return
         fi
+    fi
+
+    if [[ "${words[2]}" == "runbook" && "${words[3]}" == "new" && "$CURRENT" -ge 5 ]]; then
+        _kb_entries
+        return
     fi
 
     local subcmd="${words[2]}"
@@ -404,6 +415,11 @@ _kb_custom() {
         local p="${cur#tag:}"
         COMPREPLY=( $(compgen -W "$(kb __complete tags "$p" 2>/dev/null)" -- "$p") )
         return 0
+    elif [[ "$cur" == runbook:* ]]; then
+        local p="${cur#runbook:}"
+        local rbs=$(kb __complete runbooks "$p" 2>/dev/null | cut -f1)
+        COMPREPLY=( $(compgen -P "runbook:" -W "$rbs" -- "$p") )
+        return 0
     elif [[ "$prev" == "--var" ]]; then
         local entry_id=""
         local i
@@ -427,6 +443,12 @@ _kb_custom() {
         fi
     fi
 
+    if [[ "${words[1]}" == "runbook" && "${words[2]}" == "new" && "$cword" -ge 4 ]]; then
+        local ids=$(kb __complete entries "$cur" 2>/dev/null | cut -f1)
+        COMPREPLY=( $(compgen -W "$ids" -- "$cur") )
+        return 0
+    fi
+
     local subcmd="${words[1]}"
     if [[ "$cword" -eq 2 && ("$subcmd" == "copy" || "$subcmd" == "use" || "$subcmd" == "show" || "$subcmd" == "edit" || "$subcmd" == "rm" || "$subcmd" == "vars" || "$subcmd" == "actions" || "$subcmd" == "open" || "$subcmd" == "run") ]]; then
         local ids=$(kb __complete entries "$cur" 2>/dev/null | cut -f1)
@@ -444,6 +466,7 @@ fn dynamic_fish() -> &'static str {
     r#"
 # Dynamic completions for fish
 complete -c kb -n '__fish_seen_subcommand_from copy use show edit rm vars actions open run' -a '(kb __complete entries (commandline -ct) 2>/dev/null)'
+complete -c kb -n '__fish_seen_subcommand_from runbook; and __fish_seen_subcommand_from new' -a '(kb __complete entries (commandline -ct) 2>/dev/null)'
 complete -c kb -l type -a '(kb __complete types (commandline -ct) 2>/dev/null)'
 complete -c kb -l tag -a '(kb __complete tags (commandline -ct) 2>/dev/null)'
 complete -c kb -l var -a '(kb __complete vars (commandline -opc)[2] (commandline -ct) 2>/dev/null)'

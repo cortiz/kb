@@ -59,6 +59,8 @@ commands! {
     Sync => "sync",
     History => "history",
     Help => "help",
+    MarkEntry => "mark-entry",
+    NewRunbookFromMarks => "new-runbook-from-marks",
     // Esc: clear the query, close the preview, or exit when there is nothing to clear.
     Cancel => "cancel",
     // Exit at once (Ctrl-C is always bound to it).
