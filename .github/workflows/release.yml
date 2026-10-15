@@ -292,7 +292,7 @@ jobs:
           echo "NEXT=$NEXT" >> "$GITHUB_ENV"
           awk -v v="$NEXT" '!d && /^version = "/ { $0 = "version = \"" v "\""; d = 1 } 1' Cargo.toml > Cargo.toml.new
           mv Cargo.toml.new Cargo.toml
-          cargo update --workspace --offline
+          cargo update --workspace
           git add Cargo.toml Cargo.lock
           git commit -m "chore(release): kb $VERSION formula, start $NEXT"
       # a broken formula never gets a pull request
