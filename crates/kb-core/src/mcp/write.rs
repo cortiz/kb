@@ -321,7 +321,9 @@ impl<'a> McpEngine<'a> {
                 .or_else(|| req.fields.get("steps").and_then(|v| v.as_array()).cloned())
                 .unwrap_or_default();
             if steps.is_empty() {
-                return Err(KbError::Unreadable("a runbook must have at least one step".into()));
+                return Err(KbError::Unreadable(
+                    "a runbook must have at least one step".into(),
+                ));
             }
             DraftFields::Runbook { steps }
         } else {
@@ -353,11 +355,8 @@ impl<'a> McpEngine<'a> {
         let mut check = draft.check(&id, &SystemClock);
 
         if is_runbook {
-            let parsed_entry = crate::entry::parse_entry(
-                &id,
-                &format!("{id}.md"),
-                check.bytes.clone(),
-            );
+            let parsed_entry =
+                crate::entry::parse_entry(&id, &format!("{id}.md"), check.bytes.clone());
             if let Some(entry) = parsed_entry.entry {
                 let rb_findings = crate::runbook::lint::check_runbooks(
                     self.kb.root(),
@@ -715,7 +714,10 @@ impl<'a> McpEngine<'a> {
                         if step.id_explicit || !step.id.is_empty() {
                             obj.insert("id".into(), serde_json::Value::String(step.id.clone()));
                         }
-                        obj.insert("title".into(), serde_json::Value::String(step.title.clone()));
+                        obj.insert(
+                            "title".into(),
+                            serde_json::Value::String(step.title.clone()),
+                        );
                         match &step.target {
                             crate::runbook::StepTarget::Entry(e) => {
                                 obj.insert("entry".into(), serde_json::Value::String(e.clone()));
@@ -792,11 +794,8 @@ impl<'a> McpEngine<'a> {
         }
 
         if is_runbook {
-            let parsed_entry = crate::entry::parse_entry(
-                &req.id,
-                &format!("{}.md", req.id),
-                check.bytes.clone(),
-            );
+            let parsed_entry =
+                crate::entry::parse_entry(&req.id, &format!("{}.md", req.id), check.bytes.clone());
             if let Some(entry) = parsed_entry.entry {
                 let rb_findings = crate::runbook::lint::check_runbooks(
                     self.kb.root(),

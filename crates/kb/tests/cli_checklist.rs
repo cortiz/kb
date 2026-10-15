@@ -96,7 +96,13 @@ Owner: platform security.
 fn test_show_checklist_unresolved() {
     let (_d, root) = fixture_kb();
     let out = kb_without_terminal(
-        &["--root", root.to_str().unwrap(), "show", "runbook/deploy", "--checklist"],
+        &[
+            "--root",
+            root.to_str().unwrap(),
+            "show",
+            "runbook/deploy",
+            "--checklist",
+        ],
         &[("KB_TEST_NOW", NOW)],
     );
 

@@ -295,148 +295,165 @@ impl<'a> McpEngine<'a> {
         let mut steps_view = None;
         let mut binding_table_view = None;
 
-        if entry.entry_type() == Some(EntryType::Runbook) {
-            if let TypeFields::Runbook { steps: rb_steps } = entry.fields() {
-                let mut step_entries_vars: HashMap<String, Vec<crate::vars::Variable>> = HashMap::new();
-                for step in rb_steps {
-                    if let crate::runbook::StepTarget::Entry(ref target_id) = step.target {
-                        if !step_entries_vars.contains_key(target_id) {
-                            if let Ok(target_entry) = self.kb.entry(target_id) {
-                                step_entries_vars.insert(target_id.clone(), target_entry.vars().to_vec());
-                            }
-                        }
-                    }
+        if entry.entry_type() == Some(EntryType::Runbook)
+            && let TypeFields::Runbook { steps: rb_steps } = entry.fields()
+        {
+            let mut step_entries_vars: HashMap<String, Vec<crate::vars::Variable>> = HashMap::new();
+            for step in rb_steps {
+                if let crate::runbook::StepTarget::Entry(ref target_id) = step.target
+                    && !step_entries_vars.contains_key(target_id)
+                    && let Ok(target_entry) = self.kb.entry(target_id)
+                {
+                    step_entries_vars.insert(target_id.clone(), target_entry.vars().to_vec());
                 }
-
-                let b_table = crate::runbook::binding::evaluate_runbook_bindings(
-                    id,
-                    entry.vars(),
-                    rb_steps,
-                    |target_id| step_entries_vars.get(target_id).map(|v| v.as_slice()),
-                );
-
-                let mut resolved_rb_vars: HashMap<String, String> = HashMap::new();
-                for v in entry.vars() {
-                    if let Some(val) = vars.get(&v.name) {
-                        resolved_rb_vars.insert(v.name.clone(), val.clone());
-                    } else if let Some(def) = &v.default {
-                        resolved_rb_vars.insert(v.name.clone(), def.clone());
-                    }
-                }
-
-                let mut out_steps = Vec::new();
-                let mut out_bindings = Vec::new();
-
-                for (idx, step) in rb_steps.iter().enumerate() {
-                    let is_hidden = match &step.target {
-                        crate::runbook::StepTarget::Entry(target_id) => {
-                            if let Ok(target_entry) = self.kb.entry(target_id) {
-                                let type_excluded = target_entry
-                                    .entry_type()
-                                    .map(|t| self.settings.is_type_excluded(t.name()))
-                                    .unwrap_or(false);
-                                type_excluded
-                                    || target_entry.tags().iter().any(|t| self.settings.is_tag_excluded(t))
-                            } else {
-                                false
-                            }
-                        }
-                        crate::runbook::StepTarget::Do(_) => false,
-                    };
-
-                    if is_hidden {
-                        out_steps.push(serde_json::json!({
-                            "hidden": true,
-                            "position": idx + 1,
-                        }));
-                    } else {
-                        if let Some(row) = b_table.steps.iter().find(|r| r.step_index == idx) {
-                            out_bindings.push(serde_json::to_value(row).unwrap());
-                        }
-
-                        let mut step_obj = serde_json::Map::new();
-                        if step.id_explicit || !step.id.is_empty() {
-                            step_obj.insert("id".into(), serde_json::Value::String(step.id.clone()));
-                        }
-
-                        let step_title = if resolve {
-                            let mut t = step.title.clone();
-                            for (vk, vv) in &resolved_rb_vars {
-                                t = t.replace(&format!("{{{{{}}}}}", vk), vv);
-                            }
-                            t
-                        } else {
-                            step.title.clone()
-                        };
-                        step_obj.insert("title".into(), serde_json::Value::String(step_title));
-
-                        match &step.target {
-                            crate::runbook::StepTarget::Entry(target_id) => {
-                                step_obj.insert("entry".into(), serde_json::Value::String(target_id.clone()));
-                                if !step.vars.is_empty() {
-                                    let mut v_map = serde_json::Map::new();
-                                    for (k, v) in &step.vars {
-                                        let v_val = match v {
-                                            crate::runbook::StepVarBinding::RunbookVar(r) => serde_json::Value::String(format!("{{{{{}}}}}", r)),
-                                            crate::runbook::StepVarBinding::Literal(lit) => lit.clone(),
-                                        };
-                                        v_map.insert(k.clone(), v_val);
-                                    }
-                                    step_obj.insert("vars".into(), serde_json::Value::Object(v_map));
-                                }
-                                if resolve {
-                                    if let Ok(target_entry) = self.kb.entry(target_id) {
-                                        let mut step_var_values = HashMap::new();
-                                        for target_v in target_entry.vars() {
-                                            if let Some(val) = resolved_rb_vars.get(&target_v.name) {
-                                                step_var_values.insert(target_v.name.clone(), val.clone());
-                                            }
-                                        }
-                                        for (target_k, binding) in &step.vars {
-                                            match binding {
-                                                crate::runbook::StepVarBinding::RunbookVar(rb_var) => {
-                                                    if let Some(val) = resolved_rb_vars.get(rb_var) {
-                                                        step_var_values.insert(target_k.clone(), val.clone());
-                                                    }
-                                                }
-                                                crate::runbook::StepVarBinding::Literal(lit) => {
-                                                    let s = match lit {
-                                                        serde_json::Value::String(s) => s.clone(),
-                                                        _ => lit.to_string(),
-                                                    };
-                                                    step_var_values.insert(target_k.clone(), s);
-                                                }
-                                            }
-                                        }
-                                        if let Ok((res_payload, _, res_links)) = self.resolve_entry(&target_entry, &step_var_values) {
-                                            step_obj.insert("resolved_payload".into(), serde_json::Value::String(res_payload));
-                                            step_obj.insert("action_links".into(), serde_json::to_value(&res_links).unwrap());
-                                        }
-                                    }
-                                }
-                            }
-                            crate::runbook::StepTarget::Do(manual_text) => {
-                                step_obj.insert("do".into(), serde_json::Value::String(manual_text.clone()));
-                            }
-                        }
-
-                        if let Some(note) = &step.note {
-                            step_obj.insert("note".into(), serde_json::Value::String(note.clone()));
-                        }
-                        if step.optional {
-                            step_obj.insert("optional".into(), serde_json::Value::Bool(true));
-                        }
-                        if step.confirm {
-                            step_obj.insert("confirm".into(), serde_json::Value::Bool(true));
-                        }
-
-                        out_steps.push(serde_json::Value::Object(step_obj));
-                    }
-                }
-
-                steps_view = Some(out_steps);
-                binding_table_view = Some(out_bindings);
             }
+
+            let b_table = crate::runbook::binding::evaluate_runbook_bindings(
+                id,
+                entry.vars(),
+                rb_steps,
+                |target_id| step_entries_vars.get(target_id).map(|v| v.as_slice()),
+            );
+
+            let mut resolved_rb_vars: HashMap<String, String> = HashMap::new();
+            for v in entry.vars() {
+                if let Some(val) = vars.get(&v.name) {
+                    resolved_rb_vars.insert(v.name.clone(), val.clone());
+                } else if let Some(def) = &v.default {
+                    resolved_rb_vars.insert(v.name.clone(), def.clone());
+                }
+            }
+
+            let mut out_steps = Vec::new();
+            let mut out_bindings = Vec::new();
+
+            for (idx, step) in rb_steps.iter().enumerate() {
+                let is_hidden = match &step.target {
+                    crate::runbook::StepTarget::Entry(target_id) => {
+                        if let Ok(target_entry) = self.kb.entry(target_id) {
+                            let type_excluded = target_entry
+                                .entry_type()
+                                .map(|t| self.settings.is_type_excluded(t.name()))
+                                .unwrap_or(false);
+                            type_excluded
+                                || target_entry
+                                    .tags()
+                                    .iter()
+                                    .any(|t| self.settings.is_tag_excluded(t))
+                        } else {
+                            false
+                        }
+                    }
+                    crate::runbook::StepTarget::Do(_) => false,
+                };
+
+                if is_hidden {
+                    out_steps.push(serde_json::json!({
+                        "hidden": true,
+                        "position": idx + 1,
+                    }));
+                } else {
+                    if let Some(row) = b_table.steps.iter().find(|r| r.step_index == idx) {
+                        out_bindings.push(serde_json::to_value(row).unwrap());
+                    }
+
+                    let mut step_obj = serde_json::Map::new();
+                    if step.id_explicit || !step.id.is_empty() {
+                        step_obj.insert("id".into(), serde_json::Value::String(step.id.clone()));
+                    }
+
+                    let step_title = if resolve {
+                        let mut t = step.title.clone();
+                        for (vk, vv) in &resolved_rb_vars {
+                            t = t.replace(&format!("{{{{{}}}}}", vk), vv);
+                        }
+                        t
+                    } else {
+                        step.title.clone()
+                    };
+                    step_obj.insert("title".into(), serde_json::Value::String(step_title));
+
+                    match &step.target {
+                        crate::runbook::StepTarget::Entry(target_id) => {
+                            step_obj.insert(
+                                "entry".into(),
+                                serde_json::Value::String(target_id.clone()),
+                            );
+                            if !step.vars.is_empty() {
+                                let mut v_map = serde_json::Map::new();
+                                for (k, v) in &step.vars {
+                                    let v_val = match v {
+                                        crate::runbook::StepVarBinding::RunbookVar(r) => {
+                                            serde_json::Value::String(format!("{{{{{}}}}}", r))
+                                        }
+                                        crate::runbook::StepVarBinding::Literal(lit) => lit.clone(),
+                                    };
+                                    v_map.insert(k.clone(), v_val);
+                                }
+                                step_obj.insert("vars".into(), serde_json::Value::Object(v_map));
+                            }
+                            if resolve && let Ok(target_entry) = self.kb.entry(target_id) {
+                                let mut step_var_values = HashMap::new();
+                                for target_v in target_entry.vars() {
+                                    if let Some(val) = resolved_rb_vars.get(&target_v.name) {
+                                        step_var_values.insert(target_v.name.clone(), val.clone());
+                                    }
+                                }
+                                for (target_k, binding) in &step.vars {
+                                    match binding {
+                                        crate::runbook::StepVarBinding::RunbookVar(rb_var) => {
+                                            if let Some(val) = resolved_rb_vars.get(rb_var) {
+                                                step_var_values
+                                                    .insert(target_k.clone(), val.clone());
+                                            }
+                                        }
+                                        crate::runbook::StepVarBinding::Literal(lit) => {
+                                            let s = match lit {
+                                                serde_json::Value::String(s) => s.clone(),
+                                                _ => lit.to_string(),
+                                            };
+                                            step_var_values.insert(target_k.clone(), s);
+                                        }
+                                    }
+                                }
+                                if let Ok((res_payload, _, res_links)) =
+                                    self.resolve_entry(&target_entry, &step_var_values)
+                                {
+                                    step_obj.insert(
+                                        "resolved_payload".into(),
+                                        serde_json::Value::String(res_payload),
+                                    );
+                                    step_obj.insert(
+                                        "action_links".into(),
+                                        serde_json::to_value(&res_links).unwrap(),
+                                    );
+                                }
+                            }
+                        }
+                        crate::runbook::StepTarget::Do(manual_text) => {
+                            step_obj.insert(
+                                "do".into(),
+                                serde_json::Value::String(manual_text.clone()),
+                            );
+                        }
+                    }
+
+                    if let Some(note) = &step.note {
+                        step_obj.insert("note".into(), serde_json::Value::String(note.clone()));
+                    }
+                    if step.optional {
+                        step_obj.insert("optional".into(), serde_json::Value::Bool(true));
+                    }
+                    if step.confirm {
+                        step_obj.insert("confirm".into(), serde_json::Value::Bool(true));
+                    }
+
+                    out_steps.push(serde_json::Value::Object(step_obj));
+                }
+            }
+
+            steps_view = Some(out_steps);
+            binding_table_view = Some(out_bindings);
         }
 
         Ok(EntryView {
@@ -653,7 +670,11 @@ impl<'a> McpEngine<'a> {
                 {
                     continue;
                 }
-                if entry.tags().iter().any(|t| self.settings.is_tag_excluded(t)) {
+                if entry
+                    .tags()
+                    .iter()
+                    .any(|t| self.settings.is_tag_excluded(t))
+                {
                     continue;
                 }
                 used.push(UsedInEntry {

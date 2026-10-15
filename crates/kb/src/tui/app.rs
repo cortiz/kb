@@ -1645,7 +1645,12 @@ impl AppState {
             }
             Command::NewRunbookFromMarks => {
                 if self.marks.is_empty() {
-                    self.say("mark entries first with Alt-M (or v)", MessageKind::Info, now, true);
+                    self.say(
+                        "mark entries first with Alt-M (or v)",
+                        MessageKind::Info,
+                        now,
+                        true,
+                    );
                     Vec::new()
                 } else {
                     self.prompt = Some(ListPrompt::NewRunbook {

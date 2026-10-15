@@ -703,7 +703,8 @@ impl McpServer {
                                         resp.id, resp.version
                                     );
                                     if !resp.used_in.is_empty() {
-                                        let ids: Vec<&str> = resp.used_in.iter().map(|u| u.id.as_str()).collect();
+                                        let ids: Vec<&str> =
+                                            resp.used_in.iter().map(|u| u.id.as_str()).collect();
                                         s.push_str(&format!(
                                             "\nWarning: used in runbooks: {}",
                                             ids.join(", ")

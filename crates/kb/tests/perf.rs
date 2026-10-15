@@ -926,6 +926,8 @@ Notes.
     };
     assert!(m_runbook < limit, "runbook: filter {m_runbook:?}");
     assert!(m_used_by < limit, "used-by: filter {m_used_by:?}");
-    assert!(m_type_runbook < limit, "type:runbook filter {m_type_runbook:?}");
+    assert!(
+        m_type_runbook < limit,
+        "type:runbook filter {m_type_runbook:?}"
+    );
 }
-

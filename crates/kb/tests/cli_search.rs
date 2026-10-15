@@ -531,7 +531,10 @@ Special instructions for deployment operations.
 
     // 1. Matches on title
     let found = ids(&root, &["Deploy", "Authorizer", "Runbook"]);
-    assert!(found.contains(&"deploy/authorizer".to_string()), "matches on title: {found:?}");
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on title: {found:?}"
+    );
 
     // 2. Matches on tag
     let found = ids(&root, &["tag:deployrunbook"]);
@@ -539,15 +542,24 @@ Special instructions for deployment operations.
 
     // 3. Matches on step title
     let found = ids(&root, &["baseline"]);
-    assert!(found.contains(&"deploy/authorizer".to_string()), "matches on step title: {found:?}");
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on step title: {found:?}"
+    );
 
     // 4. Matches on manual step text
     let found = ids(&root, &["telemetry", "dashboards"]);
-    assert!(found.contains(&"deploy/authorizer".to_string()), "matches on do text: {found:?}");
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on do text: {found:?}"
+    );
 
     // 5. Matches on notes
     let found = ids(&root, &["special", "deployment", "operations"]);
-    assert!(found.contains(&"deploy/authorizer".to_string()), "matches on notes: {found:?}");
+    assert!(
+        found.contains(&"deploy/authorizer".to_string()),
+        "matches on notes: {found:?}"
+    );
 
     // 6. type:runbook filter
     let found = ids(&root, &["type:runbook"]);
@@ -563,4 +575,3 @@ Special instructions for deployment operations.
     assert!(found.contains(&"cmd/deploy-service".to_string()));
     assert!(!found.contains(&"deploy/authorizer".to_string()));
 }
-

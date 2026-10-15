@@ -1,6 +1,6 @@
  kb · ~/kb · 32 entries
  ›                                                                                                              32 / 32
-  all 32   sql 5   sumo 4   cw 6   cmd 5   prompt 6   link 3   code 3   note 0
+  all 32   sql 5   sumo 4   cw 6   cmd 5   prompt 6   link 3   code 3   note 0   runbook 0
 ┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
 │ cmd    Flush role mapping                    ││ Flush role mapping                                                   │
 │        #cache                                ││ cmd · #cache · edited 2026-08-29                                     │
@@ -46,6 +46,7 @@
 1:112..120 fg=241
 2:1..9 fg=17 bg=153 bold
 2:71..79 fg=248
+2:80..91 fg=248
 3:0..1 fg=246
 3:1..10 fg=241
 3:10..49 fg=246

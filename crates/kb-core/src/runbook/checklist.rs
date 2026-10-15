@@ -17,7 +17,10 @@ pub fn generate_checklist(runbook: &Entry) -> String {
             let step_title = crate::terminal::raw(&step.title);
             match &step.target {
                 StepTarget::Entry(entry_id) => {
-                    out.push_str(&format!("- [ ] {}. {} (`{}`){}\n", num, step_title, entry_id, opt_str));
+                    out.push_str(&format!(
+                        "- [ ] {}. {} (`{}`){}\n",
+                        num, step_title, entry_id, opt_str
+                    ));
                 }
                 StepTarget::Do(instruction) => {
                     out.push_str(&format!("- [ ] {}. {}{}\n", num, step_title, opt_str));
@@ -65,7 +68,10 @@ where
 
             match &step.target {
                 StepTarget::Entry(entry_id) => {
-                    out.push_str(&format!("- [ ] {}. {} (`{}`){}\n", num, step_title, entry_id, opt_str));
+                    out.push_str(&format!(
+                        "- [ ] {}. {} (`{}`){}\n",
+                        num, step_title, entry_id, opt_str
+                    ));
 
                     // Compute step variables
                     let mut step_vars = std::collections::HashMap::new();

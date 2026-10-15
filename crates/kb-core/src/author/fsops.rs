@@ -311,7 +311,8 @@ impl Kb {
             let Ok(text) = String::from_utf8(bytes) else {
                 continue;
             };
-            let Some(rewritten) = crate::runbook::retarget_runbook_step_references(&text, old, new) else {
+            let Some(rewritten) = crate::runbook::retarget_runbook_step_references(&text, old, new)
+            else {
                 continue;
             };
             let tmp = temp_path(&path);

@@ -5,7 +5,7 @@ use std::path::Path;
 
 use assert_cmd::Command;
 
-const EXAMPLES: [&str; 7] = [
+const EXAMPLES: [&str; 9] = [
     "sql/example-active-connections.md",
     "sumo/example-5xx-by-authorizer.md",
     "cw/example-lambda-errors.md",
@@ -13,6 +13,8 @@ const EXAMPLES: [&str; 7] = [
     "prompt/example-summarize-incident.md",
     "link/example-runbook.md",
     "code/example-request-handler.md",
+    "note/example-authorizer-role-cache.md",
+    "runbook/example-deploy-authorizer.md",
 ];
 
 fn kb(home: &Path) -> Command {
@@ -64,7 +66,7 @@ fn new_kb_with_examples_that_lint_clean() {
         .args(["lint", "--strict"]));
     assert_eq!(
         (out.as_str(), code),
-        ("8 entries, 0 errors, 0 warnings\n", 0)
+        ("9 entries, 0 errors, 0 warnings\n", 0)
     );
 }
 
@@ -132,7 +134,7 @@ fn json_report() {
     assert_eq!(v["version"], 1);
     assert_eq!(v["examples"], "created");
     assert_eq!(v["created"][0], ".");
-    assert_eq!(v["created"].as_array().unwrap().len(), 11);
+    assert_eq!(v["created"].as_array().unwrap().len(), 12);
     let (out, _, _) = run(kb(dir.path()).arg("init").arg(&root).arg("--json"));
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["created"].as_array().unwrap().len(), 0);

@@ -178,6 +178,9 @@ pub fn build_preview_with(
     )
 }
 
+/// Type alias for looking up runbook step target info.
+pub type StepLookup<'a> = &'a dyn Fn(&str) -> Option<StepTargetInfo>;
+
 /// Builds preview with full lookup capabilities for runbook steps and backlinks ("used in").
 pub fn build_preview_full(
     entry: &Entry,
@@ -185,7 +188,7 @@ pub fn build_preview_full(
     use_count: u64,
     highlight_syntax: bool,
     lookup: Option<Lookup<'_>>,
-    step_lookup: Option<&dyn Fn(&str) -> Option<StepTargetInfo>>,
+    step_lookup: Option<StepLookup<'_>>,
     used_in: Vec<String>,
 ) -> PreviewModel {
     let ty = entry.entry_type();
@@ -596,15 +599,8 @@ Runbook notes here.
             }
         };
 
-        let model = build_preview_full(
-            &entry,
-            None,
-            1,
-            false,
-            None,
-            Some(&step_lookup),
-            Vec::new(),
-        );
+        let model =
+            build_preview_full(&entry, None, 1, false, None, Some(&step_lookup), Vec::new());
         assert_eq!(model.steps.len(), 3);
         assert_eq!(model.step_issue_counts, Some((0, 1, 1))); // (missing=0, errors=1, unreviewed=1)
 
@@ -618,19 +614,34 @@ Runbook notes here.
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered_text.contains("steps"), "should contain steps divider: {rendered_text}");
-        assert!(rendered_text.contains("1. [sumo] Check error rate"), "{rendered_text}");
+        assert!(
+            rendered_text.contains("steps"),
+            "should contain steps divider: {rendered_text}"
+        );
+        assert!(
+            rendered_text.contains("1. [sumo] Check error rate"),
+            "{rendered_text}"
+        );
         assert!(rendered_text.contains("(minutes=30)"), "{rendered_text}");
-        assert!(rendered_text.contains("2. [cmd] Deploy to env"), "{rendered_text}");
+        assert!(
+            rendered_text.contains("2. [cmd] Deploy to env"),
+            "{rendered_text}"
+        );
         assert!(rendered_text.contains("[confirm]"), "{rendered_text}");
         assert!(rendered_text.contains("[agent]"), "{rendered_text}");
         assert!(rendered_text.contains("[⚠ errors]"), "{rendered_text}");
-        assert!(rendered_text.contains("3. [manual] Roll back if p99 high"), "{rendered_text}");
+        assert!(
+            rendered_text.contains("3. [manual] Roll back if p99 high"),
+            "{rendered_text}"
+        );
         assert!(rendered_text.contains("[optional]"), "{rendered_text}");
 
         // Now test used_in on an entry
         let sumo_entry = load("search", "sumo/5xx-by-authorizer");
-        let used_in = vec!["Deploy authorizer to prod".to_string(), "Incident response".to_string()];
+        let used_in = vec![
+            "Deploy authorizer to prod".to_string(),
+            "Incident response".to_string(),
+        ];
         let entry_model = build_preview_full(&sumo_entry, None, 5, false, None, None, used_in);
         assert_eq!(entry_model.used_in.len(), 2);
 
@@ -644,9 +655,14 @@ Runbook notes here.
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(entry_text.contains("used in"), "should contain used in divider: {entry_text}");
-        assert!(entry_text.contains("• Deploy authorizer to prod"), "{entry_text}");
+        assert!(
+            entry_text.contains("used in"),
+            "should contain used in divider: {entry_text}"
+        );
+        assert!(
+            entry_text.contains("• Deploy authorizer to prod"),
+            "{entry_text}"
+        );
         assert!(entry_text.contains("• Incident response"), "{entry_text}");
     }
 }
-

@@ -196,30 +196,29 @@ pub fn run(
             } else {
                 match kb.entry(&id) {
                     Ok(entry) => {
-                        let used_in: Vec<String> = if entry.entry_type()
-                            != Some(kb_core::entry::EntryType::Runbook)
-                        {
-                            let rb_ids = kb.runbooks_referencing(&id);
-                            rb_ids
-                                .into_iter()
-                                .filter_map(|rb_id: String| {
-                                    kb.entry(&rb_id).ok()?.title().map(str::to_string)
-                                })
-                                .collect()
-                        } else {
-                            Vec::new()
-                        };
+                        let used_in: Vec<String> =
+                            if entry.entry_type() != Some(kb_core::entry::EntryType::Runbook) {
+                                let rb_ids = kb.runbooks_referencing(&id);
+                                rb_ids
+                                    .into_iter()
+                                    .filter_map(|rb_id: String| {
+                                        kb.entry(&rb_id).ok()?.title().map(str::to_string)
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
                         let lookup = |target: &str| crate::show::link_lookup(&kb, target);
                         let step_lookup = |target: &str| {
                             let e = kb.entry(target).ok()?;
                             let ty = e.entry_type()?;
                             let title = e.title()?.to_string();
-                            let has_errors =
-                                !kb.lint_entry(target).unwrap_or_default().is_empty();
-                            let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(
-                                kb.root(),
-                                target,
-                            );
+                            let has_errors = !kb.lint_entry(target).unwrap_or_default().is_empty();
+                            let unreviewed =
+                                kb_core::mcp::review::ReviewStateTracker::is_unreviewed(
+                                    kb.root(),
+                                    target,
+                                );
                             Some(super::preview::StepTargetInfo {
                                 entry_type: Some(ty),
                                 title: Some(title),

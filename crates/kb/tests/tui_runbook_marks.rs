@@ -140,5 +140,8 @@ fn mark_indicators_rendered_in_view() {
         }
         content.push('\n');
     }
-    assert!(content.contains("✓1"), "buffer should contain ✓1 mark indicator");
+    assert!(
+        content.contains("✓1"),
+        "buffer should contain ✓1 mark indicator"
+    );
 }

@@ -231,11 +231,9 @@ pub fn resolve_runbook_checklist(
                     values_map.insert(planned.var.name.clone(), varres::Value::plain(def.clone()));
                 }
             }
-            if let Ok(resolved) = varres::resolve_for_target(
-                &step_plan,
-                &values_map,
-                varres::ResolutionTarget::Mcp,
-            ) {
+            if let Ok(resolved) =
+                varres::resolve_for_target(&step_plan, &values_map, varres::ResolutionTarget::Mcp)
+            {
                 resolved.primary().map(|o| (o.text.clone(), fence))
             } else if let Some(p) = step_entry.payload() {
                 Some((p.text.clone(), fence))
@@ -522,7 +520,13 @@ pub fn run_pick(
             Ok(ExitCode::SUCCESS)
         }
         PostPick::Show(options) => {
-            write_stdout(&show_entry(platform, &kb, &loaded.settings, id, options.clone())?);
+            write_stdout(&show_entry(
+                platform,
+                &kb,
+                &loaded.settings,
+                id,
+                options.clone(),
+            )?);
             Ok(ExitCode::SUCCESS)
         }
     }

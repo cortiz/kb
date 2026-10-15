@@ -41,10 +41,10 @@ pub fn check_runbooks(
                 if step.title.contains(&needle) {
                     used_rb_vars.insert(var.name.clone());
                 }
-                if let StepTarget::Do(ref text) = step.target {
-                    if text.contains(&needle) {
-                        used_rb_vars.insert(var.name.clone());
-                    }
+                if let StepTarget::Do(ref text) = step.target
+                    && text.contains(&needle)
+                {
+                    used_rb_vars.insert(var.name.clone());
                 }
             }
             if runbook.notes().contains(&needle) {
@@ -68,16 +68,16 @@ pub fn check_runbooks(
                         if *candidate_id == target_id {
                             continue;
                         }
-                        if let Ok(bytes) = fs::read(&candidate_entry.abs_path) {
-                            if crate::usage::content_hash(&bytes) == rec.hash {
-                                return Some(*candidate_id);
-                            }
+                        if let Ok(bytes) = fs::read(&candidate_entry.abs_path)
+                            && crate::usage::content_hash(&bytes) == rec.hash
+                        {
+                            return Some(*candidate_id);
                         }
                     }
                     None
                 });
-                let suggested = renamed_id
-                    .or_else(|| crate::lint::suggest::suggest(target_id, &known_ids));
+                let suggested =
+                    renamed_id.or_else(|| crate::lint::suggest::suggest(target_id, &known_ids));
                 let fix = match suggested {
                     Some(s) => format!("did you mean `{s}`?"),
                     None => "check the entry ID or create the entry".to_string(),
@@ -99,24 +99,19 @@ pub fn check_runbooks(
             };
 
             // Parse entry if not already cached
-            let parsed_outcome = parsed_cache
-                .entry(target_id.clone())
-                .or_insert_with(|| {
-                    fs::read(&file_entry.abs_path)
-                        .ok()
-                        .map(|bytes| crate::entry::parse_entry(target_id, &file_entry.rel_path, bytes))
-                });
+            let parsed_outcome = parsed_cache.entry(target_id.clone()).or_insert_with(|| {
+                fs::read(&file_entry.abs_path)
+                    .ok()
+                    .map(|bytes| crate::entry::parse_entry(target_id, &file_entry.rel_path, bytes))
+            });
 
             let Some(outcome) = parsed_outcome else {
                 continue;
             };
 
             // Check if step entry is itself a runbook (KB083)
-            let is_runbook = outcome
-                .entry
-                .as_ref()
-                .and_then(|e| e.entry_type())
-                == Some(EntryType::Runbook);
+            let is_runbook =
+                outcome.entry.as_ref().and_then(|e| e.entry_type()) == Some(EntryType::Runbook);
 
             if is_runbook {
                 let (line, column) = runbook.source().position(step.target_span.start);
@@ -162,11 +157,16 @@ pub fn check_runbooks(
             };
 
             let target_vars = target_entry.vars();
-            let target_var_names: HashSet<&str> = target_vars.iter().map(|v| v.name.as_str()).collect();
+            let target_var_names: HashSet<&str> =
+                target_vars.iter().map(|v| v.name.as_str()).collect();
 
             // Check explicit step bindings
             for (bound_name, binding) in &step.vars {
-                let span = step.vars_spans.get(bound_name).cloned().unwrap_or(step.target_span.clone());
+                let span = step
+                    .vars_spans
+                    .get(bound_name)
+                    .cloned()
+                    .unwrap_or(step.target_span.clone());
                 let (line, column) = runbook.source().position(span.start);
 
                 if !target_var_names.contains(bound_name.as_str()) {
@@ -190,7 +190,9 @@ pub fn check_runbooks(
                 match binding {
                     StepVarBinding::RunbookVar(source_name) => {
                         used_rb_vars.insert(source_name.clone());
-                        if let Some(source_var) = runbook.vars().iter().find(|v| v.name == *source_name) {
+                        if let Some(source_var) =
+                            runbook.vars().iter().find(|v| v.name == *source_name)
+                        {
                             if let Err(reason) = check_kind_compatibility(
                                 source_var.kind,
                                 &source_var.options,
@@ -204,7 +206,9 @@ pub fn check_runbooks(
                                     column,
                                     severity: RuleCode::InvalidBinding.severity(),
                                     code: RuleCode::InvalidBinding,
-                                    message: format!("invalid binding for `{bound_name}`: {reason}"),
+                                    message: format!(
+                                        "invalid binding for `{bound_name}`: {reason}"
+                                    ),
                                     fix: Some("use compatible variable kind or options".into()),
                                 });
                             }
@@ -224,7 +228,9 @@ pub fn check_runbooks(
                         }
                     }
                     StepVarBinding::Literal(val) => {
-                        if let Err(reason) = check_literal_validity(val, target_var.kind, &target_var.options) {
+                        if let Err(reason) =
+                            check_literal_validity(val, target_var.kind, &target_var.options)
+                        {
                             out.push(Finding {
                                 path: runbook.path().to_string(),
                                 id: Some(runbook.id().to_string()),
@@ -232,8 +238,13 @@ pub fn check_runbooks(
                                 column,
                                 severity: RuleCode::InvalidBinding.severity(),
                                 code: RuleCode::InvalidBinding,
-                                message: format!("invalid literal value for `{bound_name}`: {reason}"),
-                                fix: Some("provide a value matching the variable's type and options".into()),
+                                message: format!(
+                                    "invalid literal value for `{bound_name}`: {reason}"
+                                ),
+                                fix: Some(
+                                    "provide a value matching the variable's type and options"
+                                        .into(),
+                                ),
                             });
                         }
                     }
@@ -246,7 +257,8 @@ pub fn check_runbooks(
                     continue;
                 }
 
-                if let Some(source_var) = runbook.vars().iter().find(|v| v.name == target_var.name) {
+                if let Some(source_var) = runbook.vars().iter().find(|v| v.name == target_var.name)
+                {
                     used_rb_vars.insert(source_var.name.clone());
                     if let Err(reason) = check_kind_compatibility(
                         source_var.kind,
@@ -295,28 +307,28 @@ pub fn check_runbooks(
         }
 
         // Check unused runbook variables (KB092)
-        if let Some(vars_node) = runbook.tree().get("vars") {
-            if let crate::yaml::Node::Map { entries, .. } = vars_node {
-                for (key, _) in entries {
-                    if !used_rb_vars.contains(&key.name) {
-                        let (line, column) = runbook.source().position(key.span.start);
-                        out.push(Finding {
-                            path: runbook.path().to_string(),
-                            id: Some(runbook.id().to_string()),
-                            line,
-                            column,
-                            severity: RuleCode::UnusedRunbookVar.severity(),
-                            code: RuleCode::UnusedRunbookVar,
-                            message: format!(
-                                "variable `{}` is declared on the runbook but never used by any step",
-                                key.name
-                            ),
-                            fix: Some(format!(
-                                "remove `{}` from `vars:` or bind it in a step",
-                                key.name
-                            )),
-                        });
-                    }
+        if let Some(vars_node) = runbook.tree().get("vars")
+            && let crate::yaml::Node::Map { entries, .. } = vars_node
+        {
+            for (key, _) in entries {
+                if !used_rb_vars.contains(&key.name) {
+                    let (line, column) = runbook.source().position(key.span.start);
+                    out.push(Finding {
+                        path: runbook.path().to_string(),
+                        id: Some(runbook.id().to_string()),
+                        line,
+                        column,
+                        severity: RuleCode::UnusedRunbookVar.severity(),
+                        code: RuleCode::UnusedRunbookVar,
+                        message: format!(
+                            "variable `{}` is declared on the runbook but never used by any step",
+                            key.name
+                        ),
+                        fix: Some(format!(
+                            "remove `{}` from `vars:` or bind it in a step",
+                            key.name
+                        )),
+                    });
                 }
             }
         }

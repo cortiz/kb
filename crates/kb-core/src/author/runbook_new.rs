@@ -93,11 +93,7 @@ pub fn lift_variables(entries: &[&Entry]) -> Vec<LiftedVar> {
             let d = occs[0].default.clone();
             if kind == VarKind::Enum {
                 if let Some(ref val) = d {
-                    if !options.contains(val) {
-                        None
-                    } else {
-                        d
-                    }
+                    if !options.contains(val) { None } else { d }
                 } else {
                     None
                 }
@@ -108,10 +104,7 @@ pub fn lift_variables(entries: &[&Entry]) -> Vec<LiftedVar> {
             None
         };
 
-        let description = occs
-            .iter()
-            .find_map(|v| v.description.as_ref())
-            .map(String::clone);
+        let description = occs.iter().find_map(|v| v.description.as_ref()).cloned();
 
         lifted.push(LiftedVar {
             name,
@@ -233,7 +226,12 @@ filter latency
         // minutes was NOT lifted (only in e2)
         assert!(!content.contains("minutes:"));
         // steps
-        assert!(content.contains("- id: deploy-service\n    title: Deploy service\n    entry: cmd/deploy"));
-        assert!(content.contains("- id: watch-latency\n    title: Watch latency\n    entry: cw/watch"));
+        assert!(
+            content
+                .contains("- id: deploy-service\n    title: Deploy service\n    entry: cmd/deploy")
+        );
+        assert!(
+            content.contains("- id: watch-latency\n    title: Watch latency\n    entry: cw/watch")
+        );
     }
 }

@@ -376,13 +376,22 @@ fn git_tracks(platform: &impl Platform, root: &Path, rel: &str) -> bool {
 /// rename; usage and remembered values follow. The `[[old]]` links of notes are pointed at the new
 /// ID, and the rename and those edits are one commit. Returns what happened and how, and the notes
 /// whose links changed.
+#[allow(clippy::type_complexity)]
 pub fn move_entry(
     platform: &impl Platform,
     kb: &mut Kb,
     old: &str,
     new: &str,
     settings: &kb_core::config::Settings,
-) -> Result<(kb_core::author::fsops::Renamed, &'static str, Vec<String>, Vec<String>), FsError> {
+) -> Result<
+    (
+        kb_core::author::fsops::Renamed,
+        &'static str,
+        Vec<String>,
+        Vec<String>,
+    ),
+    FsError,
+> {
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("rename");
     let mover = |from: &Path, to: &Path| -> io::Result<()> {

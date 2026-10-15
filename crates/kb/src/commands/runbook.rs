@@ -31,7 +31,7 @@ pub struct RunbookNewArgs {
     #[arg(required = true)]
     pub entries: Vec<String>,
 
-    /// Where to write the entry, relative to the KB root (default: runbook/<slug>).
+    /// Where to write the entry, relative to the KB root (default: `runbook/<slug>`).
     #[arg(long)]
     pub path: Option<String>,
 
@@ -68,10 +68,8 @@ pub fn run_runbook_new(
         };
         resolved_entries.push((id.as_str(), entry));
     }
-    let entries_slice: Vec<(&str, &Entry)> = resolved_entries
-        .iter()
-        .map(|(id, e)| (*id, e))
-        .collect();
+    let entries_slice: Vec<(&str, &Entry)> =
+        resolved_entries.iter().map(|(id, e)| (*id, e)).collect();
 
     // 2. Generate runbook content with variable lifting
     let content = kb_core::author::runbook_new::generate_runbook_content(
@@ -137,8 +135,11 @@ pub fn run_runbook_new(
             &target_id,
             &[rel],
         );
-        if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
-            eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
+        if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome
+        {
+            eprintln!(
+                "kb: git commit skipped: author identity unknown (set user.name and user.email)"
+            );
         }
         return Ok(ExitCode::SUCCESS);
     }

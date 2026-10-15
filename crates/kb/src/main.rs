@@ -776,9 +776,9 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Mv(args) => {
             kb_cli::author::run_mv(&platform, &root, &loaded, &args.id, &args.new_id, args.json)
         }
-        Command::Rm(args) => {
-            kb_cli::author::run_rm(&platform, &root, &loaded, &args.id, args.yes, args.force, args.json)
-        }
+        Command::Rm(args) => kb_cli::author::run_rm(
+            &platform, &root, &loaded, &args.id, args.yes, args.force, args.json,
+        ),
         Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
         Command::Note(args) => {
             use std::io::IsTerminal;
@@ -947,8 +947,12 @@ fn apply_lint_fixes(
     for finding in &report.findings {
         if finding.code == kb_core::lint::RuleCode::StepMissingEntry {
             let Some(ref fix) = finding.fix else { continue };
-            let Some(old_id) = finding.message.split('`').nth(1) else { continue };
-            let Some(new_id) = fix.split('`').nth(1) else { continue };
+            let Some(old_id) = finding.message.split('`').nth(1) else {
+                continue;
+            };
+            let Some(new_id) = fix.split('`').nth(1) else {
+                continue;
+            };
 
             if !yes {
                 eprint!(
@@ -965,14 +969,12 @@ fn apply_lint_fixes(
             }
 
             let full_path = root.join(&finding.path);
-            if let Ok(content) = std::fs::read_to_string(&full_path) {
-                if let Some(updated) =
+            if let Ok(content) = std::fs::read_to_string(&full_path)
+                && let Some(updated) =
                     kb_core::runbook::retarget_runbook_step_references(&content, old_id, new_id)
-                {
-                    if std::fs::write(&full_path, updated).is_ok() {
-                        modified.push(full_path);
-                    }
-                }
+                && std::fs::write(&full_path, updated).is_ok()
+            {
+                modified.push(full_path);
             }
         }
     }

@@ -549,7 +549,10 @@ Notes.
     .unwrap();
 
     git(&root, &["add", "-A"]);
-    git(&root, &["commit", "-q", "-m", "initial commit with runbook"]);
+    git(
+        &root,
+        &["commit", "-q", "-m", "initial commit with runbook"],
+    );
 
     let out = kb_in(&root)
         .args(["mv", A, "sumo/authorizer/5xx"])
@@ -627,7 +630,10 @@ Notes.
         stderr.contains("cannot delete 'cmd/deploy-service': referenced by runbook(s):"),
         "{stderr}"
     );
-    assert!(stderr.contains("- runbook/test-rb (step: deploy)"), "{stderr}");
+    assert!(
+        stderr.contains("- runbook/test-rb (step: deploy)"),
+        "{stderr}"
+    );
     assert!(
         root.join("cmd/deploy-service.md").is_file(),
         "file must not be deleted"
@@ -638,10 +644,16 @@ Notes.
         .args(["rm", "cmd/deploy-service", "--force", "--yes"])
         .output()
         .unwrap();
-    assert_eq!(out_force.status.code(), Some(0), "{}", text(&out_force.stderr));
+    assert_eq!(
+        out_force.status.code(),
+        Some(0),
+        "{}",
+        text(&out_force.stderr)
+    );
     let stderr_force = text(&out_force.stderr);
     assert!(
-        stderr_force.contains("warning: 'cmd/deploy-service' is referenced by runbook(s); deleting anyway"),
+        stderr_force
+            .contains("warning: 'cmd/deploy-service' is referenced by runbook(s); deleting anyway"),
         "{stderr_force}"
     );
     assert!(
@@ -658,4 +670,3 @@ Notes.
         "expected broken reference diagnostic: {stdout_lint}"
     );
 }
-

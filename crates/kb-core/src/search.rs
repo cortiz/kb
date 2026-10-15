@@ -765,13 +765,12 @@ impl Kb {
             let mut step_order: HashMap<String, usize> = HashMap::new();
             if let Ok(mut stmt) = conn.prepare(
                 "SELECT entry_id, min(position) FROM runbook_steps WHERE runbook_id = ? GROUP BY entry_id",
-            ) {
-                if let Ok(rows) = stmt.query_map([rb_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))) {
+            )
+                && let Ok(rows) = stmt.query_map([rb_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))) {
                     for r in rows.flatten() {
                         step_order.insert(r.0, r.1);
                     }
                 }
-            }
             cands.sort_by(|a, b| {
                 let pos_a = step_order.get(&a.id).copied().unwrap_or(usize::MAX);
                 let pos_b = step_order.get(&b.id).copied().unwrap_or(usize::MAX);

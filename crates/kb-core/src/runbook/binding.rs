@@ -163,41 +163,42 @@ where
 
         let mut bindings = Vec::new();
 
-        if let Some(ref target_id) = entry_id {
-            if let Some(target_vars) = get_entry_vars(target_id) {
-                for target_var in target_vars {
-                    let var_name = target_var.name.clone();
-                    let expected_kind = target_var.kind.name().to_string();
+        if let Some(ref target_id) = entry_id
+            && let Some(target_vars) = get_entry_vars(target_id)
+        {
+            for target_var in target_vars {
+                let var_name = target_var.name.clone();
+                let expected_kind = target_var.kind.name().to_string();
 
-                    // Check if explicitly bound
-                    if let Some(binding) = step.vars.get(&var_name) {
-                        match binding {
-                            StepVarBinding::RunbookVar(source_name) => {
-                                // Find in runbook_vars
-                                if let Some(source_var) =
-                                    runbook_vars.iter().find(|v| v.name == *source_name)
-                                {
-                                    let comp = check_kind_compatibility(
-                                        source_var.kind,
-                                        &source_var.options,
-                                        target_var.kind,
-                                        &target_var.options,
-                                    );
-                                    let validity = match comp {
-                                        Ok(()) => BindingValidity::Valid,
-                                        Err(reason) => BindingValidity::Invalid { reason },
-                                    };
-                                    bindings.push(VarBindingInfo {
-                                        var_name,
-                                        expected_kind,
-                                        target: BindingTarget::RunbookVar {
-                                            name: source_name.clone(),
-                                            kind: source_var.kind.name().to_string(),
-                                        },
-                                        validity,
-                                    });
-                                } else {
-                                    bindings.push(VarBindingInfo {
+                // Check if explicitly bound
+                if let Some(binding) = step.vars.get(&var_name) {
+                    match binding {
+                        StepVarBinding::RunbookVar(source_name) => {
+                            // Find in runbook_vars
+                            if let Some(source_var) =
+                                runbook_vars.iter().find(|v| v.name == *source_name)
+                            {
+                                let comp = check_kind_compatibility(
+                                    source_var.kind,
+                                    &source_var.options,
+                                    target_var.kind,
+                                    &target_var.options,
+                                );
+                                let validity = match comp {
+                                    Ok(()) => BindingValidity::Valid,
+                                    Err(reason) => BindingValidity::Invalid { reason },
+                                };
+                                bindings.push(VarBindingInfo {
+                                    var_name,
+                                    expected_kind,
+                                    target: BindingTarget::RunbookVar {
+                                        name: source_name.clone(),
+                                        kind: source_var.kind.name().to_string(),
+                                    },
+                                    validity,
+                                });
+                            } else {
+                                bindings.push(VarBindingInfo {
                                         var_name,
                                         expected_kind,
                                         target: BindingTarget::RunbookVar {
@@ -210,34 +211,11 @@ where
                                             ),
                                         },
                                     });
-                                }
-                            }
-                            StepVarBinding::Literal(lit_val) => {
-                                let comp = check_literal_validity(
-                                    lit_val,
-                                    target_var.kind,
-                                    &target_var.options,
-                                );
-                                let validity = match comp {
-                                    Ok(()) => BindingValidity::Valid,
-                                    Err(reason) => BindingValidity::Invalid { reason },
-                                };
-                                bindings.push(VarBindingInfo {
-                                    var_name,
-                                    expected_kind,
-                                    target: BindingTarget::Literal {
-                                        value: lit_val.clone(),
-                                    },
-                                    validity,
-                                });
                             }
                         }
-                    } else {
-                        // Default binding by name (FR-008)
-                        if let Some(source_var) = runbook_vars.iter().find(|v| v.name == var_name) {
-                            let comp = check_kind_compatibility(
-                                source_var.kind,
-                                &source_var.options,
+                        StepVarBinding::Literal(lit_val) => {
+                            let comp = check_literal_validity(
+                                lit_val,
                                 target_var.kind,
                                 &target_var.options,
                             );
@@ -246,23 +224,45 @@ where
                                 Err(reason) => BindingValidity::Invalid { reason },
                             };
                             bindings.push(VarBindingInfo {
-                                var_name: var_name.clone(),
+                                var_name,
                                 expected_kind,
-                                target: BindingTarget::RunbookVar {
-                                    name: var_name,
-                                    kind: source_var.kind.name().to_string(),
+                                target: BindingTarget::Literal {
+                                    value: lit_val.clone(),
                                 },
                                 validity,
                             });
-                        } else {
-                            // Unbound step variable (FR-010)
-                            bindings.push(VarBindingInfo {
-                                var_name,
-                                expected_kind,
-                                target: BindingTarget::Unbound,
-                                validity: BindingValidity::Valid,
-                            });
                         }
+                    }
+                } else {
+                    // Default binding by name (FR-008)
+                    if let Some(source_var) = runbook_vars.iter().find(|v| v.name == var_name) {
+                        let comp = check_kind_compatibility(
+                            source_var.kind,
+                            &source_var.options,
+                            target_var.kind,
+                            &target_var.options,
+                        );
+                        let validity = match comp {
+                            Ok(()) => BindingValidity::Valid,
+                            Err(reason) => BindingValidity::Invalid { reason },
+                        };
+                        bindings.push(VarBindingInfo {
+                            var_name: var_name.clone(),
+                            expected_kind,
+                            target: BindingTarget::RunbookVar {
+                                name: var_name,
+                                kind: source_var.kind.name().to_string(),
+                            },
+                            validity,
+                        });
+                    } else {
+                        // Unbound step variable (FR-010)
+                        bindings.push(VarBindingInfo {
+                            var_name,
+                            expected_kind,
+                            target: BindingTarget::Unbound,
+                            validity: BindingValidity::Valid,
+                        });
                     }
                 }
             }
@@ -292,19 +292,25 @@ mod tests {
         let step_opts_superset = vec!["dev".into(), "stage".into(), "prod".into()];
         let step_opts_subset = vec!["prod".into()];
 
-        assert!(check_kind_compatibility(
-            VarKind::Enum,
-            &runbook_opts,
-            VarKind::Enum,
-            &step_opts_superset
-        ).is_ok());
+        assert!(
+            check_kind_compatibility(
+                VarKind::Enum,
+                &runbook_opts,
+                VarKind::Enum,
+                &step_opts_superset
+            )
+            .is_ok()
+        );
 
-        assert!(check_kind_compatibility(
-            VarKind::Enum,
-            &runbook_opts,
-            VarKind::Enum,
-            &step_opts_subset
-        ).is_err());
+        assert!(
+            check_kind_compatibility(
+                VarKind::Enum,
+                &runbook_opts,
+                VarKind::Enum,
+                &step_opts_subset
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -318,8 +324,8 @@ mod tests {
 
     #[test]
     fn test_evaluate_binding_table() {
-        use std::collections::BTreeMap;
         use crate::vars::{Escape, Variable};
+        use std::collections::BTreeMap;
 
         let test_var = |name: &str, kind: VarKind, opts: &[&str]| Variable {
             name: name.into(),
@@ -340,25 +346,26 @@ mod tests {
 
         let mut step1_vars = BTreeMap::new();
         step1_vars.insert("version".into(), StepVarBinding::RunbookVar("tag".into()));
-        step1_vars.insert("count".into(), StepVarBinding::Literal(serde_json::json!(5)));
+        step1_vars.insert(
+            "count".into(),
+            StepVarBinding::Literal(serde_json::json!(5)),
+        );
 
-        let steps = vec![
-            RunbookStep {
-                id: "deploy".into(),
-                id_explicit: true,
-                title: "Deploy step".into(),
-                target: StepTarget::Entry("cmd/deploy".into()),
-                note: None,
-                optional: false,
-                confirm: true,
-                vars: step1_vars,
-                span: 0..0,
-                title_span: 0..0,
-                target_span: 0..0,
-                id_span: None,
-                vars_spans: BTreeMap::new(),
-            },
-        ];
+        let steps = vec![RunbookStep {
+            id: "deploy".into(),
+            id_explicit: true,
+            title: "Deploy step".into(),
+            target: StepTarget::Entry("cmd/deploy".into()),
+            note: None,
+            optional: false,
+            confirm: true,
+            vars: step1_vars,
+            span: 0..0,
+            title_span: 0..0,
+            target_span: 0..0,
+            id_span: None,
+            vars_spans: BTreeMap::new(),
+        }];
 
         let entry_vars = vec![
             test_var("env", VarKind::Enum, &["dev", "stage", "prod"]),
@@ -393,7 +400,11 @@ mod tests {
         assert_eq!(env_b.validity, BindingValidity::Valid);
 
         // 2. version -> explicitly bound to runbook var "tag"
-        let ver_b = row.bindings.iter().find(|b| b.var_name == "version").unwrap();
+        let ver_b = row
+            .bindings
+            .iter()
+            .find(|b| b.var_name == "version")
+            .unwrap();
         assert_eq!(
             ver_b.target,
             BindingTarget::RunbookVar {
@@ -414,7 +425,11 @@ mod tests {
         assert_eq!(cnt_b.validity, BindingValidity::Valid);
 
         // 4. unbound_var -> unbound
-        let unb_b = row.bindings.iter().find(|b| b.var_name == "unbound_var").unwrap();
+        let unb_b = row
+            .bindings
+            .iter()
+            .find(|b| b.var_name == "unbound_var")
+            .unwrap();
         assert_eq!(unb_b.target, BindingTarget::Unbound);
         assert_eq!(unb_b.validity, BindingValidity::Valid);
     }

@@ -209,7 +209,11 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
                 if let Some(ref note) = step.note {
                     step_payload.push(note.clone());
                 }
-                rb_steps.push((idx, step.id.clone(), step.target.entry_id().map(str::to_string)));
+                rb_steps.push((
+                    idx,
+                    step.id.clone(),
+                    step.target.entry_id().map(str::to_string),
+                ));
             }
         }
         (step_payload.join("\n"), entry.notes().to_string(), rb_steps)

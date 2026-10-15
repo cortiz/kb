@@ -1,6 +1,6 @@
  kb · ~/kb · 8 entries
  ›                                                                        8 / 8
-  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
 ┌ preview ─────────────────────────────────────────────────────────────────────┐
 │ Orders by status with comments                                               │
 │ sql · #db #orders · edited 2026-09-01                                        │
@@ -29,7 +29,6 @@
 1:3..4 reverse
 1:74..80 dim
 2:1..8 bold+reverse
-2:70..78 dim
 3:1..10 dim
 4:2..32 bold
 5:2..5 bold

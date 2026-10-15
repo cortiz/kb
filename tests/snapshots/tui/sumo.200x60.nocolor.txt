@@ -1,6 +1,6 @@
  kb · ~/kb · 8 entries
  ›                                                                                                                                                                                                8 / 8
-  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0   runbook 0
 ┌ results ─────────────────────────────────────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │ cmd    Deploy with secret token                                              ││ Long Sumo query with sixty lines                                                                                     │
 │        #deploy #prod                                                         ││ sumo · #prod #logs #long · edited 2026-09-30                                                                         │
@@ -66,6 +66,7 @@
 1:194..200 dim
 2:1..8 bold+reverse
 2:70..78 dim
+2:79..90 dim
 3:1..10 dim
 3:81..90 dim
 4:2..8 bold

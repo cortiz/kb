@@ -1069,12 +1069,7 @@ pub fn run(
 
                     guard.suspend();
                     let _ = crate::editfile::edit_and_save_runbook(
-                        platform,
-                        &mut ui_kb,
-                        &settings,
-                        &content,
-                        &target_id,
-                        false,
+                        platform, &mut ui_kb, &settings, &content, &target_id, false,
                     );
                     let _ = guard.resume();
                     if let Ok(size) = terminal.size() {

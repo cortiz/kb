@@ -138,12 +138,11 @@ impl std::str::FromStr for RuleCode {
         if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == s) {
             return Ok(c);
         }
-        if let Some(rest) = s.strip_prefix("KB0") {
-            if let Some((_, slug)) = rest.split_once('-') {
-                if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == slug) {
-                    return Ok(c);
-                }
-            }
+        if let Some(rest) = s.strip_prefix("KB0")
+            && let Some((_, slug)) = rest.split_once('-')
+            && let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == slug)
+        {
+            return Ok(c);
         }
         Err(format!("unknown rule code {s:?}"))
     }

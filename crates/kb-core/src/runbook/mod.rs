@@ -51,7 +51,7 @@ pub enum StepVarBinding {
 /// A single step in a runbook.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunbookStep {
-    /// Step identifier unique within the runbook ([a-z0-9][a-z0-9-]*).
+    /// Step identifier unique within the runbook (`[a-z0-9][a-z0-9-]*`).
     pub id: String,
     /// Whether `id` was explicitly specified in the frontmatter.
     pub id_explicit: bool,
@@ -159,7 +159,10 @@ pub(crate) fn parse_steps(node: &Node, sink: &mut Sink<'_>) -> Vec<RunbookStep> 
         sink.push(
             RuleCode::LongRunbook,
             span.start,
-            format!("runbook has {} steps; more than 50 is hard to follow under pressure", items.len()),
+            format!(
+                "runbook has {} steps; more than 50 is hard to follow under pressure",
+                items.len()
+            ),
             Some("consider breaking this runbook into shorter phases".into()),
         );
     }
@@ -196,7 +199,11 @@ pub(crate) fn parse_steps(node: &Node, sink: &mut Sink<'_>) -> Vec<RunbookStep> 
                     sink.push(
                         RuleCode::InvalidTitle,
                         sp.start,
-                        format!("step title is {} characters long; the limit is {}", s.chars().count(), crate::entry::MAX_TITLE_CHARS),
+                        format!(
+                            "step title is {} characters long; the limit is {}",
+                            s.chars().count(),
+                            crate::entry::MAX_TITLE_CHARS
+                        ),
                         Some("shorten step title".into()),
                     );
                     (s.to_string(), sp)
@@ -297,13 +304,21 @@ pub(crate) fn parse_steps(node: &Node, sink: &mut Sink<'_>) -> Vec<RunbookStep> 
         }
 
         // 4. Note
-        let note = item.get("note").and_then(|n| n.as_str().map(|s| s.trim().to_string()));
+        let note = item
+            .get("note")
+            .and_then(|n| n.as_str().map(|s| s.trim().to_string()));
 
         // 5. Optional
-        let optional = item.get("optional").and_then(|n| n.as_bool()).unwrap_or(false);
+        let optional = item
+            .get("optional")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false);
 
         // 6. Confirm
-        let confirm = item.get("confirm").and_then(|n| n.as_bool()).unwrap_or(false);
+        let confirm = item
+            .get("confirm")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false);
 
         // 7. Step vars
         let mut vars = BTreeMap::new();
@@ -315,8 +330,14 @@ pub(crate) fn parse_steps(node: &Node, sink: &mut Sink<'_>) -> Vec<RunbookStep> 
                     vars_spans.insert(var_name.clone(), v.span().clone());
                     if let Some(s) = v.as_str() {
                         let trimmed = s.trim();
-                        if let Some(stripped) = trimmed.strip_prefix("{{").and_then(|rest| rest.strip_suffix("}}")) {
-                            vars.insert(var_name, StepVarBinding::RunbookVar(stripped.trim().to_string()));
+                        if let Some(stripped) = trimmed
+                            .strip_prefix("{{")
+                            .and_then(|rest| rest.strip_suffix("}}"))
+                        {
+                            vars.insert(
+                                var_name,
+                                StepVarBinding::RunbookVar(stripped.trim().to_string()),
+                            );
                             continue;
                         }
                     }
@@ -339,7 +360,10 @@ pub(crate) fn parse_steps(node: &Node, sink: &mut Sink<'_>) -> Vec<RunbookStep> 
                 sink.push(
                     RuleCode::WrongValueType,
                     vars_node.span().start,
-                    format!("step `vars` must be a mapping, not a {}", vars_node.kind_name()),
+                    format!(
+                        "step `vars` must be a mapping, not a {}",
+                        vars_node.kind_name()
+                    ),
                     Some("write `vars:` with `name: value` pairs".into()),
                 );
             }
@@ -381,10 +405,10 @@ pub fn retarget_runbook_step_references(text: &str, old_id: &str, new_id: &str) 
 
     let mut replacements = Vec::new();
     for step in steps {
-        if let StepTarget::Entry(ref id) = step.target {
-            if id == old_id {
-                replacements.push(step.target_span.clone());
-            }
+        if let StepTarget::Entry(ref id) = step.target
+            && id == old_id
+        {
+            replacements.push(step.target_span.clone());
         }
     }
 
@@ -418,7 +442,10 @@ mod tests {
     #[test]
     fn test_slugify() {
         assert_eq!(slugify_step_title("Check error rate!"), "check-error-rate");
-        assert_eq!(slugify_step_title("Deploy {{version}} to {{env}}"), "deploy-version-to-env");
+        assert_eq!(
+            slugify_step_title("Deploy {{version}} to {{env}}"),
+            "deploy-version-to-env"
+        );
         assert_eq!(slugify_step_title("   "), "step");
     }
 
@@ -479,10 +506,17 @@ steps:
         assert_eq!(steps[1].id, "manual-step");
         assert!(!steps[1].id_explicit);
         assert_eq!(steps[1].title, "Manual step");
-        assert_eq!(steps[1].target, StepTarget::Do("Check slack channel".into()));
+        assert_eq!(
+            steps[1].target,
+            StepTarget::Do("Check slack channel".into())
+        );
         assert!(steps[1].optional);
         assert!(!steps[1].confirm);
-        assert!(sink.findings.iter().any(|f| f.code == RuleCode::ImplicitStepId));
+        assert!(
+            sink.findings
+                .iter()
+                .any(|f| f.code == RuleCode::ImplicitStepId)
+        );
     }
 
     #[test]
@@ -537,11 +571,9 @@ steps:
 
 Notes here.
 "#;
-        let retargeted = retarget_runbook_step_references(
-            text,
-            "sumo/5xx-authorizer",
-            "sumo/authorizer/5xx",
-        ).expect("should rewrite reference");
+        let retargeted =
+            retarget_runbook_step_references(text, "sumo/5xx-authorizer", "sumo/authorizer/5xx")
+                .expect("should rewrite reference");
 
         assert!(retargeted.contains("entry: sumo/authorizer/5xx"));
         assert!(retargeted.contains("# Initial check"));

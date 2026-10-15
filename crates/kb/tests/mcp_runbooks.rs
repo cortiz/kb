@@ -172,11 +172,31 @@ Owner: platform security.
     )
     .unwrap();
 
-    let _ = Command::new("git").args(["init"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.name", "Test Agent"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["config", "user.email", "agent@example.com"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["add", "-A"]).current_dir(&root).output().unwrap();
-    let _ = Command::new("git").args(["commit", "-m", "initial commit"]).current_dir(&root).output().unwrap();
+    let _ = Command::new("git")
+        .args(["init"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.name", "Test Agent"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["config", "user.email", "agent@example.com"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let _ = Command::new("git")
+        .args(["commit", "-m", "initial commit"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
 
     (temp, root)
 }
@@ -204,9 +224,8 @@ fn test_mcp_runbook_get_unresolved_and_hidden_steps() {
     assert_eq!(resp["id"], 2);
     assert_eq!(resp["result"]["isError"], false);
 
-    let parsed: Value = serde_json::from_str(
-        resp["result"]["content"][0]["text"].as_str().unwrap()
-    ).unwrap();
+    let parsed: Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
 
     assert_eq!(parsed["id"], "runbook/deploy");
     assert_eq!(parsed["type"], "runbook");
@@ -240,7 +259,10 @@ fn test_mcp_runbook_get_unresolved_and_hidden_steps() {
     // Binding table check
     let binding_table = parsed["binding_table"].as_array().expect("binding_table");
     assert!(!binding_table.is_empty());
-    let baseline_row = binding_table.iter().find(|r| r["step_id"] == "baseline").unwrap();
+    let baseline_row = binding_table
+        .iter()
+        .find(|r| r["step_id"] == "baseline")
+        .unwrap();
     assert_eq!(baseline_row["entry_id"], "sumo/5xx");
 
     client.close();
@@ -273,14 +295,23 @@ fn test_mcp_runbook_get_resolved() {
     assert_eq!(resp["id"], 3);
     assert_eq!(resp["result"]["isError"], false);
 
-    let parsed: Value = serde_json::from_str(
-        resp["result"]["content"][0]["text"].as_str().unwrap()
-    ).unwrap();
+    let parsed: Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
 
     let steps = parsed["steps"].as_array().expect("steps array");
     // Step 1: baseline resolved payload
-    assert!(steps[0]["resolved_payload"].as_str().unwrap().contains("_sourceCategory=api/prod"));
-    assert!(steps[0]["resolved_payload"].as_str().unwrap().contains("timeslice 15m"));
+    assert!(
+        steps[0]["resolved_payload"]
+            .as_str()
+            .unwrap()
+            .contains("_sourceCategory=api/prod")
+    );
+    assert!(
+        steps[0]["resolved_payload"]
+            .as_str()
+            .unwrap()
+            .contains("timeslice 15m")
+    );
 
     // Step 2: still hidden
     assert_eq!(steps[1]["hidden"], true);
@@ -288,7 +319,12 @@ fn test_mcp_runbook_get_resolved() {
 
     // Step 3: deploy title interpolated and payload resolved
     assert_eq!(steps[2]["title"], "Deploy v2.14.0 to prod");
-    assert!(steps[2]["resolved_payload"].as_str().unwrap().contains("deploy.sh --env prod --version v2.14.0"));
+    assert!(
+        steps[2]["resolved_payload"]
+            .as_str()
+            .unwrap()
+            .contains("deploy.sh --env prod --version v2.14.0")
+    );
 
     client.close();
 }
@@ -314,9 +350,8 @@ fn test_mcp_entry_used_in_and_update() {
     let resp = client.recv();
     assert_eq!(resp["id"], 4);
     assert_eq!(resp["result"]["isError"], false);
-    let parsed: Value = serde_json::from_str(
-        resp["result"]["content"][0]["text"].as_str().unwrap()
-    ).unwrap();
+    let parsed: Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     let used_in = parsed["used_in"].as_array().expect("used_in array");
     assert_eq!(used_in.len(), 1);
     assert_eq!(used_in[0]["id"], "runbook/deploy");
@@ -344,8 +379,11 @@ fn test_mcp_entry_used_in_and_update() {
     assert_eq!(update_resp["id"], 5);
     assert_eq!(update_resp["result"]["isError"], false);
     let update_parsed: Value = serde_json::from_str(
-        update_resp["result"]["content"][0]["text"].as_str().unwrap()
-    ).unwrap();
+        update_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
     let update_used_in = update_parsed["used_in"].as_array().expect("used_in array");
     assert_eq!(update_used_in.len(), 1);
     assert_eq!(update_used_in[0]["id"], "runbook/deploy");
@@ -388,9 +426,8 @@ fn test_mcp_runbook_create_and_update() {
     let resp = client.recv();
     assert_eq!(resp["id"], 6);
     assert_eq!(resp["result"]["isError"], false);
-    let parsed: Value = serde_json::from_str(
-        resp["result"]["content"][0]["text"].as_str().unwrap()
-    ).unwrap();
+    let parsed: Value =
+        serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(parsed["id"], "runbook/restart-services");
     assert!(root.join("runbook/restart-services.md").exists());
 
@@ -432,7 +469,12 @@ fn test_mcp_runbook_create_and_update() {
     let err_resp = client.recv();
     assert_eq!(err_resp["id"], 7);
     assert_eq!(err_resp["result"]["isError"], true);
-    assert!(err_resp["result"]["content"][0]["text"].as_str().unwrap().contains("KB082"));
+    assert!(
+        err_resp["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("KB082")
+    );
 
     // 3. Update runbook steps
     let version = parsed["version"].as_str().unwrap().to_string();

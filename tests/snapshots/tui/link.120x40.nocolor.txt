@@ -1,6 +1,6 @@
  kb · ~/kb · 8 entries
  ›                                                                                                                8 / 8
-  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0   runbook 0
 ┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
 │ cmd    Deploy with secret token              ││ Very long documentation link                                         │
 │        #deploy #prod                         ││ https://wiki.example.com/engineering/operations/runbooks/payments/in │
@@ -46,6 +46,7 @@
 1:114..120 dim
 2:1..8 bold+reverse
 2:70..78 dim
+2:79..90 dim
 3:1..10 dim
 3:49..58 dim
 4:2..8 bold

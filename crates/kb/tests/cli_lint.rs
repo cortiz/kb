@@ -413,7 +413,10 @@ steps:
     let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
     assert_eq!(code, 1);
     assert!(out.contains("KB082-step-missing-entry"), "{out}");
-    assert!(out.contains("referenced entry `nonexistent/missing-entry` does not exist"), "{out}");
+    assert!(
+        out.contains("referenced entry `nonexistent/missing-entry` does not exist"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -503,7 +506,11 @@ Notes.
     assert!(out.contains("did you mean `sumo/5xx-by-authorizer`?"));
 
     // Run kb lint --fix --yes
-    let (out_fix, code_fix) = stdout(kb().arg("--root").arg(&root).args(["lint", "--fix", "--yes"]));
+    let (out_fix, code_fix) = stdout(
+        kb().arg("--root")
+            .arg(&root)
+            .args(["lint", "--fix", "--yes"]),
+    );
     assert_eq!(code_fix, 0, "fixed runbook should pass lint: {out_fix}");
 
     // Check file content updated preserving comments
@@ -523,4 +530,3 @@ Notes.
         "commit msg: {commit_msg}"
     );
 }
-

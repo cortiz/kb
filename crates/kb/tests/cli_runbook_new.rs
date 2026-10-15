@@ -176,7 +176,14 @@ fn runbook_new_missing_entry_fails() {
 fn runbook_new_without_yes_in_non_terminal_fails() {
     let (_d, root) = fixture_kb();
     let out = support::kb_without_terminal(
-        &["--root", root.to_str().unwrap(), "runbook", "new", "Interactive Runbook", "sumo/5xx"],
+        &[
+            "--root",
+            root.to_str().unwrap(),
+            "runbook",
+            "new",
+            "Interactive Runbook",
+            "sumo/5xx",
+        ],
         &[("KB_TEST_NOW", NOW)],
     );
 

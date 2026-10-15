@@ -702,9 +702,10 @@ pub fn key_bar(map: &EffectiveKeymap, normal: bool, kind: BarKind, width: usize)
                         EntryType::Sumo | EntryType::Cw => it(3, 6, hint(Cmd::Open, "console")),
                         EntryType::Cmd => it(3, 6, hint(Cmd::Run, "run")),
                         EntryType::Code => it(3, 6, hint(Cmd::Open, "code view")),
-                        EntryType::Sql | EntryType::Prompt | EntryType::Note | EntryType::Runbook => {
-                            it(3, 4, hint(Cmd::Copy, "copy"))
-                        }
+                        EntryType::Sql
+                        | EntryType::Prompt
+                        | EntryType::Note
+                        | EntryType::Runbook => it(3, 4, hint(Cmd::Copy, "copy")),
                     });
                     items.push(it(4, 5, hint(Cmd::Edit, "edit")));
                     items.push(it(5, 7, hint(Cmd::ActionMenu, "actions")));

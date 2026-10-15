@@ -27,7 +27,9 @@ impl CompletionKind {
 }
 
 pub fn complete_types(prefix: Option<&str>) -> Vec<String> {
-    const TYPES: [&str; 8] = ["cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook"];
+    const TYPES: [&str; 8] = [
+        "cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook",
+    ];
     TYPES
         .iter()
         .filter(|t| prefix.is_none_or(|p| t.starts_with(p)))
@@ -264,7 +266,9 @@ mod tests {
         let all = complete_types(None);
         assert_eq!(
             all,
-            vec!["cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook"]
+            vec![
+                "cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook"
+            ]
         );
 
         let filtered = complete_types(Some("c"));

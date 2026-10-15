@@ -17,9 +17,7 @@ use super::highlight::Span as TokSpan;
 use super::keys::{self, BarKind, Mode};
 use super::layout::{self, Layout, Screen, pad, truncate, truncate_middle, width};
 use super::markdown;
-use super::preview::{
-    PreviewModel, StepPreview, StepPreviewStatus, StepPreviewTarget, VarRow,
-};
+use super::preview::{PreviewModel, StepPreview, StepPreviewStatus, StepPreviewTarget, VarRow};
 use super::theme::Class;
 use super::theme::Theme;
 
@@ -892,13 +890,19 @@ fn meta_spans(m: &PreviewModel, theme: &Theme, cols: usize) -> Vec<Span<'static>
             parts.push(format!("{missing} missing"));
         }
         if errors > 0 {
-            parts.push(format!("{errors} error{}", if errors == 1 { "" } else { "s" }));
+            parts.push(format!(
+                "{errors} error{}",
+                if errors == 1 { "" } else { "s" }
+            ));
         }
         if agent > 0 {
             parts.push(format!("{agent} agent"));
         }
         if !parts.is_empty() {
-            spans.push(Span::styled(format!(" · {}", parts.join(", ")), theme.warning()));
+            spans.push(Span::styled(
+                format!(" · {}", parts.join(", ")),
+                theme.warning(),
+            ));
         }
     }
     let _ = cols;
@@ -938,10 +942,9 @@ fn step_spans(s: &StepPreview, theme: &Theme, cols: usize) -> Vec<Span<'static>>
         title: Some(entry_title),
         ..
     } = &s.target
+        && entry_title != &s.title
     {
-        if entry_title != &s.title {
-            spans.push(Span::styled(format!(" · {entry_title}"), theme.muted()));
-        }
+        spans.push(Span::styled(format!(" · {entry_title}"), theme.muted()));
     }
 
     // 5. Status indicators
@@ -969,12 +972,11 @@ fn step_spans(s: &StepPreview, theme: &Theme, cols: usize) -> Vec<Span<'static>>
 
     // 7. Bindings
     if !s.bindings.is_empty() {
-        let b_str: Vec<String> = s
-            .bindings
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect();
-        spans.push(Span::styled(format!(" ({})", b_str.join(", ")), theme.muted()));
+        let b_str: Vec<String> = s.bindings.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        spans.push(Span::styled(
+            format!(" ({})", b_str.join(", ")),
+            theme.muted(),
+        ));
     }
 
     let _ = cols;
