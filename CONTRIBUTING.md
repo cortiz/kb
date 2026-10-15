@@ -67,3 +67,11 @@ Tests that touch the clipboard use fake `pbpaste` / `wl-paste` programs on `PATH
 test gets its own `TMPDIR` when it checks that temp files are cleaned up. `KB_TEST_NOW` fixes the
 clock in debug builds. Never point a test at `~/kb` or the real clipboard.
 
+
+## Re-recording the README demo
+
+`scripts/demo/record.sh` plays `scripts/demo/storyboard.py` against a throwaway KB with a real
+`kb` build (`cargo build --release` first) and rewrites `demo.cast` and `demo.gif`. It needs
+`python3` and [`agg`](https://github.com/asciinema/agg). Edit the storyboard to change what the
+demo shows; `scripts/demo/drive.py <kb> <root> <out.cast> --peek` (with `pip install pyte`) prints
+the screen at each `mark(...)` so you can check it without rendering a GIF.

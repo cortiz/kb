@@ -5,6 +5,8 @@ CloudWatch queries, shell commands, prompts, links and code locations. Each snip
 Markdown file you can edit by hand, and `kb` is a single terminal binary that checks and searches
 them.
 
+![kb demo: search, fill in variables, copy, vim mode, add from the clipboard, lint](demo.gif)
+
 > Status: milestone MCP (012-mcp-server: stdio MCP server for AI agents, human review workflow, secret shielding).
 
 ## Install
