@@ -256,7 +256,7 @@ fn default_fields(ty: EntryType) -> DraftFields {
             shell: None,
             cwd: None,
         },
-        EntryType::Prompt => DraftFields::None,
+        EntryType::Prompt | EntryType::Note => DraftFields::None,
         EntryType::Link => DraftFields::Link { url: String::new() },
         EntryType::Code => DraftFields::Code {
             repo: String::new(),
@@ -298,6 +298,7 @@ impl Draft {
             None => (detection.ty, false),
         };
         let fields = fields_for(ty, &detection, &normalized);
+        let note_text = (ty == EntryType::Note).then(|| normalized.clone());
         let body = if !ty.has_payload() {
             String::new()
         } else if detection.body.is_empty() {
@@ -312,9 +313,15 @@ impl Draft {
         let mut draft = Draft::new(source, ty, detection, opts);
         draft.fields = fields;
         draft.body = body;
+        if let Some(text) = note_text {
+            draft.notes = text;
+        }
         draft.type_chosen = type_chosen;
         if draft.title.is_empty() {
             draft.title = suggest_title(ty, &draft.body, &draft.fields);
+        }
+        if draft.title.is_empty() && ty == EntryType::Note {
+            draft.title = crate::entry::note_title_from_body(&draft.notes).unwrap_or_default();
         }
         draft.refresh();
         draft

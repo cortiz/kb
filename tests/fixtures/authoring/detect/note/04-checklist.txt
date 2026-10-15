@@ -1,0 +1,5 @@
+# Release checklist
+
+- [ ] Bump the version
+- [ ] Tag the commit
+- [x] Update the changelog

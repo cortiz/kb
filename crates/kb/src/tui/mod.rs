@@ -18,6 +18,7 @@ pub mod keys;
 pub mod layout;
 pub mod markdown;
 pub mod preview;
+pub mod render_cache;
 pub mod run_modal;
 pub mod terminal;
 pub mod theme;
@@ -206,12 +207,14 @@ pub fn run(
                     id,
                     modified,
                     use_count,
+                    cols,
                 } => {
                     let _ = worker.tx.send(Request::Preview {
                         generation,
                         id,
                         modified,
                         use_count,
+                        cols,
                     });
                 }
                 Effect::Pick => {
@@ -248,6 +251,16 @@ pub fn run(
                         )),
                     };
                     pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::FollowLink(id) => {
+                    let action = follow_links(&ui_kb, &id);
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
+                Effect::CopyRenderedText => {
+                    let report = copy_rendered_text(platform, &clipboard_settings, &state, &ui_kb);
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
                     dirty = true;
                 }
                 Effect::CopyTemplate => {
@@ -942,7 +955,7 @@ pub fn run(
                         &to,
                         &state.options.settings,
                     ) {
-                        Ok((renamed, _)) => Action::Renamed {
+                        Ok((renamed, _, _)) => Action::Renamed {
                             from: renamed.from,
                             to: renamed.to,
                         },
@@ -1230,6 +1243,73 @@ fn copy_selected(
         }
     };
     let outcome = clipboard::copy(platform, settings, &payload, Place::Ui);
+    if outcome.sent() {
+        let _ = kb.record_use(id, SystemTime::now());
+    }
+    CopyReport {
+        message: outcome.message_short(),
+        sent: outcome.sent(),
+    }
+}
+
+/// What "Follow entry link" does for note `id`: go straight to the only linked entry, or list them.
+fn follow_links(kb: &Kb, id: &str) -> Action {
+    let say = |message: String| {
+        Action::CopyDone(CopyReport {
+            message,
+            sent: false,
+        })
+    };
+    let entry = match kb.entry(id) {
+        Ok(e) => e,
+        Err(e) => return say(format!("Error loading entry '{id}': {e}")),
+    };
+    let mut choices: Vec<action_view::LinkChoice> = Vec::new();
+    for link in kb_core::entry::link::extract_links(entry.notes()) {
+        if choices.iter().any(|c| c.id == link.target_id) {
+            continue;
+        }
+        let target = crate::show::link_lookup(kb, &link.target_id);
+        choices.push(action_view::LinkChoice {
+            id: link.target_id,
+            target,
+        });
+    }
+    match choices.as_slice() {
+        [] => say("This note has no entry links".into()),
+        [only] => match &only.target {
+            Some((_, title)) => Action::GoToEntry {
+                id: only.id.clone(),
+                title: title.clone(),
+            },
+            None => say(format!("No entry named {}", only.id)),
+        },
+        _ => Action::OpenLinkPicker(Box::new(action_view::LinkPickerState {
+            choices,
+            selected: 0,
+        })),
+    }
+}
+
+/// A note as the plain text it is drawn as.
+fn copy_rendered_text(
+    platform: &impl Platform,
+    settings: &ClipboardSettings,
+    state: &AppState,
+    kb: &Kb,
+) -> CopyReport {
+    let failed = |m: String| CopyReport {
+        message: m,
+        sent: false,
+    };
+    let Some(id) = &state.selected_id else {
+        return failed("Copy failed: nothing selected".into());
+    };
+    let text = match crate::show::rendered_text(kb, id) {
+        Ok(t) => t,
+        Err(e) => return failed(format!("Copy failed: {e}")),
+    };
+    let outcome = clipboard::copy(platform, settings, &text, Place::Ui);
     if outcome.sent() {
         let _ = kb.record_use(id, SystemTime::now());
     }
@@ -1603,7 +1683,7 @@ fn edit_body(
     let ext = match ty {
         EntryType::Sql => "sql",
         EntryType::Cmd => "sh",
-        EntryType::Prompt => "md",
+        EntryType::Prompt | EntryType::Note => "md",
         _ => "txt",
     };
     let temp = match platform.private_temp_file(ext, text.as_bytes()) {

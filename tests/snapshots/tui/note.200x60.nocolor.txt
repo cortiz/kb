@@ -1,0 +1,172 @@
+ kb · ~/kb · 15 entries
+ ›                                                                                                                                                                                              15 / 15
+  all 15   sql 1   sumo 2   cw 1   cmd 1   prompt 2   link 1   code 1   note 6
+┌ results ─────────────────────────────────────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ cmd    Deploy with secret token                                              ││ Role cache TTL and Redis architecture                                                                                │
+│        #deploy #prod                                                         ││ note · #auth #redis #architecture · edited 2026-10-14                                                                │
+│ code   Retry handler with symbol                                             ││ note/role-cache-ttl.md                                                                                               │
+│        #api #retry                                                           ││                                                                                                                      │
+│ cw     Lambda timeouts by function                                           ││ Role cache TTL and Redis architecture                                                                                │
+│        #prod #lambda                                                         ││ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                                                                │
+│ link   Very long documentation link                                          ││                                                                                                                      │
+│        #docs                                                                 ││ The authorizer caches user roles in Redis for 300 seconds to protect the PostgreSQL primary.                         │
+│ note   Rotate the signing key                                                ││                                                                                                                      │
+│        #ops                                                                  ││ Architecture                                                                                                         │
+│ note   Authorizer runbook links                                              ││ ────────────                                                                                                         │
+│        #auth                                                                 ││                                                                                                                      │
+│ note   Hostile note                                                          ││ See operational telemetry in [sumo] 5xx by authorizer.                                                               │
+│        #test                                                                 ││                                                                                                                      │
+│ note   Ports and owners                                                      ││ Cache invalidation table                                                                                             │
+│        #ops                                                                  ││                                                                                                                      │
+│ note   Private planning                                                      ││ ┌────────────────┬─────────────┬───────────┐                                                                         │
+│        #private #planning                                                    ││ │ Event          │ Action      │    TTL    │                                                                         │
+│ note   Role cache TTL and Redis architecture                                 ││ ├────────────────┼─────────────┼───────────┤                                                                         │
+│        #auth #redis #architecture                                            ││ │ Role Revoke    │ Redis DEL   │ Immediate │                                                                         │
+│ prompt 日本語のタイトル 🚀 とても長いタイトルがここに続きます。端末の幅を超… ││ │ Role Grant     │ Redis SETEX │   300 s   │                                                                         │
+│        #日本語 #🚀 #ops                                                      ││ │ Session Expiry │ Evicted     │  Natural  │                                                                         │
+│ prompt Summarize an incident                                                 ││ └────────────────┴─────────────┴───────────┘                                                                         │
+│        #incident #ai                                                         ││                                                                                                                      │
+│ sql    Orders by status with comments                                        ││ ▌ ⚠ Warning                                                                                                          │
+│        #db #orders                                                           ││ ▌ Never set TTL lower than 60 seconds during active incidents without team approval.                                 │
+│ sumo   5xx by authorizer                                                     ││                                                                                                                      │
+│        #auth #lambda                                                         ││ ☐ Check the hit ratio                                                                                                │
+│ sumo   Long Sumo query with sixty lines                                      ││ ☑ Read the runbook                                                                                                   │
+│        #prod #logs #long                                                     ││                                                                                                                      │
+│                                                                              ││ ┌─ python ──────────────────────────────────────────┐                                                                │
+│                                                                              ││ │ # Check Redis TTL directly                        │                                                                │
+│                                                                              ││ │ import redis                                      │                                                                │
+│                                                                              ││ │ r = redis.Redis(host="redis.internal", port=6379) │                                                                │
+│                                                                              ││ │ print(r.ttl("role:user_42"))                      │                                                                │
+│                                                                              ││ └───────────────────────────────────────────────────┘                                                                │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││ Strike this and a footnote[1].                                                                                       │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││ ────────────────────                                                                                                 │
+│                                                                              ││ [1] Footnote text.                                                                                                   │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+│                                                                              ││                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ select · Enter pick · ^Y copy · ^E edit · Alt-A actions · ? help · Esc quit
+--- styles ---
+0:0..3 bold
+0:3..23 dim
+1:0..3 bold
+1:3..4 reverse
+1:192..200 dim
+2:1..9 bold+reverse
+3:1..10 dim
+3:81..90 dim
+4:2..8 bold
+4:82..119 bold
+5:9..16 dim
+5:17..22 dim
+5:82..86 bold
+5:86..135 dim
+6:2..8 bold
+6:82..104 dim
+7:9..13 dim
+7:14..20 dim
+8:2..8 bold
+8:82..119 bold
+9:9..14 dim
+9:15..22 dim
+9:82..119 bold
+10:2..8 bold
+11:9..14 dim
+12:2..8 bold
+13:9..13 dim
+13:82..94 bold
+14:2..8 bold
+14:82..94 dim
+15:9..14 dim
+16:2..8 bold
+16:111..117 bold
+16:118..135 underline
+17:9..14 dim
+18:2..8 bold
+18:82..106 bold
+19:9..13 dim
+20:2..8 bold
+20:82..126 dim
+21:9..17 dim
+21:18..27 dim
+21:82..83 dim
+21:84..89 bold
+21:99..100 dim
+21:101..107 bold
+21:113..114 dim
+21:118..121 bold
+21:125..126 dim
+22:1..2 reverse
+22:2..8 bold+reverse
+22:8..79 reverse
+22:82..126 dim
+23:1..9 reverse
+23:9..14 dim+reverse
+23:14..15 reverse
+23:15..21 dim+reverse
+23:21..22 reverse
+23:22..35 dim+reverse
+23:35..79 reverse
+23:82..83 dim
+23:99..100 dim
+23:113..114 dim
+23:125..126 dim
+24:2..8 bold
+24:82..83 dim
+24:99..100 dim
+24:113..114 dim
+24:125..126 dim
+25:9..11 dim
+25:12..13 dim
+25:14..15 dim
+25:17..19 dim
+25:21..25 dim
+25:82..83 dim
+25:99..100 dim
+25:113..114 dim
+25:125..126 dim
+26:2..8 bold
+26:82..126 dim
+27:9..18 dim
+27:19..22 dim
+28:2..8 bold
+28:82..93 bold
+29:9..12 dim
+29:13..20 dim
+29:82..84 bold
+30:2..8 bold
+31:9..14 dim
+31:15..22 dim
+31:82..84 dim
+32:2..8 bold
+32:82..100 dim
+33:9..14 dim
+33:15..20 dim
+33:21..26 dim
+34:82..135 dim
+35:82..84 dim
+35:133..135 dim
+36:82..84 dim
+36:133..135 dim
+37:82..84 dim
+37:133..135 dim
+38:82..84 dim
+38:133..135 dim
+39:82..135 dim
+41:89..93 dim
+41:108..111 dim
+43:82..102 dim
+44:82..86 dim
+59:1..79 dim

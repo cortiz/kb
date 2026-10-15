@@ -56,6 +56,28 @@ pub fn compute_unified_diff(path: &str, old_text: &str, new_text: &str) -> Strin
     out
 }
 
+/// `bytes` (a rendered entry) with its `created:` line set to `created`.
+fn keep_created(bytes: &[u8], created: &str) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
+    let Some(end) = text.find("\n---\n").map(|i| i + 1) else {
+        return bytes.to_vec();
+    };
+    let (front, rest) = text.split_at(end);
+    let front: Vec<String> = front
+        .split('\n')
+        .map(|l| {
+            if l.starts_with("created:") {
+                format!("created: {created}")
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    format!("{}{rest}", front.join("\n")).into_bytes()
+}
+
 fn parse_draft_fields(
     entry_type: EntryType,
     fields: &BTreeMap<String, serde_json::Value>,
@@ -139,7 +161,7 @@ fn parse_draft_fields(
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
         },
-        EntryType::Prompt => DraftFields::None,
+        EntryType::Prompt | EntryType::Note => DraftFields::None,
     }
 }
 
@@ -150,21 +172,17 @@ impl<'a> McpEngine<'a> {
         req: &CreateEntryRequest,
         client_name: Option<&str>,
     ) -> Result<CreateEntryResponse, KbError> {
-        let title = req.title.trim();
-        if title.is_empty() {
-            return Err(KbError::Unreadable("title cannot be empty".into()));
-        }
-        if title.len() > 120 {
-            return Err(KbError::Unreadable("title exceeds 120 characters".into()));
-        }
-
-        // Determine entry type (explicit or detected)
+        // Determine entry type (explicit, a note when `content` is given, or detected)
         let (entry_type, detection) = if let Some(t_str) = &req.entry_type {
             let ty = EntryType::from_name(t_str)
                 .ok_or_else(|| KbError::Unreadable(format!("unknown entry type '{t_str}'")))?;
             let mut det = detect(&req.payload);
             det.ty = ty;
             (ty, det)
+        } else if req.content.is_some() {
+            let mut det = detect(&req.payload);
+            det.ty = EntryType::Note;
+            (EntryType::Note, det)
         } else {
             let det = detect(&req.payload);
             if det.confidence == Confidence::Low {
@@ -175,6 +193,39 @@ impl<'a> McpEngine<'a> {
             }
             (det.ty, det)
         };
+
+        // A note is all Markdown; its title may be the first `# heading`
+        let is_note = entry_type == EntryType::Note;
+        let note_body = is_note.then(|| {
+            req.content
+                .clone()
+                .or_else(|| req.notes.clone().filter(|n| !n.trim().is_empty()))
+                .unwrap_or_else(|| req.payload.clone())
+        });
+        if is_note && !req.vars.is_empty() {
+            return Err(KbError::Unreadable(
+                "notes do not support variables (remove 'vars')".into(),
+            ));
+        }
+        if !is_note && req.payload.is_empty() {
+            return Err(KbError::Unreadable("'payload' is required".into()));
+        }
+        let derived_title = match (&note_body, req.title.trim().is_empty()) {
+            (Some(body), true) => crate::entry::note_title_from_body(body),
+            _ => None,
+        };
+        let title = derived_title.as_deref().unwrap_or(req.title.trim());
+        if title.is_empty() {
+            return Err(KbError::Unreadable(if is_note {
+                "a note needs a 'title', or 'content' that starts with a level-1 heading (# Title)"
+                    .into()
+            } else {
+                "title cannot be empty".into()
+            }));
+        }
+        if title.chars().count() > 120 {
+            return Err(KbError::Unreadable("title exceeds 120 characters".into()));
+        }
 
         // Check mcp.write_types filter
         let allowed_types = self.settings.mcp_write_types();
@@ -236,8 +287,8 @@ impl<'a> McpEngine<'a> {
             );
         }
 
-        // Auto-declaration of undeclared placeholders
-        for brace in scan_refs(&req.payload) {
+        // Auto-declaration of undeclared placeholders (a note has none: `{{x}}` is text there)
+        for brace in scan_refs(if is_note { "" } else { &req.payload }) {
             if let Brace::Ref { name, .. } = brace
                 && !vars_map.contains_key(&name)
             {
@@ -263,8 +314,14 @@ impl<'a> McpEngine<'a> {
             title: title.to_string(),
             tags: req.tags.clone(),
             fields,
-            body: req.payload.clone(),
-            notes: req.notes.clone().unwrap_or_default(),
+            body: if is_note {
+                String::new()
+            } else {
+                req.payload.clone()
+            },
+            notes: note_body
+                .clone()
+                .unwrap_or_else(|| req.notes.clone().unwrap_or_default()),
             vars: draft_vars,
             suggestions: Vec::new(),
             path: PathChoice::Fixed(id.clone()),
@@ -282,10 +339,17 @@ impl<'a> McpEngine<'a> {
         for f in &check.findings {
             let is_sec = (60..=65).contains(&f.code.number());
             if is_sec {
-                secret_err = Some(format!(
-                    "refusing to write entry with likely secrets (Rule {} on line {})",
-                    f.code, f.line
-                ));
+                secret_err = Some(if is_note {
+                    format!(
+                        "Error: SecretDetected - Note content contains sensitive credentials (rule {} on line {}).",
+                        f.code, f.line
+                    )
+                } else {
+                    format!(
+                        "refusing to write entry with likely secrets (Rule {} on line {})",
+                        f.code, f.line
+                    )
+                });
             }
             if f.severity == Severity::Error {
                 has_error = true;
@@ -393,21 +457,45 @@ impl<'a> McpEngine<'a> {
         }
 
         // Construct updated values
-        let new_title = req
-            .changes
-            .title
-            .as_deref()
-            .unwrap_or_else(|| entry.title().unwrap_or(""));
+        let is_note = entry_type == EntryType::Note;
+        if is_note {
+            let c = &req.changes;
+            if c.payload.is_some() {
+                return Err(KbError::Unreadable(
+                    "a note has no payload: use 'content' for its Markdown".into(),
+                ));
+            }
+            if c.vars.is_some() || c.set_vars.is_some() || c.remove_vars.is_some() {
+                return Err(KbError::Unreadable("notes do not support variables".into()));
+            }
+        }
+        // a note whose title comes from its `# heading` keeps doing so
+        let title_is_written = entry
+            .tree()
+            .get("title")
+            .is_some_and(|n| !n.is_null() && n.as_str().is_none_or(|s| !s.trim().is_empty()));
+        let new_title = match req.changes.title.as_deref() {
+            Some(t) => t,
+            None if is_note && !title_is_written => "",
+            None => entry.title().unwrap_or(""),
+        };
         let new_payload = req
             .changes
             .payload
             .clone()
             .unwrap_or_else(|| entry.payload().map(|p| p.text.clone()).unwrap_or_default());
-        let new_notes = req
-            .changes
-            .notes
-            .clone()
-            .unwrap_or_else(|| entry.notes().to_string());
+        let new_notes = if is_note {
+            req.changes
+                .content
+                .clone()
+                .or_else(|| req.changes.notes.clone())
+                .unwrap_or_else(|| entry.notes().to_string())
+        } else {
+            req.changes
+                .notes
+                .clone()
+                .unwrap_or_else(|| entry.notes().to_string())
+        };
 
         // Tags mutation: full replacement or add/remove deltas
         let mut tags = entry.tags().to_vec();
@@ -578,7 +666,9 @@ impl<'a> McpEngine<'a> {
                     }
                 }
             }
-            crate::entry::TypeFields::Prompt | crate::entry::TypeFields::Unknown => {}
+            crate::entry::TypeFields::Prompt
+            | crate::entry::TypeFields::Note
+            | crate::entry::TypeFields::Unknown => {}
         }
 
         if let Some(ch_fields) = &req.changes.fields {
@@ -606,7 +696,11 @@ impl<'a> McpEngine<'a> {
             type_chosen: true,
         };
 
-        let check = draft.check(&req.id, &SystemClock);
+        let mut check = draft.check(&req.id, &SystemClock);
+        // an update changes `updated`, not when the entry was made
+        if let Some(created) = entry.created() {
+            check.bytes = keep_created(&check.bytes, created);
+        }
 
         // Validate findings
         let mut finding_views: Vec<FindingView> = Vec::new();
@@ -616,10 +710,17 @@ impl<'a> McpEngine<'a> {
         for f in &check.findings {
             let is_sec = (60..=65).contains(&f.code.number());
             if is_sec {
-                secret_err = Some(format!(
-                    "refusing to update entry with likely secrets (Rule {} on line {})",
-                    f.code, f.line
-                ));
+                secret_err = Some(if is_note {
+                    format!(
+                        "Error: SecretDetected - Note content contains sensitive credentials (rule {} on line {}).",
+                        f.code, f.line
+                    )
+                } else {
+                    format!(
+                        "refusing to update entry with likely secrets (Rule {} on line {})",
+                        f.code, f.line
+                    )
+                });
             }
             if f.severity == Severity::Error {
                 has_error = true;
@@ -731,6 +832,7 @@ mod tests {
             tags: vec!["auth".into()],
             payload: "_sourceCategory={{env}}/api | count by status".into(),
             notes: Some("Check error spike".into()),
+            content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
             path: None,
@@ -770,6 +872,7 @@ mod tests {
             tags: vec!["ops".into()],
             payload: "kubectl logs -f deployment/{{service}}".into(),
             notes: None,
+            content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
             path: None,
@@ -786,6 +889,7 @@ mod tests {
             tags: vec![],
             payload: "export AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".into(),
             notes: None,
+            content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
             path: None,
@@ -806,6 +910,7 @@ mod tests {
             tags: vec!["stats".into()],
             payload: "_sourceCategory=web | count by user".into(),
             notes: Some("Initial notes".into()),
+            content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
             path: None,
@@ -819,6 +924,7 @@ mod tests {
             version: "wrongversionhash".into(),
             changes: ChangeSet {
                 notes: Some("New notes".into()),
+                content: None,
                 ..Default::default()
             },
             dry_run: false,
@@ -833,6 +939,7 @@ mod tests {
             changes: ChangeSet {
                 add_tags: Some(vec!["prod".into()]),
                 notes: Some("Updated notes".into()),
+                content: None,
                 ..Default::default()
             },
             dry_run: true,

@@ -61,6 +61,9 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     if let Some(ref menu) = state.action_menu {
         super::action_view::draw_action_menu(state, menu, theme, area, buf);
     }
+    if let Some(ref picker) = state.link_picker {
+        super::action_view::draw_link_picker(picker, theme, area, buf);
+    }
     if let Some(ref h) = state.history {
         super::history_view::draw_history(h, theme, area, buf);
     }
@@ -472,11 +475,20 @@ enum Row {
     Notes(usize),
 }
 
+/// Where a hyperlink sits in a drawn preview: columns `x0..x1` of row `y` of the buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkRegion {
+    pub y: u16,
+    pub x0: u16,
+    pub x1: u16,
+    pub url: String,
+}
+
 struct PreviewLayout {
     rows: Vec<Row>,
     urls: Vec<String>,
     code: Vec<(&'static str, String)>,
-    notes: Vec<Vec<TokSpan>>,
+    notes: std::sync::Arc<Vec<markdown::NoteLine>>,
 }
 
 /// Splits `s` into pieces of at most `cols` columns (URLs have no spaces to wrap at).
@@ -541,10 +553,13 @@ fn preview_layout(m: &PreviewModel, cols: usize) -> PreviewLayout {
         rows.push(Row::Rule("fields"));
         rows.extend((0..m.fields.len()).map(Row::Field));
     }
-    let notes = markdown::wrap(&m.notes, cols);
+    let notes = m.notes.lines(cols);
     if !notes.is_empty() {
         rows.push(Row::Blank);
-        rows.push(Row::Rule("notes"));
+        // a note is all body: no label over it
+        if m.meta.as_ref().map(|x| x.entry_type) != Some(EntryType::Note) {
+            rows.push(Row::Rule("notes"));
+        }
         rows.extend((0..notes.len()).map(Row::Notes));
     }
     PreviewLayout {
@@ -563,6 +578,12 @@ fn preview_inner(state: &AppState) -> Option<Rect> {
     };
     let r = l.preview?;
     (r.width > 2 && r.height > 2).then(|| Rect::new(r.x + 1, r.y + 1, r.width - 2, r.height - 2))
+}
+
+/// The columns the preview text is laid out in for the current size and layout mode.
+pub fn preview_cols(state: &AppState) -> Option<usize> {
+    let inner = preview_inner(state)?;
+    Some(usize::from(inner.width).saturating_sub(2).max(4))
 }
 
 /// `(rows in the preview, rows that fit)` for the selected entry, or `None` without a preview.
@@ -642,7 +663,12 @@ fn draw_preview(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     }
     let Some(m) = &state.preview else {
         if !state.results.is_empty() {
-            buf.set_string(inner.x + 1, inner.y, "…", theme.muted());
+            // a note is parsed and highlighted on the worker, which can take a moment
+            let note = state
+                .selected_result()
+                .is_some_and(|r| r.entry_type == EntryType::Note);
+            let text = if note { "rendering…" } else { "…" };
+            buf.set_string(inner.x + 1, inner.y, text, theme.muted());
         }
         return;
     };
@@ -681,6 +707,20 @@ fn draw_preview_rows(
     inner: Rect,
     scroll: usize,
     buf: &mut Buffer,
+) {
+    draw_preview_rows_linked(m, lay, stale, theme, inner, scroll, buf, None);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_preview_rows_linked(
+    m: &PreviewModel,
+    lay: &PreviewLayout,
+    stale: bool,
+    theme: &Theme,
+    inner: Rect,
+    scroll: usize,
+    buf: &mut Buffer,
+    mut links: Option<&mut Vec<LinkRegion>>,
 ) {
     let cols = usize::from(inner.width).saturating_sub(2);
     let height = usize::from(inner.height);
@@ -736,7 +776,13 @@ fn draw_preview_rows(
                     Span::styled(truncate(v, cols.saturating_sub(11)), theme.text()),
                 ]
             }
-            Row::Notes(i) => tok(&lay.notes[i], theme),
+            Row::Notes(i) => {
+                let line = lay.notes[i].spans();
+                if let Some(out) = links.as_deref_mut() {
+                    note_links(&line, y, x, inner.x + inner.width, out);
+                }
+                tok(&line, theme)
+            }
         };
         buf.set_line(x, y, &Line::from(spans), inner.width.saturating_sub(1));
     }
@@ -745,13 +791,49 @@ fn draw_preview_rows(
 /// The whole preview of one entry as a buffer `width` columns wide and exactly tall enough, for
 /// `kb show`. It is the same drawing code as the UI's preview pane.
 pub fn render_preview(m: &PreviewModel, theme: &Theme, width: u16) -> Buffer {
+    render_preview_links(m, theme, width).0
+}
+
+/// [`render_preview`], and where the Markdown links of a note are in the buffer. Only links kb may
+/// turn into terminal hyperlinks are listed.
+pub fn render_preview_links(
+    m: &PreviewModel,
+    theme: &Theme,
+    width: u16,
+) -> (Buffer, Vec<LinkRegion>) {
     let cols = usize::from(width).saturating_sub(2).max(4);
     let lay = preview_layout(m, cols);
     let height = u16::try_from(lay.rows.len()).unwrap_or(u16::MAX);
     let area = Rect::new(0, 0, width, height);
     let mut buf = Buffer::empty(area);
-    draw_preview_rows(m, &lay, false, theme, area, 0, &mut buf);
-    buf
+    let mut links = Vec::new();
+    draw_preview_rows_linked(m, &lay, false, theme, area, 0, &mut buf, Some(&mut links));
+    (buf, links)
+}
+
+/// The linked spans of one drawn line, as regions (cut at `limit`, the edge of what is drawn).
+fn note_links(line: &[TokSpan], y: u16, x: u16, limit: u16, out: &mut Vec<LinkRegion>) {
+    let mut at = x;
+    for s in line {
+        let w = u16::try_from(width(&s.text)).unwrap_or(u16::MAX);
+        let end = at.saturating_add(w).min(limit);
+        if let Some(url) = s.url.as_deref()
+            && kb_core::terminal::is_safe_link(url)
+            && end > at
+        {
+            match out.last_mut() {
+                // one link split over spans (a word style change inside it) stays one region
+                Some(last) if last.y == y && last.x1 == at && last.url == url => last.x1 = end,
+                _ => out.push(LinkRegion {
+                    y,
+                    x0: at,
+                    x1: end,
+                    url: url.to_string(),
+                }),
+            }
+        }
+        at = at.saturating_add(w);
+    }
 }
 
 fn meta_spans(m: &PreviewModel, theme: &Theme, cols: usize) -> Vec<Span<'static>> {
@@ -1135,10 +1217,10 @@ pub(crate) mod tests {
             "~/kb".into(),
         );
         s.loaded = true;
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
         let g = s.search_gen;
         s.update(Action::Results(g, page(&["a"])), std::time::Instant::now());
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
         let row = render(&s, &Theme::dark(), 80, 24)[2].clone();
         assert!(
             row.contains("tag:prod ×") && row.contains("-tag:stage ×"),

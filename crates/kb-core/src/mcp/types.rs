@@ -14,6 +14,13 @@ pub struct EntryView {
     pub fields: BTreeMap<String, serde_json::Value>,
     pub payload: String,
     pub notes: String,
+    /// A note's whole Markdown body, without frontmatter and without escape sequences.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated: Option<String>,
     pub vars: BTreeMap<String, VarDeclarationView>,
     pub version: String,
     pub unreviewed: bool,
@@ -83,6 +90,9 @@ pub struct ChangeSet {
     pub payload: Option<String>,
     #[serde(default)]
     pub notes: Option<String>,
+    /// A note's new Markdown body.
+    #[serde(default)]
+    pub content: Option<String>,
     #[serde(default)]
     pub fields: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
@@ -157,12 +167,18 @@ pub struct PromptArgumentView {
 pub struct CreateEntryRequest {
     #[serde(rename = "type", default)]
     pub entry_type: Option<String>,
+    /// Optional for a note whose `content` starts with a `# heading`.
+    #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
     pub payload: String,
     #[serde(default)]
     pub notes: Option<String>,
+    /// A note's Markdown body.
+    #[serde(default)]
+    pub content: Option<String>,
     #[serde(default)]
     pub vars: BTreeMap<String, VarDeclarationView>,
     #[serde(default)]
@@ -218,6 +234,9 @@ mod tests {
             fields: BTreeMap::new(),
             payload: "_sourceCategory=prod".into(),
             notes: "Notes".into(),
+            content: None,
+            created: None,
+            updated: None,
             vars: BTreeMap::new(),
             version: "sha256hash".into(),
             unreviewed: false,

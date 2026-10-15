@@ -100,6 +100,11 @@ rule_codes! {
     SecretJwt = 63, "secret-jwt", Error;
     SecretPrivateKey = 64, "secret-private-key", Error;
     SecretHighEntropy = 65, "secret-high-entropy", Error;
+    NoteTitle = 70, "note-title", Error;
+    NoteVars = 71, "note-vars", Error;
+    NoteOversized = 72, "note-oversized", Warning;
+    NoteEmpty = 73, "note-empty", Info;
+    EntryLinkBroken = 74, "entry-link-broken", Warning;
 }
 
 impl fmt::Display for RuleCode {
@@ -271,12 +276,23 @@ pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
         findings: walked.findings,
         ..Default::default()
     };
+    let mut linking_notes = Vec::new();
     for file in &walked.files {
         let bytes = std::fs::read(&file.abs_path).map_err(|e| LintError::Io {
             path: file.abs_path.clone(),
             message: e.to_string(),
         })?;
-        lint_file(file, bytes, &mut report);
+        if let Some(entry) = lint_file(file, bytes, &mut report)
+            && entry.entry_type() == Some(crate::entry::EntryType::Note)
+            && entry.notes().contains("[[")
+        {
+            linking_notes.push(entry);
+        }
+    }
+    if !linking_notes.is_empty() {
+        report
+            .findings
+            .extend(broken_links(&report.root.clone(), &linking_notes));
     }
     report
         .findings
@@ -288,6 +304,45 @@ pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
         .suppressions
         .sort_by(|a, b| (&a.path, a.line, a.code).cmp(&(&b.path, b.line, b.code)));
     Ok(report)
+}
+
+/// `KB074`: `[[entry-id]]` links in `notes` to entries that are not in the KB. The ID of every
+/// entry comes from the whole KB, not just the files being linted.
+fn broken_links(root: &Path, notes: &[crate::entry::Entry]) -> Vec<Finding> {
+    let all = crate::walk::walk(root, &[root.to_path_buf()]).map(|w| w.files);
+    let Ok(files) = all else {
+        return Vec::new();
+    };
+    let ids: std::collections::HashSet<&str> = files.iter().map(|f| f.id.as_str()).collect();
+    let known: Vec<&str> = files.iter().map(|f| f.id.as_str()).collect();
+    let mut out = Vec::new();
+    for note in notes {
+        let base = note.split.body.start;
+        for link in crate::entry::link::extract_links(note.notes()) {
+            if ids.contains(link.target_id.as_str()) {
+                continue;
+            }
+            let (line, column) = note.source().position(base + link.span.start);
+            let fix = match suggest::suggest(&link.target_id, &known) {
+                Some(s) => format!("fix the ID (did you mean `{s}`?) or create the entry"),
+                None => "fix the ID or create the missing entry".to_string(),
+            };
+            out.push(Finding {
+                path: note.path().to_string(),
+                id: Some(note.id().to_string()),
+                line,
+                column,
+                severity: RuleCode::EntryLinkBroken.severity(),
+                code: RuleCode::EntryLinkBroken,
+                message: format!(
+                    "entry link [[{}]] does not point at an entry in the knowledge base",
+                    crate::terminal::display(&link.target_id)
+                ),
+                fix: Some(fix),
+            });
+        }
+    }
+    out
 }
 
 /// Everything the per-file checks found, plus the parsed entry when the file is readable.
@@ -591,7 +646,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture produces {code}"));
             assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
         }
-        assert_eq!(errors.len(), 39);
+        assert_eq!(errors.len(), 41);
     }
 
     #[test]
@@ -615,7 +670,7 @@ mod tests {
                 code.number()
             );
         }
-        assert_eq!(RuleCode::ALL.len(), 49);
+        assert_eq!(RuleCode::ALL.len(), 54);
     }
 
     #[test]

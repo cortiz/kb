@@ -160,7 +160,7 @@ pub struct SearchOutcome {
     pub total: usize,
     /// Candidates per entry type (index = `EntryType::ALL` order) for the text and non-type
     /// filters, before the type filter and paging.
-    pub type_counts: [usize; 7],
+    pub type_counts: [usize; EntryType::COUNT],
     /// Entries in the index.
     pub indexed: usize,
     /// Entries left out of the index because of errors.
@@ -506,6 +506,41 @@ impl Kb {
         counts
     }
 
+    /// The notes that link to `id` with `[[id]]`, by ID. The index is brought up to date first and
+    /// answers; without one the notes are read.
+    pub fn notes_linking_to(&mut self, id: &str) -> Vec<String> {
+        let _ = self.refresh();
+        let from_index = self.held.as_ref().and_then(|index| {
+            let mut stmt = index
+                .conn
+                .prepare(
+                    "SELECT source_id FROM entry_links WHERE target_id = ?1 ORDER BY source_id",
+                )
+                .ok()?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0)).ok()?;
+            Some(rows.flatten().collect::<Vec<_>>())
+        });
+        if let Some(found) = from_index {
+            return found;
+        }
+        let mut found = Vec::new();
+        for file in self.walk().map(|w| w.files).unwrap_or_default() {
+            let Ok(bytes) = self.reader.read(&file.abs_path) else {
+                continue;
+            };
+            if let Some(entry) = parse_entry(&file.id, &file.rel_path, bytes).entry
+                && entry.entry_type() == Some(EntryType::Note)
+                && crate::entry::link::extract_links(entry.notes())
+                    .iter()
+                    .any(|l| l.target_id == id)
+            {
+                found.push(file.id.clone());
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// The errors `kb lint` would report for this entry's file (empty when it is valid).
     pub fn lint_entry(&self, id: &str) -> Result<Vec<crate::lint::Finding>, KbError> {
         let (path, rel) = self.entry_file(id)?;
@@ -642,7 +677,7 @@ impl Kb {
                 }
             }
         }
-        let mut type_counts = [0usize; 7];
+        let mut type_counts = [0usize; EntryType::COUNT];
         for c in &cands {
             if let Some(i) = EntryType::ALL.iter().position(|t| *t == c.ty) {
                 type_counts[i] += 1;
@@ -946,12 +981,48 @@ fn highlight(conn: &Connection, expr: &str, r: &mut SearchResult) -> Result<(), 
         if ranges.is_empty() {
             continue;
         }
+        // snippets are printed on terminals: nothing in a file may reach one as an escape sequence
+        let (plain, ranges) = clean_text(plain, ranges);
         if r.snippet.is_none() {
-            r.snippet = Some(snippet(field, &plain, &ranges));
+            r.snippet = Some(
+                if r.entry_type == EntryType::Note && field == Field::Payload {
+                    note_snippet(&plain, &ranges)
+                } else {
+                    snippet(field, &plain, &ranges)
+                },
+            );
         }
         r.matches.push(FieldMatch { field, ranges });
     }
     Ok(())
+}
+
+/// `text` without control characters and escape sequences, with `ranges` (in characters) moved to
+/// where their text went.
+fn clean_text(text: String, ranges: Vec<Range<usize>>) -> (String, Vec<Range<usize>>) {
+    use crate::terminal::{Mode, Sanitizer};
+    if matches!(
+        crate::terminal::sanitize(&text, Mode::Display),
+        std::borrow::Cow::Borrowed(_)
+    ) {
+        return (text, ranges);
+    }
+    let mut s = Sanitizer::new(Mode::Display);
+    let mut out = String::with_capacity(text.len());
+    // where each input character ends up: the output length after taking it in
+    let mut at = vec![0usize];
+    for c in text.chars() {
+        s.push(c, &mut out);
+        at.push(out.chars().count());
+    }
+    s.finish(&mut out);
+    let last = out.chars().count();
+    let ranges = ranges
+        .into_iter()
+        .map(|r| at[r.start.min(at.len() - 1)]..at[r.end.min(at.len() - 1)].min(last))
+        .filter(|r| r.start < r.end)
+        .collect();
+    (out, ranges)
 }
 
 /// Removes the `\u{1}…\u{2}` markers; returns the text and the marked ranges in characters.
@@ -977,6 +1048,36 @@ fn split_marks(s: &str) -> (String, Vec<Range<usize>>) {
         }
     }
     (plain, ranges)
+}
+
+/// A note's body is flattened to plain paragraphs when it is indexed, so the snippet only has to
+/// pick the paragraph with the most matches (the first one on a tie) and cut around the first.
+fn note_snippet(text: &str, ranges: &[Range<usize>]) -> Snippet {
+    let mut best: Option<(usize, Range<usize>)> = None;
+    let mut start = 0;
+    for para in text.split("\n\n") {
+        let end = start + para.chars().count();
+        let hits = ranges
+            .iter()
+            .filter(|r| r.start >= start && r.end <= end)
+            .count();
+        if hits > best.as_ref().map_or(0, |b| b.0) {
+            best = Some((hits, start..end));
+        }
+        start = end + 2;
+    }
+    let Some((_, span)) = best else {
+        return snippet(Field::Payload, text, ranges);
+    };
+    let para: String = text.chars().skip(span.start).take(span.len()).collect();
+    let rel: Vec<Range<usize>> = ranges
+        .iter()
+        .filter(|r| r.start >= span.start && r.end <= span.end)
+        .map(|r| r.start - span.start..r.end - span.start)
+        .collect();
+    // line breaks inside a paragraph are list items or table rows: show them on one line
+    let flat: String = para.replace('\n', " ");
+    snippet(Field::Payload, &flat, &rel)
 }
 
 fn snippet(field: Field, text: &str, ranges: &[Range<usize>]) -> Snippet {

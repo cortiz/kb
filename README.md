@@ -9,6 +9,58 @@ them.
 
 ## Install
 
+### Quick install (Linux & macOS)
+
+Install the latest release directly into `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh
+```
+
+Or with `wget`:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh
+```
+
+The installer:
+- Detects your operating system and architecture (`linux-x86_64`, `linux-arm64`, `macos-apple-silicon`, `macos-intel`)
+- Downloads the matching release archive and verifies its SHA-256 checksum
+- Installs the `kb` binary into `~/.local/bin`
+- Prompts to configure your `$PATH` in `~/.bashrc`, `~/.zshrc`, or your shell profile if `~/.local/bin` is not yet in your PATH
+- Installs the `kb-update` helper into `~/.local/bin/kb-update`
+
+Customizing installation:
+
+```sh
+# Install to a custom directory without modifying shell config
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh -s -- --bin-dir /usr/local/bin --no-modify-path
+
+# Install a specific release version non-interactively
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh -s -- --version v0.2.0 -y
+```
+
+### Updating kb
+
+To check for and install updates at any time, run:
+
+```sh
+kb-update
+```
+
+Options:
+- `kb-update --check`: check if an update is available without downloading
+- `kb-update --force`: force reinstall the latest version
+- `kb-update --version <tag>`: install a specific release version
+
+Or update directly via curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/scripts/update.sh | sh
+```
+
+### Manual download
+
 Download the archive for your machine from the
 [releases page](https://github.com/cortiz/kb/releases) together with `SHA256SUMS`, then:
 
@@ -22,12 +74,19 @@ Platforms: `macos-apple-silicon` (M1 and newer), `macos-intel`, `linux-x86_64` a
 (the Linux builds are static, no libraries needed). macOS warns about a downloaded binary
 because it is not notarized; run `xattr -d com.apple.quarantine kb` once, or install with Homebrew.
 
-Homebrew (once the repository is public, stable releases only):
+Homebrew (stable releases only):
 
 ```sh
 brew tap cortiz/kb https://github.com/cortiz/kb
+brew trust cortiz/kb
 brew install kb
 ```
+
+> **Note on Homebrew trust**: Modern Homebrew (v4.4+) requires explicitly trusting non-official taps before loading third-party formulas. If Homebrew prints:
+> ```text
+> Error: Refusing to load formula cortiz/kb/kb from untrusted tap cortiz/kb.
+> ```
+> Run `brew trust cortiz/kb` (or `brew trust --formula cortiz/kb/kb`), then re-run `brew install kb`.
 
 Or build it yourself: `cargo install --git https://github.com/cortiz/kb kb`. Contributing and the
 release process are in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -174,8 +233,8 @@ The file starts with YAML frontmatter between `---` lines, followed by a Markdow
 | Key | Required | Value |
 |-----|----------|-------|
 | `kb_format` | yes | `1` |
-| `type` | yes | `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link` or `code` |
-| `title` | yes | Text, at most 120 characters |
+| `type` | yes | `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link`, `code` or `note` |
+| `title` | yes (a `note` may take it from its first `# heading`) | Text, at most 120 characters |
 | `tags` | no | A list; read in lowercase, without a leading `#` |
 | `vars` | no | Variable definitions (below) |
 | `created`, `updated` | no | `2026-10-08` or `2026-10-08T14:30:00Z` |
@@ -190,6 +249,7 @@ Type-specific keys:
 | `cmd` | `shell` (`sh` default, `bash`, `zsh`, `fish`), `cwd` | yes |
 | `prompt` | — | yes |
 | `link` | `url` (required, `http` or `https`) | no |
+| `note` | — (no `vars`) | no: the whole body is Markdown |
 | `code` | `code:` with `repo` (`owner/name` or a git URL), `path`, `line`, `ref`, optional `symbol` and `end_line` | no |
 
 Other keys are kept as they are and reported as info. kb accepts plain YAML: no anchors,
@@ -200,6 +260,53 @@ aliases, explicit tags or duplicate keys.
 For `sql`, `sumo`, `cw`, `cmd` and `prompt`, the **payload** is the first fenced code block in the
 body. Use a longer fence (four backticks, or tildes) to put code blocks inside a prompt. Everything
 else in the body is **notes**. For `link` and `code`, the whole body is notes, and it may be empty.
+
+### Notes
+
+A `note` is free-form Markdown (an incident write-up, a decision, a how-to) in `note/<slug>.md`.
+`kb note "Role cache TTL" --tag redis` opens your editor on a template; `--private` adds the
+`private` tag, which keeps the note away from AI agents. With piped input or `--yes` it saves
+without asking (`kb note --yes < notes.md`); `kb add --type note` does the same, and pasted
+Markdown with headings, lists or tables is detected as a note.
+
+```markdown
+---
+kb_format: 1
+type: note
+tags: [auth, redis]
+---
+
+# Role cache TTL
+
+See [[sumo/5xx-by-authorizer]] for the error rate.
+
+| Event | TTL |
+|:--|--:|
+| Role granted | 300 s |
+
+> [!WARNING]
+> Never go below 60 s during an incident.
+```
+
+`kb show` and the preview pane draw headings, lists, task lists, tables (wrapped to the width),
+GitHub callouts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`), framed and
+highlighted code, footnotes and strikethrough. Images show as `[image: alt] (path)`, HTML is shown
+as text, and `kb show --raw` prints the Markdown without frontmatter.
+
+- **Entry links**: `[[sumo/5xx-by-authorizer]]` shows as `[sumo] 5xx by authorizer`, or `[?] id`
+  when the entry does not exist (`kb lint` warns, KB074). Write `\[[` for a literal `[[`.
+  *Follow entry link* in the action menu (`Alt-A`, `f`) goes to the entry, or lists them when
+  there are several. `kb mv` points the links at the new ID in the same commit, and `kb rm`
+  names the notes that link to what you delete.
+- **Terminal safety**: escape sequences and control characters in a note, a title or a tag never
+  reach your terminal (they show as `␛`; `--raw` drops them). Only `http`, `https` and `mailto`
+  links become terminal hyperlinks, only in `kb show`, only where the terminal supports them
+  (`FORCE_HYPERLINK=1` or `0` overrides).
+- **Search**: headings count more than body text, `in:body` searches the body only, and typo
+  matching ignores body words. A note over 64 KB gets a lint warning (KB072); `{{x}}` is plain
+  text and `vars:` is an error (KB071).
+- **Agents**: `search`, `get`, `create` and `update` work on notes. `get` returns the Markdown as
+  `content`; `create` and `update` take `content`, and a title may come from its first heading.
 
 ### Variables
 
@@ -283,7 +390,7 @@ Paths are tried relative to the current directory first, then relative to the KB
 lists each finding with its file, line, column, rule code and a suggested fix, then a summary:
 
 ```text
-sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type "sumologic"; expected one of sql, sumo, cw, cmd, prompt, link, code
+sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type "sumologic"; expected one of sql, sumo, cw, cmd, prompt, link, code, note
   fix: use "sumo"
 
 284 entries, 1 error, 0 warnings
@@ -312,7 +419,7 @@ kb search                             # everything, most used first
 | `tag:prod` / `-tag:stage` | Has / lacks a tag; several `tag:` must all be present. Same as `--tag`, `--not-tag`. |
 | `var:region` | Uses the variable `region`. |
 | `repo:acme/api` | A `code` entry in that repo. |
-| `in:title`, `in:payload`, `in:notes` | Restrict the free text to one field. |
+| `in:title`, `in:payload`, `in:notes`, `in:body` | Restrict the free text to one field (`in:body` is `in:payload`; for a note it is the Markdown body). |
 
 Results are ordered by relevance (title, then tags, ID, variables and type-specific fields, payload,
 notes), with entries you use often and recently ranked a little higher; an exact title match always
@@ -617,8 +724,9 @@ kb add --empty --type prompt --path prompts/standup -t "Standup"      # no body,
 | Flag | |
 |------|--|
 | `-t`, `--title` | The title. Without it kb uses a leading comment (`-- title`, `# title`, `// title`), a link's host and last path segment, or a code location. |
-| `--type` | `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link` or `code`. Beats detection. |
+| `--type` | `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link`, `code` or `note`. Beats detection. |
 | `--tag` | Repeatable or comma-separated. Lowercased; a leading `#` is dropped. |
+| `--private` | Adds the `private` tag (hidden from AI agents). |
 | `--path` | The new entry's ID. Folders are created. |
 | `--clipboard`, `--stdin`, `--empty` | Where the body comes from. At most one. With none, stdin is used when it is piped in, else the clipboard. |
 | `-y`, `--yes` | Never ask: save the entry or fail. |

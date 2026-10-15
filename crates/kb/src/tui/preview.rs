@@ -1,13 +1,11 @@
 //! The preview of one entry, built on the worker and independent of any theme.
 
-use std::collections::{HashMap, VecDeque};
-
 use kb_core::entry::{Entry, EntryType, TypeFields};
 use kb_core::payload::payload_pieces;
 use kb_core::vars::VarKind;
 
 use super::highlight::{Span, highlight, lang_for};
-use super::markdown::{Block, render_notes};
+use super::markdown::{Ctx, Lookup, Notes, render_markdown};
 use crate::output::utc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +49,7 @@ pub struct PreviewModel {
     pub payload: Vec<Vec<Span>>,
     pub vars: Vec<VarRow>,
     pub fields: Vec<(String, String)>,
-    pub notes: Vec<Block>,
+    pub notes: Notes,
     pub mtime: i64,
 }
 
@@ -101,6 +99,7 @@ fn fields_of(entry: &Entry) -> Vec<(String, String)> {
         TypeFields::Link { .. }
         | TypeFields::Code { .. }
         | TypeFields::Prompt
+        | TypeFields::Note
         | TypeFields::Unknown => {}
     }
     out
@@ -113,6 +112,17 @@ pub fn build_preview(
     modified: Option<i64>,
     use_count: u64,
     highlight_syntax: bool,
+) -> PreviewModel {
+    build_preview_with(entry, modified, use_count, highlight_syntax, None)
+}
+
+/// [`build_preview`] with a way to look up the entries a note links to.
+pub fn build_preview_with(
+    entry: &Entry,
+    modified: Option<i64>,
+    use_count: u64,
+    highlight_syntax: bool,
+    lookup: Option<Lookup<'_>>,
 ) -> PreviewModel {
     let ty = entry.entry_type();
     let edited = entry
@@ -172,43 +182,27 @@ pub fn build_preview(
         payload,
         vars,
         fields: fields_of(entry),
-        notes: render_notes(entry.notes().trim()),
+        notes: Notes::new(render_markdown(
+            entry.notes().trim(),
+            &Ctx {
+                color: highlight_syntax,
+                entry_links: ty == Some(EntryType::Note),
+                lookup,
+            },
+        )),
         mtime: modified.unwrap_or(0),
     }
 }
 
-/// Recently built previews, keyed by entry and modification time.
-#[derive(Debug, Default)]
-pub struct PreviewCache {
-    map: HashMap<(String, i64), PreviewModel>,
-    order: VecDeque<(String, i64)>,
-}
-
-const CACHE_SIZE: usize = 64;
-
-impl PreviewCache {
-    pub fn get(&self, id: &str, mtime: i64) -> Option<&PreviewModel> {
-        self.map.get(&(id.to_string(), mtime))
-    }
-
-    pub fn put(&mut self, model: PreviewModel) {
-        let key = (model.id.clone(), model.mtime);
-        if self.map.insert(key.clone(), model).is_none() {
-            self.order.push_back(key);
-        }
-        while self.order.len() > CACHE_SIZE {
-            if let Some(old) = self.order.pop_front() {
-                self.map.remove(&old);
-            }
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
+impl PreviewModel {
+    /// A rough size in bytes, for bounding the cache.
+    pub fn approx_bytes(&self) -> usize {
+        let payload: usize = self
+            .payload
+            .iter()
+            .map(|l| l.iter().map(|s| s.text.len() + 48).sum::<usize>() + 24)
+            .sum();
+        256 + payload + self.notes.approx_bytes()
     }
 }
 
@@ -342,6 +336,7 @@ mod tests {
 
     #[test]
     fn markdown_notes_are_parsed() {
+        use crate::tui::markdown::Block;
         let m = build_preview(&load("tui", "sumo/long-query"), None, 0, true);
         assert!(
             m.notes
@@ -371,23 +366,5 @@ mod tests {
                 .flatten()
                 .any(|s| s.class == Class::Variable)
         );
-    }
-
-    #[test]
-    fn the_cache_keys_on_mtime_and_is_bounded() {
-        let mut c = PreviewCache::default();
-        let model = |id: &str, mtime| PreviewModel {
-            id: id.to_string(),
-            mtime,
-            ..PreviewModel::default()
-        };
-        c.put(model("a", 1));
-        assert!(c.get("a", 1).is_some() && c.get("a", 2).is_none() && c.get("b", 1).is_none());
-        for i in 0..100 {
-            c.put(model(&format!("e{i}"), 1));
-        }
-        assert_eq!(c.len(), 64);
-        assert!(c.get("a", 1).is_none(), "the oldest entries were dropped");
-        assert!(c.get("e99", 1).is_some() && !c.is_empty());
     }
 }

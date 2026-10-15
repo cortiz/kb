@@ -1,5 +1,5 @@
  New entry · from clipboard · detected link (high)
- Type      sql sumo cw cmd prompt [link] code         ┌ Link ──────────────────────────────────────────────────────────┐
+ Type      sql sumo cw cmd prompt [link] code note    ┌ Link ──────────────────────────────────────────────────────────┐
                                                       │ url      https://example.com/runbooks/auth                     │
 ▸Title     Authorizer p99 latency                     │                                                                │
  Tags      lambda                                     │                                                                │
@@ -48,6 +48,7 @@
 1:27..33 fg=245
 1:34..40 fg=30 bold
 1:41..45 fg=245
+1:46..50 fg=245
 1:54..55 fg=240
 1:55..61 fg=245
 1:61..120 fg=240

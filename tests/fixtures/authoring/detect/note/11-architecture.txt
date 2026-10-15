@@ -1,0 +1,15 @@
+# Architecture overview
+
+The system has three parts.
+
+## Parts
+
+1. API
+2. Worker
+3. Index
+
+## Diagram
+
+```mermaid
+graph TD; A-->B;
+```

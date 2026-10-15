@@ -1,0 +1,10 @@
+# Glossary
+
+**TTL** is time to live.
+
+## Terms
+
+- TTL: how long a value is cached
+- SLO: the target we promise
+
+Footnotes live below.

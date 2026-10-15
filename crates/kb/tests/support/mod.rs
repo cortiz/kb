@@ -44,6 +44,35 @@ pub fn vars_kb() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
+/// The note fixtures in `crates/kb/tests/fixtures/notes`: a standard note, one titled by its
+/// `# heading`, one with `[[entry links]]`, a `private` one and a hostile one (escape sequences,
+/// raw HTML). They are written to `note/<name>.md` in the KB at `root`.
+pub fn note_fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes")
+}
+
+pub fn add_notes(root: &Path) {
+    copy_dir(&note_fixtures(), &root.join("note"));
+}
+
+/// A note whose body is a little over 64 KB (`KB072-note-oversized`), written to `note/big.md`.
+pub fn add_oversized_note(root: &Path) {
+    let mut text =
+        String::from("---\nkb_format: 1\ntype: note\ntitle: Big note\n---\n\n# Big note\n\n");
+    while text.len() <= 65_536 + 1024 {
+        text.push_str("A line of prose that repeats to fill the note body.\n");
+    }
+    fs::create_dir_all(root.join("note")).unwrap();
+    fs::write(root.join("note/big.md"), text).unwrap();
+}
+
+/// `search_kb()` plus the note fixtures.
+pub fn notes_kb() -> (tempfile::TempDir, PathBuf) {
+    let (dir, root) = search_kb();
+    add_notes(&root);
+    (dir, root)
+}
+
 /// A home that does not exist: tests that do not care about config get no config.
 pub const NOWHERE: &str = "/nonexistent-kb-test-home";
 
@@ -337,6 +366,60 @@ pub fn generate_kb(root: &Path, n: usize) {
         let dir = root.join(format!("group-{:02}", i % 50));
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join(format!("entry-{i:05}.md")), entry(i, &mut rng)).unwrap();
+    }
+}
+
+/// A deterministic note of about `kb` kilobytes: headings, lists, a table, a code block, a link
+/// and prose from the same Zipf vocabulary as the other entries.
+fn note(i: usize, kb: usize, rng: &mut Rng) -> String {
+    let words = |rng: &mut Rng, n: usize| -> String {
+        (0..n).map(|_| zipf_word(rng)).collect::<Vec<_>>().join(" ")
+    };
+    let mut body = format!("# Note {i} {}\n\n", words(rng, 2));
+    let mut section = 0;
+    while body.len() < kb * 1024 {
+        section += 1;
+        body.push_str(&format!(
+            "## Section {section} {}\n\n{}\n\n",
+            words(rng, 2),
+            words(rng, 80)
+        ));
+        body.push_str(&format!(
+            "- {}\n- {}\n- [ ] {}\n\n",
+            words(rng, 6),
+            words(rng, 6),
+            words(rng, 6)
+        ));
+        body.push_str(&format!(
+            "| {} | {} |\n|:--|--:|\n| {} | {} |\n| {} | {} |\n\n",
+            words(rng, 1),
+            words(rng, 1),
+            words(rng, 3),
+            words(rng, 1),
+            words(rng, 3),
+            words(rng, 1)
+        ));
+        body.push_str(&format!(
+            "```sh\n{}\nkubectl get pods -n {}\n```\n\n",
+            words(rng, 5),
+            words(rng, 1)
+        ));
+        body.push_str(&format!(
+            "See [[group-{:02}/entry-{:05}]].\n\n",
+            i % 50,
+            (i * 7) % 1000 / 8 * 8
+        ));
+    }
+    format!("---\nkb_format: 1\ntype: note\ntags: [notes, perf]\n---\n\n{body}")
+}
+
+/// Writes `n` deterministic notes of about `kb` kilobytes each under `root/note/`.
+pub fn generate_notes(root: &Path, n: usize, kb: usize) {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let dir = root.join("note");
+    fs::create_dir_all(&dir).unwrap();
+    for i in 0..n {
+        fs::write(dir.join(format!("note-{i:05}.md")), note(i, kb, &mut rng)).unwrap();
     }
 }
 

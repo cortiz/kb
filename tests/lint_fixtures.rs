@@ -99,7 +99,7 @@ fn tui_fixture_kb_is_lint_clean() {
 
 #[test]
 fn invalid_fixtures_match_expectations() {
-    assert!(check_dir("invalid") >= 38);
+    assert!(check_dir("invalid") >= 40);
 }
 
 #[test]

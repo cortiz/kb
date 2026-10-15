@@ -1,0 +1,8 @@
+# Role cache TTL
+
+The authorizer caches roles in Redis for 300 seconds.
+
+## Invalidation
+
+- Role revoke: DEL
+- Role grant: SETEX

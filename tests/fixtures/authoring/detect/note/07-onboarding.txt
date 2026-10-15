@@ -1,0 +1,12 @@
+# On-call onboarding
+
+Welcome to the rota.
+
+## Day one
+
+* Get access to the dashboards
+* Read the runbooks
+
+## Day two
+
+* Shadow a handover

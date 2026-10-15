@@ -179,7 +179,19 @@ fn delete_entry(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM entries WHERE id = ?1", [id])?;
     conn.execute("DELETE FROM entry_tags WHERE id = ?1", [id])?;
     conn.execute("DELETE FROM entry_vars WHERE id = ?1", [id])?;
+    conn.execute("DELETE FROM entry_links WHERE source_id = ?1", [id])?;
     Ok(())
+}
+
+/// The words of `doc` that feed typo expansion. A note's body is arbitrary prose and code; only
+/// its title, tags, ID and headings count, so the vocabulary (and the typo scan) stays small.
+fn vocab_words(doc: &Doc) -> impl Iterator<Item = crate::fold::Word> + '_ {
+    let cols = if doc.entry_type == "note" {
+        &doc.cols[..4]
+    } else {
+        &doc.cols[..]
+    };
+    cols.iter().flat_map(|col| crate::fold::words(col))
 }
 
 fn insert_doc(conn: &Connection, id: &str, doc: &Doc, vocab: bool) -> rusqlite::Result<()> {
@@ -204,11 +216,15 @@ fn insert_doc(conn: &Connection, id: &str, doc: &Doc, vocab: bool) -> rusqlite::
     if vocab {
         let mut add =
             conn.prepare_cached("INSERT OR IGNORE INTO vocab(term, len) VALUES (?1, ?2)")?;
-        for col in &doc.cols {
-            for w in crate::fold::words(col) {
-                add.execute(params![w.text, w.text.chars().count() as i64])?;
-            }
+        for w in vocab_words(doc) {
+            add.execute(params![w.text, w.text.chars().count() as i64])?;
         }
+    }
+    for target in &doc.links {
+        conn.execute(
+            "INSERT OR IGNORE INTO entry_links(source_id, target_id) VALUES (?1,?2)",
+            params![id, target],
+        )?;
     }
     for t in &doc.tags {
         conn.execute(
@@ -277,6 +293,38 @@ fn set_meta(conn: &Connection, key: &str, value: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Adds the titles of the entries a note links to into the note's `meta` column, so searching for
+/// a linked entry's title finds the notes that mention it. Runs after all rows are written, when
+/// the targets are known; a retitled target is picked up the next time the note is indexed.
+fn add_link_titles(conn: &Connection, scan: &Scan) -> rusqlite::Result<()> {
+    for change in &scan.changes {
+        let Change::Upsert { file, built, .. } = change else {
+            continue;
+        };
+        let Verdict::Indexed(doc) = &built.verdict else {
+            continue;
+        };
+        if doc.links.is_empty() {
+            continue;
+        }
+        let titles: Vec<String> = conn
+            .prepare_cached(
+                "SELECT t.title FROM entry_links l JOIN entries t ON t.id = l.target_id \
+                 WHERE l.source_id = ?1 ORDER BY l.target_id",
+            )?
+            .query_map([&file.id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
+        if titles.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "UPDATE fts SET meta = meta || ' ' || ?2 WHERE rowid = (SELECT rowid FROM entries WHERE id = ?1)",
+            params![file.id, titles.join(" ")],
+        )?;
+    }
+    Ok(())
+}
+
 /// Writes `scan` in `BEGIN IMMEDIATE` batches. The rows of one file change in one transaction.
 pub(crate) fn apply(conn: &mut Connection, scan: &Scan, batch: usize) -> rusqlite::Result<()> {
     let mut chunks: Vec<&[Change]> = scan.changes.chunks(batch.max(1)).collect();
@@ -290,6 +338,7 @@ pub(crate) fn apply(conn: &mut Connection, scan: &Scan, batch: usize) -> rusqlit
             apply_change(&tx, change, true)?;
         }
         if i == last {
+            add_link_titles(&tx, scan)?;
             set_meta(&tx, "last_sync_start_ns", scan.start_ns)?;
         }
         tx.commit()?;
@@ -307,12 +356,139 @@ pub(crate) fn apply_reset(conn: &mut Connection, scan: &Scan) -> rusqlite::Resul
             apply_change(&tx, change, false)?;
         }
     }
-    tx.execute(
-        "INSERT OR IGNORE INTO vocab(term, len) SELECT term, length(term) FROM fts_vocab",
-        [],
-    )?;
+    // The vocabulary is built from the documents, not from `fts_vocab`: that would also hold the
+    // words of every note body.
+    let mut terms: HashSet<String> = HashSet::new();
+    for change in &scan.changes {
+        if let Change::Upsert { built, .. } = change
+            && let Verdict::Indexed(doc) = &built.verdict
+        {
+            terms.extend(vocab_words(doc).map(|w| w.text));
+        }
+    }
+    {
+        let mut add = tx.prepare("INSERT OR IGNORE INTO vocab(term, len) VALUES (?1, ?2)")?;
+        for term in &terms {
+            add.execute(params![term, term.chars().count() as i64])?;
+        }
+    }
+    add_link_titles(&tx, scan)?;
     set_meta(&tx, "last_sync_start_ns", scan.start_ns)?;
     set_meta(&tx, "last_full_build", scan.start_ns / 1_000_000_000)?;
     tx.pragma_update(None, "user_version", schema::INDEX_VERSION)?;
     tx.commit()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    const NOTE: &str = "---\nkb_format: 1\ntype: note\ntags: [redis]\n---\n\n# Cache design\n\n## Eviction policy\n\nZebrafish eviction happens nightly. See [[sql/active]].\n";
+    const SQL: &str = "---\nkb_format: 1\ntype: sql\ntitle: Active\n---\n\n```sql\nselect pgrepxyz from t;\n```\n";
+
+    fn change(id: &str, text: &str) -> Change {
+        let file = WalkEntry {
+            id: id.into(),
+            rel_path: format!("{id}.md"),
+            abs_path: PathBuf::new(),
+        };
+        let built = build_doc(&file, text.as_bytes().to_vec());
+        assert!(matches!(built.verdict, Verdict::Indexed(_)), "{id}");
+        Change::Upsert {
+            file,
+            mtime_ns: 1,
+            size: 1,
+            built,
+            reason: None,
+        }
+    }
+
+    fn has_term(conn: &Connection, term: &str) -> bool {
+        conn.query_row("SELECT count(*) FROM vocab WHERE term = ?1", [term], |r| {
+            r.get::<_, i64>(0)
+        })
+        .unwrap()
+            > 0
+    }
+
+    fn check(conn: &Connection) {
+        for term in [
+            "cache", "design", "eviction", "policy", "redis", "note", "pgrepxyz",
+        ] {
+            assert!(has_term(conn, term), "{term} should be in the vocabulary");
+        }
+        for term in ["zebrafish", "nightly", "happens"] {
+            assert!(!has_term(conn, term), "{term} is note body text");
+        }
+    }
+
+    #[test]
+    fn note_bodies_stay_out_of_the_typo_vocabulary() {
+        let changes = vec![change("note/cache", NOTE), change("sql/active", SQL)];
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema::CREATE).unwrap();
+        let scan = Scan {
+            changes,
+            ..Scan::default()
+        };
+        apply(&mut conn, &scan, 10).unwrap();
+        check(&conn);
+        // the body is still searchable, only the typo vocabulary leaves it out
+        let hits: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM fts WHERE fts MATCH 'zebrafish'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1);
+
+        let mut conn = Connection::open_in_memory().unwrap();
+        apply_reset(&mut conn, &scan).unwrap();
+        check(&conn);
+    }
+
+    #[test]
+    fn links_are_recorded_and_their_titles_searchable() {
+        let changes = vec![change("note/cache", NOTE), change("sql/active", SQL)];
+        let scan = Scan {
+            changes,
+            ..Scan::default()
+        };
+        for reset in [false, true] {
+            let mut conn = Connection::open_in_memory().unwrap();
+            if reset {
+                apply_reset(&mut conn, &scan).unwrap();
+            } else {
+                conn.execute_batch(schema::CREATE).unwrap();
+                apply(&mut conn, &scan, 1).unwrap();
+            }
+            let links: Vec<(String, String)> = conn
+                .prepare("SELECT source_id, target_id FROM entry_links")
+                .unwrap()
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(
+                links,
+                [("note/cache".to_string(), "sql/active".to_string())]
+            );
+            // "Active" is the linked entry's title; it is now in the note's meta column
+            let found: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM fts WHERE fts MATCH 'meta : active' AND rowid = (SELECT rowid FROM entries WHERE id = 'note/cache')",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "reset={reset}");
+            delete_entry(&conn, "note/cache").unwrap();
+            let left: i64 = conn
+                .query_row("SELECT count(*) FROM entry_links", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(left, 0);
+        }
+    }
 }

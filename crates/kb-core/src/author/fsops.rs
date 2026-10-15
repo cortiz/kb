@@ -246,6 +246,46 @@ impl Kb {
         })
     }
 
+    /// Points the `[[old]]` links of the notes `sources` at `new`, changing nothing else in them
+    /// (not even `updated`). Returns the notes that changed.
+    pub fn retarget_links(
+        &mut self,
+        sources: &[String],
+        old: &str,
+        new: &str,
+    ) -> Result<Vec<String>, FsError> {
+        let mut changed = Vec::new();
+        for id in sources {
+            let path = self.id_path(id)?;
+            let bytes = read_entry(&path, id)?;
+            let Ok(text) = String::from_utf8(bytes) else {
+                continue;
+            };
+            let Some(entry) = parse_entry(id, &format!("{id}.md"), text.clone().into_bytes()).entry
+            else {
+                continue;
+            };
+            // only links in the body count: the frontmatter is left alone
+            let body = entry.split.body.clone();
+            let Some(body_text) = crate::entry::link::retarget(&text[body.clone()], old, new)
+            else {
+                continue;
+            };
+            let rewritten = format!("{}{}{}", &text[..body.start], body_text, &text[body.end..]);
+            let tmp = temp_path(&path);
+            write_temp(&tmp, rewritten.as_bytes()).map_err(|e| io_err(&tmp, &e))?;
+            if let Err(e) = std::fs::rename(&tmp, &path) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(io_err(&path, &e));
+            }
+            changed.push(id.clone());
+        }
+        if !changed.is_empty() {
+            let _ = self.refresh();
+        }
+        Ok(changed)
+    }
+
     /// Deletes an entry with `remover` (a plain remove, or `git rm`) and forgets its usage.
     pub fn remove_entry(
         &mut self,

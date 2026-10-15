@@ -256,3 +256,60 @@ fn test_review_pty_revert_choice() {
     let reverted_content = fs::read_to_string(&entry_path).unwrap();
     assert!(reverted_content.contains("echo human"));
 }
+
+#[test]
+fn an_agent_made_note_is_flagged_in_the_preview_and_reviewable() {
+    let (_dir, _home, root) = setup_review_kb();
+    fs::create_dir_all(root.join("note")).unwrap();
+    fs::write(
+        root.join("note/from-agent.md"),
+        "---\nkb_format: 1\ntype: note\ntitle: From an agent\n---\n\n# From an agent\n\nBody.\n",
+    )
+    .unwrap();
+    let _ = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&root)
+        .output();
+    let _ = Command::new("git")
+        .args([
+            "commit",
+            "-m",
+            "kb: create note/from-agent\n\nKb-Source: mcp\nKb-Client: claude\n",
+        ])
+        .current_dir(&root)
+        .output();
+    ReviewStateTracker::mark_unreviewed(&root, "note/from-agent").unwrap();
+
+    let shown = kb_in(&root)
+        .args(["show", "note/from-agent"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(shown.stdout).unwrap();
+    assert!(text.contains("agent (unreviewed)"), "{text}");
+    let found = kb_in(&root)
+        .args(["search", "unreviewed:true", "--ids"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(found.stdout).unwrap().trim(),
+        "note/from-agent"
+    );
+
+    let listed = kb_in(&root).args(["review", "--json"]).output().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(json[0]["id"], "note/from-agent", "{json}");
+
+    kb_in(&root)
+        .args(["review", "--approve-all"])
+        .assert()
+        .success();
+    let shown = kb_in(&root)
+        .args(["show", "note/from-agent"])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8(shown.stdout)
+            .unwrap()
+            .contains("unreviewed")
+    );
+}

@@ -1,0 +1,8 @@
+# opts: title=Role cache TTL; tags=redis,private; type=note
+# Role cache TTL
+
+The authorizer caches roles in Redis for 300 s.
+
+| Event | TTL |
+|:--|--:|
+| Grant | 300 s |

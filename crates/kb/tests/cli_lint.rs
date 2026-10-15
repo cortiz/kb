@@ -79,7 +79,7 @@ fn unknown_type_is_reported_with_fix() {
     .unwrap();
     let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
     assert!(
-        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code\n  fix: use \"sumo\"\n"),
+        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code, note\n  fix: use \"sumo\"\n"),
         "{out}"
     );
     assert!(out.ends_with(", 1 error, 0 warnings\n"), "{out}");
@@ -346,5 +346,49 @@ fn json_usage_error() {
             .as_str()
             .unwrap()
             .contains("does not exist")
+    );
+}
+
+#[test]
+fn broken_entry_links_in_notes_are_warnings_with_a_suggestion() {
+    let (_d, root) = valid_kb();
+    fs::create_dir_all(root.join("note")).unwrap();
+    fs::write(
+        root.join("note/links.md"),
+        "---\nkb_format: 1\ntype: note\ntitle: Links\n---\n\n# Links\n\nGood: [[sumo/5xx-by-authorizer]].\nTypo: [[sumo/5xx-by-authorzer]].\nGone: [[nowhere/at-all]].\nEscaped: \\[[nowhere/escaped]] and `[[nowhere/code]]`.\n",
+    )
+    .unwrap();
+    let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
+    assert_eq!(code, 0, "warnings do not fail: {out}");
+    assert!(
+        out.contains("note/links.md:10:7: warning[KB074-entry-link-broken]"),
+        "{out}"
+    );
+    assert!(out.contains("[[sumo/5xx-by-authorzer]]"), "{out}");
+    assert!(
+        out.contains("did you mean `sumo/5xx-by-authorizer`?"),
+        "{out}"
+    );
+    assert!(
+        out.contains("note/links.md:11:7: warning[KB074-entry-link-broken]"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("escaped") && !out.contains("nowhere/code"),
+        "{out}"
+    );
+    assert!(!out.contains(":9:"), "the good link is fine: {out}");
+    assert!(out.ends_with(", 0 errors, 2 warnings\n"), "{out}");
+    let (_, code) = stdout(kb().arg("--root").arg(&root).args(["lint", "--strict"]));
+    assert_eq!(code, 1, "--strict fails on warnings");
+    // linting only the note still knows the whole KB
+    let (out, _) = stdout(
+        kb().arg("--root")
+            .arg(&root)
+            .args(["lint", "note/links.md"]),
+    );
+    assert!(
+        out.contains("2 warnings") && !out.contains("5xx-by-authorizer]]"),
+        "{out}"
     );
 }

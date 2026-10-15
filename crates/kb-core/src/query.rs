@@ -190,7 +190,7 @@ impl Query {
                 "in" => {
                     let f = match fold(value).as_str() {
                         "title" => Some(Field::Title),
-                        "payload" => Some(Field::Payload),
+                        "payload" | "body" => Some(Field::Payload),
                         "notes" => Some(Field::Notes),
                         _ => None,
                     };

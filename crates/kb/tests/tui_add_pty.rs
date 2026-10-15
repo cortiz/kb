@@ -376,3 +376,50 @@ fn space_accepts_a_suggestion_and_saving_declares_it() {
     );
     s.send(CTRL_C);
 }
+
+const NOTE_TEXT: &str = "# Rotate the signing key\n\n1. Generate a key.\n2. Deploy it as next.\n\n## Rollback\n\nKeep the old key for a day.\n";
+const CTRL_T: &[u8] = b"\x14";
+
+#[test]
+fn markdown_on_the_clipboard_is_a_note_and_private_is_one_key_away() {
+    let (t, home, root) = kb_home("search");
+    let mut s = Session::spawn(&spec(&t, &home, &root, &[], NOTE_TEXT));
+    s.wait_for("entries");
+    s.send(CTRL_N);
+    s.wait_for("detected note");
+    s.wait_for("Rotate the signing key");
+    s.wait_for("[ ] private");
+    s.wait_for("excluded from AI agent");
+    s.send(CTRL_T);
+    s.wait_for("[x] private");
+    s.send(CTRL_S);
+    s.wait_for("Saved note/rotate-the-signing-key");
+    let saved = fs::read_to_string(root.join("note/rotate-the-signing-key.md")).unwrap();
+    assert!(saved.contains("type: note\n"), "{saved}");
+    assert!(saved.contains("title: Rotate the signing key\n"), "{saved}");
+    assert!(saved.contains("tags: [private]\n"), "{saved}");
+    assert!(saved.contains("## Rollback"), "{saved}");
+    s.send(CTRL_C);
+}
+
+#[test]
+fn a_note_without_title_takes_it_from_its_heading_and_ctrl_e_edits_the_markdown() {
+    let (t, home, root) = kb_home("search");
+    let editor = script(
+        t.path(),
+        "ed",
+        "printf '# Written elsewhere\\n\\nFrom the editor.\\n' > \"$1\"",
+    );
+    let spec = spec(&t, &home, &root, &["add", "--type", "note", "--empty"], "")
+        .env("KB_EDITOR", editor.to_str().unwrap());
+    let mut s = Session::spawn(&spec);
+    s.wait_for("New entry");
+    s.wait_for("Note (Markdown");
+    s.send(CTRL_E);
+    s.wait_for("From the editor.");
+    s.send(CTRL_S);
+    assert_eq!(s.wait_exit(), 0, "{}", s.screen());
+    let saved = fs::read_to_string(root.join("note/written-elsewhere.md")).unwrap();
+    assert!(saved.contains("title: Written elsewhere\n"), "{saved}");
+    assert!(saved.contains("From the editor."), "{saved}");
+}

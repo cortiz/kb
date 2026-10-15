@@ -1,0 +1,9 @@
+# Incident 42
+
+> [!WARNING]
+> Never lower the TTL below 60 s during an incident.
+
+See the timeline below.
+
+1. Alert fired
+2. Rolled back

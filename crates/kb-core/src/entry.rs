@@ -1,5 +1,7 @@
 //! Entries: parsing an entry file into typed fields, with findings for everything wrong.
 
+pub mod link;
+
 use crate::body::{Payload, parse_body};
 use crate::frontmatter::{Split, SplitError, split};
 use crate::lint::suggest::suggest;
@@ -39,7 +41,10 @@ const ALL_KEYS: [&str; 16] = [
     "code",
 ];
 
-const TYPE_LIST: &str = "sql, sumo, cw, cmd, prompt, link, code";
+const TYPE_LIST: &str = "sql, sumo, cw, cmd, prompt, link, code, note";
+
+/// The tag that keeps an entry away from AI agents (the default of `mcp.exclude_tags`).
+pub const PRIVATE_TAG: &str = "private";
 
 /// The highest `kb_format` this version of kb reads and writes.
 pub const MAX_KB_FORMAT: u32 = 1;
@@ -47,7 +52,7 @@ pub const MAX_KB_FORMAT: u32 = 1;
 /// Longest allowed title, in characters.
 pub const MAX_TITLE_CHARS: usize = 120;
 
-/// The seven entry types.
+/// The eight entry types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntryType {
     Sql,
@@ -57,11 +62,15 @@ pub enum EntryType {
     Prompt,
     Link,
     Code,
+    Note,
 }
 
 impl EntryType {
+    /// How many entry types there are.
+    pub const COUNT: usize = Self::ALL.len();
+
     /// Every entry type, in the order the format lists them.
-    pub const ALL: [EntryType; 7] = [
+    pub const ALL: [EntryType; 8] = [
         EntryType::Sql,
         EntryType::Sumo,
         EntryType::Cw,
@@ -69,6 +78,7 @@ impl EntryType {
         EntryType::Prompt,
         EntryType::Link,
         EntryType::Code,
+        EntryType::Note,
     ];
 
     /// The name used in `type:`.
@@ -81,17 +91,18 @@ impl EntryType {
             EntryType::Prompt => "prompt",
             EntryType::Link => "link",
             EntryType::Code => "code",
+            EntryType::Note => "note",
         }
     }
 
-    /// The type named `name` in `type:`, if it is one of the seven.
+    /// The type named `name` in `type:`, if it is one of the eight.
     pub fn from_name(name: &str) -> Option<EntryType> {
         EntryType::ALL.into_iter().find(|t| t.name() == name)
     }
 
     /// Whether the body's first fenced code block is the payload.
     pub fn has_payload(self) -> bool {
-        !matches!(self, EntryType::Link | EntryType::Code)
+        !matches!(self, EntryType::Link | EntryType::Code | EntryType::Note)
     }
 
     /// The type-specific keys this type accepts.
@@ -104,6 +115,7 @@ impl EntryType {
             EntryType::Prompt => &[],
             EntryType::Link => &["url"],
             EntryType::Code => &["code"],
+            EntryType::Note => &[],
         }
     }
 }
@@ -182,6 +194,7 @@ pub enum TypeFields {
     Code {
         code: Option<CodeRef>,
     },
+    Note,
     /// The type is missing or unknown.
     Unknown,
 }
@@ -233,6 +246,8 @@ impl Sink<'_> {
         fix: Option<String>,
     ) {
         let (line, column) = self.source.position(offset);
+        // messages quote what the file says (a type, a key); they are printed on terminals
+        let message: String = message.into();
         self.findings.push(Finding {
             path: self.path.to_string(),
             id: Some(self.id.to_string()),
@@ -240,8 +255,8 @@ impl Sink<'_> {
             column,
             severity: code.severity(),
             code,
-            message: message.into(),
-            fix,
+            message: crate::terminal::display(&message).into_owned(),
+            fix: fix.map(|f| crate::terminal::display(&f).into_owned()),
         });
     }
 }
@@ -379,7 +394,12 @@ fn parse_parts(sink: &mut Sink<'_>) -> Option<Parts> {
 
     let kb_format = kb_format(&tree, sink);
     let entry_type = entry_type(&tree, sink);
-    let title = title(&tree, sink);
+    let is_note = entry_type == Some(EntryType::Note);
+    let title = if is_note {
+        note_title(&tree, text, &split.body, sink)
+    } else {
+        title(&tree, sink)
+    };
     let tags = tags(&tree, sink);
     let created = date(&tree, "created", sink);
     let updated = date(&tree, "updated", sink);
@@ -410,6 +430,10 @@ fn parse_parts(sink: &mut Sink<'_>) -> Option<Parts> {
             ),
             Some(_) => {}
         }
+    }
+
+    if is_note {
+        note_checks(&tree, &text[split.body.clone()], split.body.start, sink);
     }
 
     let mut targets = Vec::new();
@@ -445,7 +469,12 @@ fn parse_parts(sink: &mut Sink<'_>) -> Option<Parts> {
             }
         }
     }
-    let vars = crate::vars::collect(&tree, text, &targets, sink);
+    // Notes do not interpolate: `{{x}}` in a note is just text, and `vars:` is an error.
+    let vars = if is_note {
+        Vec::new()
+    } else {
+        crate::vars::collect(&tree, text, &targets, sink)
+    };
 
     Some(Parts {
         split,
@@ -575,7 +604,90 @@ fn title(tree: &Node, sink: &mut Sink<'_>) -> Option<String> {
         );
         None
     } else {
-        Some(title.to_string())
+        // the title is drawn in lists and headers: no escape sequence may get that far
+        Some(crate::terminal::display(title).into_owned())
+    }
+}
+
+/// Largest note body, in bytes, before `KB072-note-oversized`.
+pub const NOTE_OVERSIZED_BYTES: usize = 65_536;
+
+/// A note's title: `title:` when present, else its first line when that is a level-1 heading.
+fn note_title(tree: &Node, text: &str, body: &Span, sink: &mut Sink<'_>) -> Option<String> {
+    // an empty `title:` (a fresh template) means "use the heading", like a missing one
+    let given = tree
+        .get("title")
+        .filter(|n| !n.is_null() && n.as_str().is_none_or(|s| !s.trim().is_empty()));
+    if given.is_some() {
+        return title(tree, sink);
+    }
+    let found = note_title_from_body(&text[body.clone()]);
+    if found.is_none() {
+        sink.push(
+            RuleCode::NoteTitle,
+            0,
+            "a note needs a `title` or a level-1 heading (`# Title`) at the start of its body",
+            Some(
+                "add `title: \"...\"` to the frontmatter, or start the body with `# Title`".into(),
+            ),
+        );
+    }
+    found
+}
+
+/// The plain-text title of a note body: its first non-empty line, when that is a level-1 heading,
+/// with inline Markdown (code ticks, emphasis, links, strikethrough) stripped and whitespace
+/// collapsed. `None` when there is no such heading or it has no text.
+pub fn note_title_from_body(body: &str) -> Option<String> {
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+    let line = body.lines().find(|l| !l.trim().is_empty())?;
+    let mut out = String::new();
+    let mut in_h1 = false;
+    for event in Parser::new_ext(line, Options::ENABLE_STRIKETHROUGH) {
+        match event {
+            Event::Start(Tag::Heading {
+                level: pulldown_cmark::HeadingLevel::H1,
+                ..
+            }) => in_h1 = true,
+            Event::End(TagEnd::Heading(_)) => break,
+            Event::Text(t) | Event::Code(t) if in_h1 => out.push_str(&t),
+            Event::SoftBreak | Event::HardBreak if in_h1 => out.push(' '),
+            _ if !in_h1 => return None,
+            _ => {}
+        }
+    }
+    let title = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!title.is_empty()).then_some(title)
+}
+
+/// `KB071`, `KB072` and `KB073`: the rules that only apply to notes.
+fn note_checks(tree: &Node, body: &str, body_start: usize, sink: &mut Sink<'_>) {
+    if let Some((key, _)) = tree.entry("vars") {
+        sink.push(
+            RuleCode::NoteVars,
+            key.span.start,
+            "a note cannot declare `vars` (notes do not support variable interpolation)",
+            Some("remove `vars:`".into()),
+        );
+    }
+    if body.len() > NOTE_OVERSIZED_BYTES {
+        sink.push(
+            RuleCode::NoteOversized,
+            body_start,
+            format!(
+                "the note body is {} bytes; over {NOTE_OVERSIZED_BYTES} is hard to read and search",
+                body.len()
+            ),
+            Some("split it into separate linked entries".into()),
+        );
+    }
+    if body.trim().is_empty() {
+        sink.push(
+            RuleCode::NoteEmpty,
+            body_start,
+            "the note has no body",
+            Some("add content below the frontmatter".into()),
+        );
     }
 }
 
@@ -605,7 +717,8 @@ fn tags(tree: &Node, sink: &mut Sink<'_>) -> Vec<String> {
             continue;
         };
         let tag = raw.trim();
-        let tag = tag.strip_prefix('#').unwrap_or(tag).trim().to_lowercase();
+        let tag =
+            crate::terminal::display(tag.strip_prefix('#').unwrap_or(tag).trim()).to_lowercase();
         if tag.is_empty() {
             sink.push(
                 RuleCode::InvalidTag,
@@ -807,6 +920,7 @@ fn type_fields(t: EntryType, tree: &Node, sink: &mut Sink<'_>) -> TypeFields {
         EntryType::Code => TypeFields::Code {
             code: code_ref(tree, sink),
         },
+        EntryType::Note => TypeFields::Note,
     }
 }
 
@@ -1576,5 +1690,60 @@ mod tests {
         let e = out.entry.unwrap();
         assert_eq!(e.entry_type(), None);
         assert_eq!(e.fields(), &TypeFields::Unknown);
+    }
+    fn note(front: &str, body: &str) -> String {
+        format!("---\nkb_format: 1\ntype: note\n{front}---\n{body}")
+    }
+
+    #[test]
+    fn note_title_comes_from_frontmatter_or_the_first_heading() {
+        let e = clean(&note("title: Explicit\n", "\n# Heading\n\ntext\n"));
+        assert_eq!(e.title(), Some("Explicit"));
+        assert_eq!(e.entry_type(), Some(EntryType::Note));
+        assert_eq!(e.fields(), &TypeFields::Note);
+        let e = clean(&note(
+            "",
+            "\n\n# Role `cache` **TTL** ~~old~~ [docs](http://x)\n\nbody\n",
+        ));
+        assert_eq!(e.title(), Some("Role cache TTL old docs"));
+        assert!(e.payload().is_none());
+        assert!(e.notes().contains("body"));
+    }
+
+    #[test]
+    fn note_without_a_title_or_level_one_heading_is_an_error() {
+        for body in [
+            "\ntext only\n",
+            "\n## Level two\n",
+            "\ntext\n\n# late heading\n",
+            "",
+        ] {
+            let found = codes(&note("", body));
+            assert!(
+                found.iter().any(|f| f.2 == RuleCode::NoteTitle),
+                "{body:?}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn note_vars_are_an_error_and_braces_are_plain_text() {
+        let text = note("title: T\nvars:\n  a: { kind: text }\n", "\ntext {{a}}\n");
+        assert_eq!(one(&text).code, RuleCode::NoteVars);
+        let e = clean(&note("title: T\n", "\ntext {{a}}\n"));
+        assert!(e.vars().is_empty());
+    }
+
+    #[test]
+    fn note_size_and_emptiness_findings() {
+        let big = note(
+            "title: T\n",
+            &format!("\n{}\n", "x".repeat(NOTE_OVERSIZED_BYTES)),
+        );
+        assert_eq!(one(&big).code, RuleCode::NoteOversized);
+        let at_limit = note("title: T\n", &"x".repeat(NOTE_OVERSIZED_BYTES));
+        assert!(codes(&at_limit).is_empty());
+        let empty = note("title: T\n", "\n  \n");
+        assert_eq!(one(&empty).code, RuleCode::NoteEmpty);
     }
 }

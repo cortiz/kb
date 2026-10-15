@@ -1,0 +1,9 @@
+## Meeting notes
+
+| Who | Topic |
+|-----|-------|
+| Ana | Capacity |
+| Bo  | Costs |
+
+- Follow up on capacity
+- Draft the costs doc

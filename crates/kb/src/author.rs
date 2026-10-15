@@ -373,14 +373,16 @@ fn git_tracks(platform: &impl Platform, root: &Path, rel: &str) -> bool {
 }
 
 /// Renames an entry with `git mv` when it is tracked, else (or when git fails) with a plain
-/// rename; usage and remembered values follow. Returns what happened and how.
+/// rename; usage and remembered values follow. The `[[old]]` links of notes are pointed at the new
+/// ID, and the rename and those edits are one commit. Returns what happened and how, and the notes
+/// whose links changed.
 pub fn move_entry(
     platform: &impl Platform,
     kb: &mut Kb,
     old: &str,
     new: &str,
     settings: &kb_core::config::Settings,
-) -> Result<(kb_core::author::fsops::Renamed, &'static str), FsError> {
+) -> Result<(kb_core::author::fsops::Renamed, &'static str, Vec<String>), FsError> {
     let root = kb.root().to_path_buf();
     let method = std::cell::Cell::new("rename");
     let mover = |from: &Path, to: &Path| -> io::Result<()> {
@@ -402,21 +404,31 @@ pub fn move_entry(
         std::fs::rename(from, to)
     };
     let renamed = kb.rename_entry(old, new, &mover)?;
+    // notes that linked to the old ID (the renamed note too, when it linked to itself)
+    let linkers = kb.notes_linking_to(old);
+    let relinked = kb.retarget_links(&linkers, old, new)?;
     let old_rel = PathBuf::from(format!("{old}.md"));
     let new_rel = PathBuf::from(format!("{new}.md"));
     let mv_id = format!("{old} -> {new}");
+    let mut paths = vec![old_rel, new_rel];
+    for id in &relinked {
+        let rel = PathBuf::from(format!("{id}.md"));
+        if !paths.contains(&rel) {
+            paths.push(rel);
+        }
+    }
     let outcome = kb_core::git::commit::auto_commit_operation(
         &root,
         &crate::platform::SystemGitRunner,
         settings,
         kb_core::git::commit::AutoCommitAction::Mv,
         &mv_id,
-        &[old_rel, new_rel],
+        &paths,
     );
     if let Ok(kb_core::git::commit::AutoCommitOutcome::SkippedMissingIdentity { .. }) = outcome {
         eprintln!("kb: git commit skipped: author identity unknown (set user.name and user.email)");
     }
-    Ok((renamed, method.get()))
+    Ok((renamed, method.get(), relinked))
 }
 
 /// Deletes an entry with `git rm` when it is tracked, else (or when git fails) from the disk.
@@ -476,14 +488,22 @@ pub fn run_mv(
         return Ok(ExitCode::SUCCESS);
     }
     match move_entry(platform, &mut kb, old, new, &loaded.settings) {
-        Ok((renamed, method)) => {
+        Ok((renamed, method, relinked)) => {
             if json {
                 println!(
                     "{}",
-                    serde_json::json!({ "id": renamed.to, "from": renamed.from, "to": renamed.to, "method": method })
+                    serde_json::json!({ "id": renamed.to, "from": renamed.from, "to": renamed.to, "method": method, "links_updated": relinked })
                 );
             } else {
                 println!("renamed {} -> {} ({method})", renamed.from, renamed.to);
+                if !relinked.is_empty() {
+                    println!(
+                        "updated links in {} note{}: {}",
+                        relinked.len(),
+                        if relinked.len() == 1 { "" } else { "s" },
+                        relinked.join(", ")
+                    );
+                }
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -510,6 +530,23 @@ pub fn run_rm(
         eprintln!("kb: no entry with ID \"{id}\"");
         return Ok(ExitCode::from(1));
     }
+    // notes that link here would be left with a broken `[[link]]`
+    let referenced_by: Vec<String> = kb
+        .notes_linking_to(id)
+        .into_iter()
+        .filter(|n| n != id)
+        .collect();
+    let warning = (!referenced_by.is_empty()).then(|| {
+        format!(
+            "Entry '{id}' is referenced by {} note{} ({})",
+            referenced_by.len(),
+            if referenced_by.len() == 1 { "" } else { "s" },
+            referenced_by.join(", ")
+        )
+    });
+    if yes && let Some(w) = &warning {
+        eprintln!("kb: {w}; deleting anyway");
+    }
     if !yes {
         let Ok(tty) = platform
             .open_tty()
@@ -523,8 +560,17 @@ pub fn run_rm(
             ));
         };
         let signals = crate::tui::terminal::Signals::register();
-        let answer = crate::editfile::ask_line(&tty, &signals, &format!("Delete {id}? (y/N) "));
+        let question = match &warning {
+            Some(w) => format!("{w}. Delete anyway? [y/N] "),
+            None => format!("Delete {id}? (y/N) "),
+        };
+        let answer = crate::editfile::ask_line(&tty, &signals, &question);
         if !answer.is_some_and(|a| matches!(a.trim().to_ascii_lowercase().as_str(), "y" | "yes")) {
+            if warning.is_some() {
+                // a considered "no" to a warning is not a failure
+                eprintln!("kb: kept {id}");
+                return Ok(ExitCode::SUCCESS);
+            }
             return Ok(ExitCode::from(130));
         }
     }

@@ -6,21 +6,25 @@ use unicode_width::UnicodeWidthStr;
 
 use kb_core::search::{Kb, KbError};
 
-use crate::tui::preview::build_preview;
+use crate::tui::markdown::{Ctx, layout, render_markdown};
+use crate::tui::preview::build_preview_with;
 use crate::tui::theme::Theme;
-use crate::tui::view::render_preview;
+use crate::tui::view::{LinkRegion, render_preview_links};
 
 /// The narrowest and the default width of the text, in columns.
 const MIN_WIDTH: u16 = 40;
 pub const DEFAULT_WIDTH: u16 = 100;
 
 /// The preview of entry `id` as text, `width` columns wide. With `color` the text carries ANSI
-/// color codes and the payload is syntax highlighted; without, it is plain.
+/// color codes and the payload is syntax highlighted; without, it is plain. With `hyperlinks` the
+/// links of a note (http, https and mailto only) are OSC 8 hyperlinks; the caller says so only for
+/// a terminal that supports them.
 pub fn preview_text(
     kb: &Kb,
     id: &str,
     theme: &Theme,
     color: bool,
+    hyperlinks: bool,
     width: u16,
 ) -> Result<String, KbError> {
     let entry = kb.entry(id)?;
@@ -31,14 +35,43 @@ pub fn preview_text(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     let uses = kb.usage(id).map_or(0, |u| u.count);
-    let mut model = build_preview(&entry, modified, uses, color);
+    let lookup = |target: &str| link_lookup(kb, target);
+    let mut model = build_preview_with(&entry, modified, uses, color, Some(&lookup));
     let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), id);
     if let Some(meta) = &mut model.meta {
         meta.unreviewed = unreviewed;
     }
     // two columns of padding are part of the drawing and are cut off again below
-    let buf = render_preview(&model, theme, width.max(MIN_WIDTH) + 2);
-    Ok(buffer_to_text(&buf, color))
+    let (buf, links) = render_preview_links(&model, theme, width.max(MIN_WIDTH) + 2);
+    let links = if hyperlinks { links } else { Vec::new() };
+    Ok(buffer_to_text_linked(&buf, color, &links))
+}
+
+/// The body of entry `id` as the plain text a preview draws, 100 columns wide: no Markdown syntax,
+/// no styling, no control characters. For notes, this is what "copy as text" puts on the clipboard.
+pub fn rendered_text(kb: &Kb, id: &str) -> Result<String, KbError> {
+    let entry = kb.entry(id)?;
+    let lookup = |target: &str| link_lookup(kb, target);
+    let doc = render_markdown(
+        entry.notes().trim(),
+        &Ctx {
+            color: false,
+            entry_links: entry.entry_type() == Some(kb_core::entry::EntryType::Note),
+            lookup: Some(&lookup),
+        },
+    );
+    let mut out = String::new();
+    for line in layout(&doc.blocks, usize::from(DEFAULT_WIDTH)) {
+        out.push_str(line.text().trim_end());
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// The type and title of the entry `target`, for `[[entry-id]]` links.
+pub fn link_lookup(kb: &Kb, target: &str) -> Option<(kb_core::entry::EntryType, String)> {
+    let entry = kb.entry(target).ok()?;
+    Some((entry.entry_type()?, entry.title()?.to_string()))
 }
 
 /// The SGR parameters that set `fg` (or `bg` when `background`), or nothing for the default.
@@ -113,6 +146,13 @@ fn effective(style: Style) -> Style {
 /// The buffer as lines of text. The first and last column (padding) are dropped, trailing blanks
 /// are trimmed, and with `color` every change of style is an ANSI sequence.
 pub fn buffer_to_text(buf: &Buffer, color: bool) -> String {
+    buffer_to_text_linked(buf, color, &[])
+}
+
+/// [`buffer_to_text`] with each of `links` wrapped in an OSC 8 hyperlink. The regions come from
+/// kb's own drawing and have been checked for scheme; the sequences are the only escape codes
+/// other than colors that can be in the output.
+pub fn buffer_to_text_linked(buf: &Buffer, color: bool, links: &[LinkRegion]) -> String {
     let area = buf.area;
     let mut out = String::new();
     for y in 0..area.height {
@@ -121,13 +161,24 @@ pub fn buffer_to_text(buf: &Buffer, color: bool) -> String {
         let mut x = 1;
         while x < area.width.saturating_sub(1) {
             let cell = &buf[(area.x + x, area.y + y)];
-            let symbol = cell.symbol().to_string();
+            // a terminal must never be handed a control character by a cell
+            let symbol = kb_core::terminal::display(cell.symbol()).into_owned();
             let w = UnicodeWidthStr::width(symbol.as_str()).max(1);
+            let mut symbol = symbol;
+            for l in links.iter().filter(|l| l.y == y) {
+                if x == l.x0 {
+                    symbol.insert_str(0, &format!("\x1b]8;;{}\x1b\\", l.url));
+                }
+                if x + u16::try_from(w).unwrap_or(1) >= l.x1 && x < l.x1 {
+                    symbol.push_str("\x1b]8;;\x1b\\");
+                }
+            }
             cells.push((symbol, effective(cell.style())));
             x += u16::try_from(w).unwrap_or(1);
         }
         while cells.last().is_some_and(|(s, st)| {
             s.trim().is_empty()
+                && !s.contains('\x1b')
                 && st.bg.is_none_or(|b| b == Color::Reset)
                 && !st.add_modifier.contains(Modifier::UNDERLINED)
                 && !st.add_modifier.contains(Modifier::REVERSED)

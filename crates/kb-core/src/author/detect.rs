@@ -150,6 +150,14 @@ fn classify(text: &str) -> (EntryType, Confidence, DraftFields, String) {
             return (EntryType::Link, Confidence::High, url, String::new());
         }
     }
+    if let Some(confidence) = markdown_note(text) {
+        return (
+            EntryType::Note,
+            confidence,
+            DraftFields::None,
+            text.to_string(),
+        );
+    }
     let candidates = [
         sumo(text).map(|c| (EntryType::Sumo, c)),
         cloudwatch(text).map(|c| (EntryType::Cw, c)),
@@ -165,6 +173,36 @@ fn classify(text: &str) -> (EntryType, Confidence, DraftFields, String) {
         .copied()
         .unwrap_or((EntryType::Prompt, Confidence::Low));
     (ty, confidence, DraftFields::None, text.to_string())
+}
+
+static MD_HEADING: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^#{1,6}[ \t]+\S"));
+static MD_LIST_ITEM: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?m)^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\S"));
+static MD_TABLE_RULE: LazyLock<Regex> = LazyLock::new(|| {
+    re(r"(?m)^[ \t]*\|?[ \t]*:?-{2,}:?[ \t]*(?:\|[ \t]*:?-{2,}:?[ \t]*)+\|?[ \t]*$")
+});
+static MD_CALLOUT: LazyLock<Regex> =
+    LazyLock::new(|| re(r"(?mi)^>[ \t]*\[!(?:note|tip|important|warning|caution)\]"));
+
+/// Markdown structure (headings, lists, tables, callouts, several paragraphs) means a `note`.
+/// A lone `# comment` above a command is not enough: it takes two kinds of structure.
+fn markdown_note(text: &str) -> Option<Confidence> {
+    let paragraphs = text.split("\n\n").filter(|p| !p.trim().is_empty()).count();
+    let kinds = [
+        MD_HEADING.is_match(text),
+        MD_LIST_ITEM.find_iter(text).count() >= 2,
+        MD_TABLE_RULE.is_match(text),
+        MD_CALLOUT.is_match(text),
+        paragraphs >= 3 && MD_HEADING.is_match(text),
+    ]
+    .iter()
+    .filter(|k| **k)
+    .count();
+    match kinds {
+        3.. => Some(Confidence::High),
+        2 => Some(Confidence::Medium),
+        _ => None,
+    }
 }
 
 static URL: LazyLock<Regex> = LazyLock::new(|| re(r"^https?://\S+$"));

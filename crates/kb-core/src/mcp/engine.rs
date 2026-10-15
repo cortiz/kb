@@ -234,11 +234,19 @@ impl<'a> McpEngine<'a> {
                     );
                 }
             }
-            TypeFields::Prompt | TypeFields::Unknown => {}
+            TypeFields::Prompt | TypeFields::Note | TypeFields::Unknown => {}
         }
 
         let payload_text = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
-        let mut notes_text = entry.notes().to_string();
+        // a note is all body: it is `content`, whole, and not repeated as notes
+        let is_note = entry.entry_type() == Some(EntryType::Note);
+        let content = is_note
+            .then(|| crate::terminal::raw(crate::entry_json::note_source(&entry)).into_owned());
+        let mut notes_text = if is_note {
+            String::new()
+        } else {
+            entry.notes().to_string()
+        };
         if !include_full_notes && notes_text.len() > 64 * 1024 {
             notes_text.truncate(64 * 1024);
             notes_text.push_str("\n\n[Notes truncated (>64 KB). Pass include_full_notes: true to retrieve complete notes]");
@@ -289,6 +297,9 @@ impl<'a> McpEngine<'a> {
             fields: fields_map,
             payload: payload_text,
             notes: notes_text,
+            content,
+            created: entry.created().map(str::to_string),
+            updated: entry.updated().map(str::to_string),
             vars: vars_map,
             version,
             unreviewed,
@@ -464,7 +475,7 @@ impl<'a> McpEngine<'a> {
                     );
                 }
             }
-            TypeFields::Prompt | TypeFields::Unknown => {}
+            TypeFields::Prompt | TypeFields::Note | TypeFields::Unknown => {}
         }
 
         let links = EntryLinksView {

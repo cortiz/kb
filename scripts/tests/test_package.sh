@@ -9,10 +9,11 @@ script="$(repo_root)/scripts/package.sh"
 command -v python3 >/dev/null 2>&1 || { echo "skipped: needs python3"; exit 0; }
 
 root="$TMP/root"
-mkdir -p "$root" "$TMP/out"
+mkdir -p "$root/scripts" "$TMP/out"
 echo "# kb" > "$root/README.md"
 echo "MIT text" > "$root/LICENSE-MIT"
 echo "Apache text" > "$root/LICENSE-APACHE"
+printf '#!/bin/sh\necho kb-update\n' > "$root/scripts/update.sh"
 printf '#!/bin/sh\necho kb 0.2.0\n' > "$TMP/kb"
 chmod 600 "$TMP/kb"   # the archive must say 0755 regardless of the source mode
 export KB_PACKAGE_ROOT="$root" SOURCE_DATE_EPOCH=1700000000
@@ -34,7 +35,8 @@ want="kb-0.2.0-linux-x86_64 0o755 0 0 1700000000
 kb-0.2.0-linux-x86_64/LICENSE-APACHE 0o644 0 0 1700000000  
 kb-0.2.0-linux-x86_64/LICENSE-MIT 0o644 0 0 1700000000  
 kb-0.2.0-linux-x86_64/README.md 0o644 0 0 1700000000  
-kb-0.2.0-linux-x86_64/kb 0o755 0 0 1700000000  "
+kb-0.2.0-linux-x86_64/kb 0o755 0 0 1700000000  
+kb-0.2.0-linux-x86_64/kb-update 0o755 0 0 1700000000  "
 # the directory first, then files in byte order (capitals before lower case)
 assert_eq "$want" "$(listing "$archive")" "layout and metadata"
 
@@ -45,7 +47,7 @@ case "$header" in 1f8b080000000000*) ;; *) _fail "gzip header has a name or a ti
 # a second run, with different source mtimes, gives the same bytes
 first=$(sha256 "$archive")
 rm -f "$archive" "$TMP/out/SHA256SUMS"
-touch -t 202001010000 "$TMP/kb" "$root/README.md"
+touch -t 202001010000 "$TMP/kb" "$root/README.md" "$root/scripts/update.sh"
 assert_exit 0 "packages again" -- "$script" 0.2.0 "$target" "$TMP/kb" "$TMP/out"
 assert_eq "$first" "$(sha256 "$archive")" "byte-identical archives"
 

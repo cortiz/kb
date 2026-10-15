@@ -1075,5 +1075,25 @@ fn a_version_one_index_is_rebuilt() {
             .iter()
             .any(|n| matches!(n, Notice::Rebuilt { entries: 32 }))
     );
-    assert_eq!(crate::index::INDEX_VERSION, 2);
+    assert_eq!(crate::index::INDEX_VERSION, 3);
+}
+
+#[test]
+fn snippet_text_loses_escape_sequences_and_ranges_follow_the_text() {
+    let (text, ranges) = clean_text("ab\x1b[2Jcd needle ef\x07".to_string(), vec![9..15]);
+    assert_eq!(text, "ab␛cd needle ef");
+    assert_eq!(
+        &text
+            .chars()
+            .skip(ranges[0].start)
+            .take(ranges[0].len())
+            .collect::<String>(),
+        "needle"
+    );
+    // clean text is untouched
+    let (text, ranges) = clean_text("plain text".to_string(), vec![0..5]);
+    assert_eq!((text.as_str(), ranges), ("plain text", vec![0..5]));
+    // a match that was only an escape sequence is dropped
+    let (_, ranges) = clean_text("a\x1b[31mb".to_string(), vec![1..6]);
+    assert!(ranges.iter().all(|r| r.start < r.end));
 }

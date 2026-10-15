@@ -1,6 +1,6 @@
  kb · ~/kb · 8 entries
  ›                                                                                                                8 / 8
-  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1
+  all 8   sql 1   sumo 1   cw 1   cmd 1   prompt 2   link 1   code 1   note 0
 ┌ results ─────────────────────────────────────┐┌ preview ─────────────────────────────────────────────────────────────┐
 │ cmd    Deploy with secret token              ││ 日本語のタイトル 🚀 とても長いタイトルがここに続きます。端末の幅を…  │
 │        #deploy #prod                         ││ prompt · #日本語 #🚀 #ops · edited 2026-08-01                        │
@@ -45,6 +45,7 @@
 1:3..4 reverse
 1:114..120 fg=241
 2:1..8 fg=17 bg=153 bold
+2:70..78 fg=248
 3:0..1 fg=246
 3:1..10 fg=241
 3:10..49 fg=246

@@ -1,6 +1,6 @@
 //! Turning a file into what the index stores (FR-005), or deciding it must stay out.
 
-use crate::entry::{Entry, TypeFields};
+use crate::entry::{Entry, EntryType, TypeFields};
 use crate::fold::fold;
 use crate::lint::{Severity, check_file};
 use crate::usage::content_hash;
@@ -16,6 +16,8 @@ pub struct Doc {
     pub vars: Vec<String>,
     pub code_repo: Option<String>,
     pub updated: Option<String>,
+    /// The entries a note links to with `[[id]]`, without repeats.
+    pub links: Vec<String>,
     /// FTS columns: title, tags, id, meta, payload, notes.
     pub cols: [String; 6],
 }
@@ -47,6 +49,94 @@ pub fn build_doc(file: &WalkEntry, bytes: Vec<u8>) -> Built {
         _ => Verdict::Skipped,
     };
     Built { verdict, hash }
+}
+
+/// Most of a note's body the index keeps, in bytes.
+pub const NOTE_INDEX_BYTES: usize = 262_144;
+
+/// What a note puts in the search columns: headings 1 to 3 and link hosts go to `meta`; the rest
+/// of the text, with the Markdown syntax removed, goes to `payload`.
+struct NoteColumns {
+    meta: Vec<String>,
+    payload: String,
+}
+
+fn note_columns(body: &str) -> NoteColumns {
+    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+    let options = Options::ENABLE_TABLES
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_FOOTNOTES;
+    let mut meta = Vec::new();
+    let mut payload = String::new();
+    let mut heading: Option<String> = None;
+    let break_ = |payload: &mut String, blank: bool| {
+        let want = if blank { "\n\n" } else { "\n" };
+        let have = payload.len() - payload.trim_end_matches('\n').len();
+        if !payload.is_empty() && have < want.len() {
+            payload.push_str(&want[have..]);
+        }
+    };
+    for event in Parser::new_ext(body, options) {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                heading = (level <= HeadingLevel::H3).then(String::new);
+                if heading.is_none() {
+                    break_(&mut payload, true);
+                }
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                match heading.take() {
+                    Some(h) if !h.trim().is_empty() => meta.push(h),
+                    _ => {}
+                }
+                break_(&mut payload, true);
+            }
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                let url = dest_url.split_once("://").map_or(&*dest_url, |(_, r)| r);
+                if !url.starts_with('#') {
+                    meta.push(url.to_string());
+                }
+            }
+            Event::Start(Tag::CodeBlock(_)) | Event::End(TagEnd::CodeBlock) => {
+                break_(&mut payload, true);
+            }
+            Event::Text(t) | Event::Code(t) => {
+                if let Some(h) = heading.as_mut() {
+                    h.push_str(&t);
+                } else {
+                    payload.push_str(&t);
+                }
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                if let Some(h) = heading.as_mut() {
+                    h.push(' ');
+                } else {
+                    break_(&mut payload, false);
+                }
+            }
+            Event::End(TagEnd::Paragraph | TagEnd::BlockQuote(_) | TagEnd::Table) => {
+                break_(&mut payload, true);
+            }
+            Event::End(TagEnd::Item | TagEnd::TableRow | TagEnd::TableHead) => {
+                break_(&mut payload, false);
+            }
+            Event::End(TagEnd::TableCell) => payload.push(' '),
+            _ => {}
+        }
+        if payload.len() >= NOTE_INDEX_BYTES {
+            let mut cut = NOTE_INDEX_BYTES;
+            while !payload.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            payload.truncate(cut);
+            break;
+        }
+    }
+    NoteColumns {
+        meta,
+        payload: payload.trim().to_string(),
+    }
 }
 
 fn doc_of(entry: &Entry) -> Option<Doc> {
@@ -87,6 +177,22 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
     }
     let id = entry.id();
     let tags: Vec<String> = entry.tags().to_vec();
+    let mut links: Vec<String> = Vec::new();
+    let (payload, notes) = if ty == EntryType::Note {
+        for link in crate::entry::link::extract_links(entry.notes()) {
+            if !links.contains(&link.target_id) {
+                links.push(link.target_id);
+            }
+        }
+        let note = note_columns(entry.notes());
+        meta.extend(note.meta);
+        (note.payload, String::new())
+    } else {
+        (
+            entry.payload().map(|p| p.text.clone()).unwrap_or_default(),
+            entry.notes().to_string(),
+        )
+    };
     Some(Doc {
         entry_type: ty.name(),
         title_fold: fold(&title)
@@ -98,14 +204,15 @@ fn doc_of(entry: &Entry) -> Option<Doc> {
             tags.join(" "),
             id.replace(['/', '-', '_', '.'], " "),
             meta.join(" "),
-            entry.payload().map(|p| p.text.clone()).unwrap_or_default(),
-            entry.notes().to_string(),
+            payload,
+            notes,
         ],
         title,
         tags,
         vars: entry.vars().iter().map(|v| v.name.clone()).collect(),
         code_repo,
         updated: entry.updated().map(str::to_string),
+        links,
     })
 }
 
@@ -186,5 +293,53 @@ mod tests {
         let big = format!("{ok}\n{}\nzebrafish\n", "padding line\n".repeat(90_000));
         assert!(big.len() > crate::lint::rules::MAX_FILE_BYTES);
         assert!(matches!(build("big", &big).verdict, Verdict::Indexed(_)));
+    }
+
+    const NOTE: &str = "---\nkb_format: 1\ntype: note\ntags: [Redis]\n---\n\n# Role cache `TTL`\n\nThe **authorizer** caches roles. See [docs](https://example.com/docs/ttl).\n\n## Invalidation\n\n- revoke: DEL\n- grant: SETEX\n\n#### Deep heading\n\n| Event | TTL |\n|:--|--:|\n| grant | 300 s |\n\n```sh\nredis-cli ttl role:42\n```\n";
+
+    #[test]
+    fn note_columns() {
+        let d = doc("note/role-cache", NOTE);
+        assert_eq!(d.entry_type, "note");
+        assert_eq!(
+            d.cols[0], "Role cache TTL",
+            "title from the heading, stripped"
+        );
+        assert_eq!(d.cols[1], "redis");
+        assert_eq!(
+            d.cols[3],
+            "Role cache TTL example.com/docs/ttl Invalidation"
+        );
+        let body = &d.cols[4];
+        for want in [
+            "The authorizer caches roles.",
+            "revoke: DEL\ngrant: SETEX",
+            "Deep heading",
+            "grant 300 s",
+            "redis-cli ttl role:42",
+        ] {
+            assert!(body.contains(want), "{want:?} not in {body:?}");
+        }
+        assert!(
+            !body.contains("**") && !body.contains("```") && !body.contains("##"),
+            "{body:?}"
+        );
+        assert!(
+            !body.contains("Invalidation"),
+            "headings 1-3 live in meta: {body:?}"
+        );
+        assert_eq!(d.cols[5], "", "notes column stays empty");
+        assert!(d.vars.is_empty());
+    }
+
+    #[test]
+    fn note_payload_is_capped() {
+        let big = format!(
+            "---\nkb_format: 1\ntype: note\ntitle: Big\n---\n\n{}",
+            "word \n\n".repeat(80_000)
+        );
+        let d = doc("note/big", &big);
+        assert!(d.cols[4].len() <= NOTE_INDEX_BYTES);
+        assert!(d.cols[4].len() > NOTE_INDEX_BYTES - 16);
     }
 }
