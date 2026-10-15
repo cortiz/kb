@@ -955,7 +955,7 @@ pub fn run(
                         &to,
                         &state.options.settings,
                     ) {
-                        Ok((renamed, _, _)) => Action::Renamed {
+                        Ok((renamed, _, _, _)) => Action::Renamed {
                             from: renamed.from,
                             to: renamed.to,
                         },
@@ -987,6 +987,7 @@ pub fn run(
                         platform,
                         &mut ui_kb,
                         &id,
+                        false,
                         &state.options.settings,
                     ) {
                         Ok(_) => Action::Removed(id),
@@ -1046,6 +1047,55 @@ pub fn run(
                         }
                         Edited::Signalled(signal) => exit = Some(exit_code_for_signal(signal)),
                     }
+                }
+                Effect::CreateRunbookFromMarks { title, entries } => {
+                    let mut resolved_entries = Vec::new();
+                    for id in &entries {
+                        if let Ok(entry) = ui_kb.entry(id) {
+                            resolved_entries.push((id.clone(), entry));
+                        }
+                    }
+                    let entries_slice: Vec<(&str, &kb_core::entry::Entry)> = resolved_entries
+                        .iter()
+                        .map(|(id, e)| (id.as_str(), e))
+                        .collect();
+                    let content = kb_core::author::runbook_new::generate_runbook_content(
+                        &title,
+                        &[],
+                        &entries_slice,
+                    );
+                    let slug = kb_core::author::draft::slugify(&title);
+                    let target_id = format!("runbook/{slug}");
+
+                    guard.suspend();
+                    let _ = crate::editfile::edit_and_save_runbook(
+                        platform,
+                        &mut ui_kb,
+                        &settings,
+                        &content,
+                        &target_id,
+                        false,
+                    );
+                    let _ = guard.resume();
+                    if let Ok(size) = terminal.size() {
+                        let _ = terminal.resize(ratatui::layout::Rect::new(
+                            0,
+                            0,
+                            size.width,
+                            size.height,
+                        ));
+                    }
+                    state.marks.clear();
+                    state.status.refreshing = true;
+                    pending.extend(state.update(
+                        Action::GoToEntry {
+                            id: target_id,
+                            title,
+                        },
+                        Instant::now(),
+                    ));
+                    pending.push(Effect::Refresh);
+                    dirty = true;
                 }
             }
         }

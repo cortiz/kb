@@ -22,7 +22,7 @@ const COMMON_KEYS: [&str; 7] = [
 ];
 
 /// Every key kb defines, for "did you mean" suggestions.
-const ALL_KEYS: [&str; 16] = [
+const ALL_KEYS: [&str; 17] = [
     "kb_format",
     "type",
     "title",
@@ -39,9 +39,10 @@ const ALL_KEYS: [&str; 16] = [
     "cwd",
     "url",
     "code",
+    "steps",
 ];
 
-const TYPE_LIST: &str = "sql, sumo, cw, cmd, prompt, link, code, note";
+const TYPE_LIST: &str = "sql, sumo, cw, cmd, prompt, link, code, note, runbook";
 
 /// The tag that keeps an entry away from AI agents (the default of `mcp.exclude_tags`).
 pub const PRIVATE_TAG: &str = "private";
@@ -52,7 +53,7 @@ pub const MAX_KB_FORMAT: u32 = 1;
 /// Longest allowed title, in characters.
 pub const MAX_TITLE_CHARS: usize = 120;
 
-/// The eight entry types.
+/// The nine entry types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EntryType {
     Sql,
@@ -63,6 +64,7 @@ pub enum EntryType {
     Link,
     Code,
     Note,
+    Runbook,
 }
 
 impl EntryType {
@@ -70,7 +72,7 @@ impl EntryType {
     pub const COUNT: usize = Self::ALL.len();
 
     /// Every entry type, in the order the format lists them.
-    pub const ALL: [EntryType; 8] = [
+    pub const ALL: [EntryType; 9] = [
         EntryType::Sql,
         EntryType::Sumo,
         EntryType::Cw,
@@ -79,6 +81,7 @@ impl EntryType {
         EntryType::Link,
         EntryType::Code,
         EntryType::Note,
+        EntryType::Runbook,
     ];
 
     /// The name used in `type:`.
@@ -92,17 +95,21 @@ impl EntryType {
             EntryType::Link => "link",
             EntryType::Code => "code",
             EntryType::Note => "note",
+            EntryType::Runbook => "runbook",
         }
     }
 
-    /// The type named `name` in `type:`, if it is one of the eight.
+    /// The type named `name` in `type:`, if it is one of the nine.
     pub fn from_name(name: &str) -> Option<EntryType> {
         EntryType::ALL.into_iter().find(|t| t.name() == name)
     }
 
     /// Whether the body's first fenced code block is the payload.
     pub fn has_payload(self) -> bool {
-        !matches!(self, EntryType::Link | EntryType::Code | EntryType::Note)
+        !matches!(
+            self,
+            EntryType::Link | EntryType::Code | EntryType::Note | EntryType::Runbook
+        )
     }
 
     /// The type-specific keys this type accepts.
@@ -116,6 +123,7 @@ impl EntryType {
             EntryType::Link => &["url"],
             EntryType::Code => &["code"],
             EntryType::Note => &[],
+            EntryType::Runbook => &["steps"],
         }
     }
 }
@@ -195,6 +203,9 @@ pub enum TypeFields {
         code: Option<CodeRef>,
     },
     Note,
+    Runbook {
+        steps: Vec<crate::runbook::RunbookStep>,
+    },
     /// The type is missing or unknown.
     Unknown,
 }
@@ -468,10 +479,28 @@ fn parse_parts(sink: &mut Sink<'_>) -> Option<Parts> {
                 });
             }
         }
+        if t == EntryType::Runbook
+            && let TypeFields::Runbook { steps } = &fields
+        {
+            for (i, step) in steps.iter().enumerate() {
+                targets.push(ScanTarget {
+                    location: RefLocation::Field(format!("steps[{i}].title")),
+                    span: step.title_span.clone(),
+                });
+                if step.target.is_do() {
+                    targets.push(ScanTarget {
+                        location: RefLocation::Field(format!("steps[{i}].do")),
+                        span: step.target_span.clone(),
+                    });
+                }
+            }
+        }
     }
     // Notes do not interpolate: `{{x}}` in a note is just text, and `vars:` is an error.
     let vars = if is_note {
         Vec::new()
+    } else if entry_type == Some(EntryType::Runbook) {
+        crate::vars::collect_runbook(&tree, text, &targets, sink)
     } else {
         crate::vars::collect(&tree, text, &targets, sink)
     };
@@ -921,6 +950,20 @@ fn type_fields(t: EntryType, tree: &Node, sink: &mut Sink<'_>) -> TypeFields {
             code: code_ref(tree, sink),
         },
         EntryType::Note => TypeFields::Note,
+        EntryType::Runbook => {
+            let steps = if let Some(node) = tree.get("steps") {
+                crate::runbook::parse_steps(node, sink)
+            } else {
+                sink.push(
+                    RuleCode::RunbookNoSteps,
+                    0,
+                    "a runbook must have at least one step under `steps:`",
+                    Some("add `steps:` with one or more steps".into()),
+                );
+                Vec::new()
+            };
+            TypeFields::Runbook { steps }
+        }
     }
 }
 
@@ -1285,6 +1328,14 @@ impl Entry {
     /// The frontmatter tree.
     pub fn tree(&self) -> &Node {
         &self.tree
+    }
+
+    /// The runbook steps, for runbook entries.
+    pub fn runbook_steps(&self) -> Option<&[crate::runbook::RunbookStep]> {
+        match &self.fields {
+            TypeFields::Runbook { steps } => Some(steps),
+            _ => None,
+        }
     }
 }
 

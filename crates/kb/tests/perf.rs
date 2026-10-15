@@ -290,7 +290,7 @@ fn one_frame_with_ten_thousand_results_under_48ms() {
             Page {
                 results,
                 total: 10_000,
-                type_counts: [1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250],
+                type_counts: [1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 0],
                 indexed: 10_000,
                 skipped: 0,
                 notices: vec![],
@@ -775,7 +775,7 @@ fn a_large_note_is_laid_out_once_and_drawn_under_48ms() {
             Page {
                 results: vec![result],
                 total: 1,
-                type_counts: [0, 0, 0, 0, 0, 0, 0, 1],
+                type_counts: [0, 0, 0, 0, 0, 0, 0, 1, 0],
                 indexed: 1,
                 skipped: 0,
                 notices: vec![],
@@ -866,3 +866,66 @@ fn browsing_two_hundred_notes_grows_memory_under_100mb() {
     assert!(growth_mb <= 100, "grew by {growth_mb} MB");
     s.send(support::pty::CTRL_C);
 }
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn runbook_filters_and_used_in_under_50ms() {
+    let _serial = serial();
+    let dir = indexed_kb();
+    let rb_path = dir.path().join("deploy-authorizer.md");
+    fs::write(
+        &rb_path,
+        r#"---
+kb_format: 1
+type: runbook
+title: Deploy Authorizer
+steps:
+  - id: step-1
+    title: First step
+    entry: group-01/entry-00001
+  - id: step-2
+    title: Second step
+    entry: group-02/entry-00002
+---
+
+Notes.
+"#,
+    )
+    .unwrap();
+    kb_in(dir.path()).arg("reindex").output().unwrap();
+
+    // Warm up
+    timed_search(dir.path(), &["runbook:deploy-authorizer"]);
+    timed_search(dir.path(), &["used-by:runbook"]);
+    timed_search(dir.path(), &["type:runbook"]);
+
+    let m_runbook = median(
+        (0..10)
+            .map(|_| timed_search(dir.path(), &["runbook:deploy-authorizer"]))
+            .collect(),
+    );
+    let m_used_by = median(
+        (0..10)
+            .map(|_| timed_search(dir.path(), &["used-by:runbook"]))
+            .collect(),
+    );
+    let m_type_runbook = median(
+        (0..10)
+            .map(|_| timed_search(dir.path(), &["type:runbook"]))
+            .collect(),
+    );
+
+    println!(
+        "runbook filters median: runbook: {m_runbook:?}, used-by: {m_used_by:?}, type:runbook: {m_type_runbook:?}"
+    );
+
+    let limit = if std::env::var("CI").is_ok() {
+        Duration::from_millis(240)
+    } else {
+        Duration::from_millis(180)
+    };
+    assert!(m_runbook < limit, "runbook: filter {m_runbook:?}");
+    assert!(m_used_by < limit, "used-by: filter {m_used_by:?}");
+    assert!(m_type_runbook < limit, "type:runbook filter {m_type_runbook:?}");
+}
+

@@ -148,6 +148,7 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
                     "notes": { "type": "string", "description": "Markdown body notes" },
                     "vars": { "type": "object", "description": "Variable declarations" },
                     "fields": { "type": "object", "description": "Type-specific fields (url, shell, range, etc.)" },
+                    "steps": { "type": "array", "description": "Runbook steps (required for type: runbook)" },
                     "path": { "type": "string", "description": "Optional custom relative path/ID" },
                     "dry_run": { "type": "boolean", "default": false, "description": "Preview output without saving" }
                 }
@@ -170,6 +171,7 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
                             "notes": { "type": "string" },
                             "content": { "type": "string", "description": "A note's new Markdown body" },
                             "fields": { "type": "object" },
+                            "steps": { "type": "array", "description": "Runbook steps replacement" },
                             "tags": { "type": "array", "items": { "type": "string" } },
                             "add_tags": { "type": "array", "items": { "type": "string" } },
                             "remove_tags": { "type": "array", "items": { "type": "string" } },
@@ -701,9 +703,10 @@ impl McpServer {
                                         resp.id, resp.version
                                     );
                                     if !resp.used_in.is_empty() {
+                                        let ids: Vec<&str> = resp.used_in.iter().map(|u| u.id.as_str()).collect();
                                         s.push_str(&format!(
                                             "\nWarning: used in runbooks: {}",
-                                            resp.used_in.join(", ")
+                                            ids.join(", ")
                                         ));
                                     }
                                     s

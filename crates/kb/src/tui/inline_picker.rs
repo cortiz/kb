@@ -561,6 +561,7 @@ fn render_inline_ui(
             Some(EntryType::Link) => "link",
             Some(EntryType::Code) => "code",
             Some(EntryType::Note) => "note",
+            Some(EntryType::Runbook) => "runbook",
             None => "all",
         };
 

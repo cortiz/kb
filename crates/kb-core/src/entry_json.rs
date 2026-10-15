@@ -109,6 +109,9 @@ fn fields_json(entry: &Entry) -> Value {
         | TypeFields::Prompt
         | TypeFields::Note
         | TypeFields::Unknown => {}
+        TypeFields::Runbook { steps } => {
+            m.insert("steps".into(), json!(steps));
+        }
     }
     Value::Object(m)
 }
@@ -172,6 +175,7 @@ pub fn pick_output(entry: &Entry, abs_path: &Path, mode: PrintMode) -> Result<St
             // a note is all body: its Markdown, without the frontmatter and without anything a
             // terminal would act on
             TypeFields::Note => Ok(crate::terminal::raw(note_source(entry)).into_owned()),
+            TypeFields::Runbook { .. } => Ok(crate::runbook::checklist::generate_checklist(entry)),
             _ => entry.payload().map(|p| p.text.clone()).ok_or(PickError),
         },
     }

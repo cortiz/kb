@@ -7,7 +7,7 @@ them.
 
 ![kb demo: search, fill in variables, copy, vim mode, add from the clipboard, lint](demo.gif)
 
-> Status: milestone MCP (012-mcp-server: stdio MCP server for AI agents, human review workflow, secret shielding).
+> Status: milestone R1 (011-runbook-format: ordered sequence of snippet steps, variable lifting, reference integrity, checklists).
 
 ## Install
 
@@ -309,6 +309,44 @@ as text, and `kb show --raw` prints the Markdown without frontmatter.
   text and `vars:` is an error (KB071).
 - **Agents**: `search`, `get`, `create` and `update` work on notes. `get` returns the Markdown as
   `content`; `create` and `update` take `content`, and a title may come from its first heading.
+
+### Runbooks
+
+A `runbook` entry is an ordered sequence of steps that point to existing entries or carry manual instructions, with variables declared once for the whole runbook in `runbook/<slug>.md`.
+
+```yaml
+---
+kb_format: 1
+type: runbook
+title: Deploy authorizer to prod
+tags: [deploy, lambda, auth]
+vars:
+  env: { kind: enum, options: [stage, prod], default: stage }
+  version: { kind: text, description: "Release tag, e.g. v2.14.0" }
+steps:
+  - id: baseline
+    title: Check the current error rate
+    entry: sumo/5xx-by-authorizer
+    vars: { minutes: 30 }
+  - id: deploy
+    title: Deploy {{version}} to {{env}}
+    entry: cmd/deploy-authorizer
+    confirm: true
+  - id: rollback
+    title: Roll back if p99 > 800 ms
+    do: |
+      Only if p99 stayed above 800 ms for 5 minutes.
+      Post in #auth-oncall before rolling back.
+    optional: true
+---
+
+Owner: platform security.
+```
+
+- **Creation**: `kb runbook new "Deploy authorizer" sumo/5xx cmd/deploy` creates a runbook from existing entries, automatically lifting compatible variables to the runbook. You can also mark entries in the TUI (`Space` or `m`) and run `new-runbook-from-marks` (`C-R`).
+- **Integrity**: `kb mv` updates step references across runbooks in the same commit. `kb rm` refuses to delete entries used in runbooks unless `--force` is passed.
+- **Checklists**: `kb show <runbook> --checklist` exports a Markdown checklist. With `--resolve`, it prompts once for variables and inlines resolved query/command code blocks with secrets safely masked. `kb use <runbook>` copies the resolved checklist to the clipboard and records usage.
+- **Search & Filters**: `type:runbook` lists only runbooks. `runbook:<id>` lists the entries used by that runbook in step order. `used-by:runbook` lists all entries referenced by any runbook. Ordinary entries display a "Used in" section in preview showing referencing runbooks.
 
 ### Variables
 

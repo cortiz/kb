@@ -9,6 +9,7 @@ pub mod detect;
 pub mod draft;
 pub mod fsops;
 pub mod render;
+pub mod runbook_new;
 pub mod suggest;
 
 pub use detect::{Confidence, Detection, detect, normalize_clipboard};

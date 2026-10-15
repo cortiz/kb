@@ -17,7 +17,9 @@ use super::highlight::Span as TokSpan;
 use super::keys::{self, BarKind, Mode};
 use super::layout::{self, Layout, Screen, pad, truncate, truncate_middle, width};
 use super::markdown;
-use super::preview::{PreviewModel, VarRow};
+use super::preview::{
+    PreviewModel, StepPreview, StepPreviewStatus, StepPreviewTarget, VarRow,
+};
 use super::theme::Class;
 use super::theme::Theme;
 
@@ -387,6 +389,12 @@ fn draw_list(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
             Span::styled(badge, theme.badge(result.entry_type)),
             Span::raw(" "),
         ];
+        if let Some(pos) = state.marks.iter().position(|m| m == &result.id) {
+            let mark_text = format!("✓{} ", pos + 1);
+            let w = mark_text.chars().count();
+            title_cols = title_cols.saturating_sub(w);
+            spans.push(Span::styled(mark_text, theme.matched()));
+        }
         if result.unreviewed {
             spans.push(Span::styled("agent ", theme.warning()));
             title_cols = title_cols.saturating_sub(6);
@@ -471,6 +479,8 @@ enum Row {
     Rule(&'static str),
     Payload(usize),
     Var(usize),
+    Step(usize),
+    UsedIn(usize),
     Field(usize),
     Notes(usize),
 }
@@ -547,6 +557,16 @@ fn preview_layout(m: &PreviewModel, cols: usize) -> PreviewLayout {
         rows.push(Row::Blank);
         rows.push(Row::Rule("variables"));
         rows.extend((0..m.vars.len()).map(Row::Var));
+    }
+    if !m.steps.is_empty() {
+        rows.push(Row::Blank);
+        rows.push(Row::Rule("steps"));
+        rows.extend((0..m.steps.len()).map(Row::Step));
+    }
+    if !m.used_in.is_empty() {
+        rows.push(Row::Blank);
+        rows.push(Row::Rule("used in"));
+        rows.extend((0..m.used_in.len()).map(Row::UsedIn));
     }
     if !m.fields.is_empty() {
         rows.push(Row::Blank);
@@ -769,6 +789,8 @@ fn draw_preview_rows_linked(
                 spans
             }
             Row::Var(i) => var_spans(&m.vars[i], theme, cols),
+            Row::Step(i) => step_spans(&m.steps[i], theme, cols),
+            Row::UsedIn(i) => used_in_spans(&m.used_in[i], theme, cols),
             Row::Field(i) => {
                 let (k, v) = &m.fields[i];
                 vec![
@@ -864,8 +886,106 @@ fn meta_spans(m: &PreviewModel, theme: &Theme, cols: usize) -> Vec<Span<'static>
     if let Some(e) = &meta.edited {
         spans.push(Span::styled(format!(" · edited {e}"), theme.muted()));
     }
+    if let Some((missing, errors, agent)) = m.step_issue_counts {
+        let mut parts = Vec::new();
+        if missing > 0 {
+            parts.push(format!("{missing} missing"));
+        }
+        if errors > 0 {
+            parts.push(format!("{errors} error{}", if errors == 1 { "" } else { "s" }));
+        }
+        if agent > 0 {
+            parts.push(format!("{agent} agent"));
+        }
+        if !parts.is_empty() {
+            spans.push(Span::styled(format!(" · {}", parts.join(", ")), theme.warning()));
+        }
+    }
     let _ = cols;
     spans
+}
+
+fn step_spans(s: &StepPreview, theme: &Theme, cols: usize) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    // 1. Position
+    spans.push(Span::styled(format!("{}. ", s.position), theme.muted()));
+
+    // 2. Type badge or manual badge
+    match &s.target {
+        StepPreviewTarget::Entry { entry_type, .. } => {
+            if let Some(ty) = entry_type {
+                spans.push(Span::styled(format!("[{}] ", ty.name()), theme.badge(*ty)));
+            } else {
+                spans.push(Span::styled("[entry] ", theme.muted()));
+            }
+        }
+        StepPreviewTarget::Manual { .. } => {
+            spans.push(Span::styled(
+                "[manual] ",
+                theme.muted().add_modifier(Modifier::BOLD),
+            ));
+        }
+    }
+
+    // 3. Step Title
+    spans.push(Span::styled(
+        s.title.clone(),
+        theme.text().add_modifier(Modifier::BOLD),
+    ));
+
+    // 4. Referenced entry's title if different
+    if let StepPreviewTarget::Entry {
+        title: Some(entry_title),
+        ..
+    } = &s.target
+    {
+        if entry_title != &s.title {
+            spans.push(Span::styled(format!(" · {entry_title}"), theme.muted()));
+        }
+    }
+
+    // 5. Status indicators
+    if let Some(status) = s.status {
+        match status {
+            StepPreviewStatus::Missing => {
+                spans.push(Span::styled(" [missing]", theme.warning()));
+            }
+            StepPreviewStatus::Errors => {
+                spans.push(Span::styled(" [⚠ errors]", theme.warning()));
+            }
+            StepPreviewStatus::Agent => {
+                spans.push(Span::styled(" [agent]", theme.warning()));
+            }
+        }
+    }
+
+    // 6. Optional / confirm markers
+    if s.optional {
+        spans.push(Span::styled(" [optional]", theme.muted()));
+    }
+    if s.confirm {
+        spans.push(Span::styled(" [confirm]", theme.warning()));
+    }
+
+    // 7. Bindings
+    if !s.bindings.is_empty() {
+        let b_str: Vec<String> = s
+            .bindings
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect();
+        spans.push(Span::styled(format!(" ({})", b_str.join(", ")), theme.muted()));
+    }
+
+    let _ = cols;
+    spans
+}
+
+fn used_in_spans(title: &str, theme: &Theme, cols: usize) -> Vec<Span<'static>> {
+    vec![
+        Span::styled("• ", theme.muted()),
+        Span::styled(truncate(title, cols.saturating_sub(2)), theme.text()),
+    ]
 }
 
 fn var_spans(v: &VarRow, theme: &Theme, cols: usize) -> Vec<Span<'static>> {
@@ -1217,10 +1337,10 @@ pub(crate) mod tests {
             "~/kb".into(),
         );
         s.loaded = true;
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0, 0];
         let g = s.search_gen;
         s.update(Action::Results(g, page(&["a"])), std::time::Instant::now());
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0, 0];
         let row = render(&s, &Theme::dark(), 80, 24)[2].clone();
         assert!(
             row.contains("tag:prod ×") && row.contains("-tag:stage ×"),

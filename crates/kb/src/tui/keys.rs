@@ -142,6 +142,8 @@ pub enum Command {
     Refresh,
     Sync,
     History,
+    MarkEntry,
+    NewRunbookFromMarks,
     /// `?`: help when the text line is empty, otherwise the character is typed.
     HelpKey,
     Help,
@@ -201,6 +203,8 @@ fn from_core(c: Cmd, key: Key) -> Option<Command> {
         Cmd::Refresh => Command::Refresh,
         Cmd::Sync => Command::Sync,
         Cmd::History => Command::History,
+        Cmd::MarkEntry => Command::MarkEntry,
+        Cmd::NewRunbookFromMarks => Command::NewRunbookFromMarks,
         Cmd::Help if key.is_printable() => Command::HelpKey,
         Cmd::Help => Command::Help,
         Cmd::Cancel => Command::Esc,
@@ -698,7 +702,7 @@ pub fn key_bar(map: &EffectiveKeymap, normal: bool, kind: BarKind, width: usize)
                         EntryType::Sumo | EntryType::Cw => it(3, 6, hint(Cmd::Open, "console")),
                         EntryType::Cmd => it(3, 6, hint(Cmd::Run, "run")),
                         EntryType::Code => it(3, 6, hint(Cmd::Open, "code view")),
-                        EntryType::Sql | EntryType::Prompt | EntryType::Note => {
+                        EntryType::Sql | EntryType::Prompt | EntryType::Note | EntryType::Runbook => {
                             it(3, 4, hint(Cmd::Copy, "copy"))
                         }
                     });

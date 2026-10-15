@@ -23,6 +23,7 @@ pub mod query;
 pub mod resolve;
 pub mod root;
 pub mod run;
+pub mod runbook;
 pub mod search;
 pub mod shell;
 pub mod source;

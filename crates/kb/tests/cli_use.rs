@@ -379,3 +379,41 @@ fn json_carries_the_other_resolved_fields() {
     let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(doc["fields"]["range"], "-15m");
 }
+
+#[test]
+fn use_runbook_copies_resolved_checklist_and_records_usage() {
+    let (d, root) = vars_kb();
+    fs::write(
+        root.join("runbook-deploy.md"),
+        r#"---
+kb_format: 1
+type: runbook
+title: Deploy service runbook
+vars:
+  env: { kind: enum, options: [dev, stage, prod], default: stage }
+steps:
+  - id: step-1
+    title: Check 5xx
+    entry: sumo/5xx-by-authorizer
+---
+
+Follow carefully.
+"#,
+    )
+    .unwrap();
+
+    let (out, copied) = run(
+        d.path(),
+        &root,
+        &["use", "runbook-deploy", "--var", "env=prod"],
+    );
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let copied_text = copied.expect("copied text");
+    assert!(copied_text.contains("# Deploy service runbook"));
+    assert!(copied_text.contains("- [ ] 1. Check 5xx (`sumo/5xx-by-authorizer`)"));
+    assert!(copied_text.contains("```sumo"));
+    assert!(copied_text.contains("_sourceCategory=prod/api"));
+
+    let s = state(&root);
+    assert_eq!(s["usage"]["runbook-deploy"]["count"], 1);
+}

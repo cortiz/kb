@@ -9,6 +9,7 @@ pub enum CompletionKind {
     Types,
     Vars,
     VarValues,
+    Runbooks,
 }
 
 impl CompletionKind {
@@ -19,13 +20,14 @@ impl CompletionKind {
             "types" => Some(Self::Types),
             "vars" => Some(Self::Vars),
             "var-values" => Some(Self::VarValues),
+            "runbooks" => Some(Self::Runbooks),
             _ => None,
         }
     }
 }
 
 pub fn complete_types(prefix: Option<&str>) -> Vec<String> {
-    const TYPES: [&str; 7] = ["cmd", "sql", "sumo", "cw", "prompt", "link", "code"];
+    const TYPES: [&str; 8] = ["cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook"];
     TYPES
         .iter()
         .filter(|t| prefix.is_none_or(|p| t.starts_with(p)))
@@ -52,6 +54,40 @@ pub fn complete_entries(root: &Path, prefix: Option<&str>) -> Vec<(String, Strin
         "SELECT id, title FROM entries ORDER BY id"
     } else {
         "SELECT id, title FROM entries WHERE id LIKE ?1 || '%' ORDER BY id"
+    };
+
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+
+    let rows = if p.is_empty() {
+        stmt.query_map([], map_entry)
+    } else {
+        stmt.query_map([p], map_entry)
+    };
+
+    match rows {
+        Ok(mapped) => mapped.filter_map(Result::ok).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+pub fn complete_runbooks(root: &Path, prefix: Option<&str>) -> Vec<(String, String)> {
+    let db_path = root.join(".kb").join("index.db");
+    let conn = match rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let p = prefix.unwrap_or("");
+    let sql = if p.is_empty() {
+        "SELECT id, title FROM entries WHERE type = 'runbook' ORDER BY id"
+    } else {
+        "SELECT id, title FROM entries WHERE type = 'runbook' AND id LIKE ?1 || '%' ORDER BY id"
     };
 
     let mut stmt = match conn.prepare(sql) {
@@ -228,7 +264,7 @@ mod tests {
         let all = complete_types(None);
         assert_eq!(
             all,
-            vec!["cmd", "sql", "sumo", "cw", "prompt", "link", "code"]
+            vec!["cmd", "sql", "sumo", "cw", "prompt", "link", "code", "runbook"]
         );
 
         let filtered = complete_types(Some("c"));

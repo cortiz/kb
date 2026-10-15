@@ -32,6 +32,9 @@ pub enum DraftFields {
         end_line: Option<u32>,
         symbol: Option<String>,
     },
+    Runbook {
+        steps: Vec<serde_json::Value>,
+    },
 }
 
 use crate::author::detect::{Confidence, Detection, detect, normalize_clipboard};
@@ -257,6 +260,7 @@ fn default_fields(ty: EntryType) -> DraftFields {
             cwd: None,
         },
         EntryType::Prompt | EntryType::Note => DraftFields::None,
+        EntryType::Runbook => DraftFields::Runbook { steps: Vec::new() },
         EntryType::Link => DraftFields::Link { url: String::new() },
         EntryType::Code => DraftFields::Code {
             repo: String::new(),

@@ -161,6 +161,14 @@ fn parse_draft_fields(
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
         },
+        EntryType::Runbook => {
+            let steps = fields
+                .get("steps")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            DraftFields::Runbook { steps }
+        }
         EntryType::Prompt | EntryType::Note => DraftFields::None,
     }
 }
@@ -196,6 +204,7 @@ impl<'a> McpEngine<'a> {
 
         // A note is all Markdown; its title may be the first `# heading`
         let is_note = entry_type == EntryType::Note;
+        let is_runbook = entry_type == EntryType::Runbook;
         let note_body = is_note.then(|| {
             req.content
                 .clone()
@@ -207,7 +216,7 @@ impl<'a> McpEngine<'a> {
                 "notes do not support variables (remove 'vars')".into(),
             ));
         }
-        if !is_note && req.payload.is_empty() {
+        if !is_note && !is_runbook && req.payload.is_empty() {
             return Err(KbError::Unreadable("'payload' is required".into()));
         }
         let derived_title = match (&note_body, req.title.trim().is_empty()) {
@@ -305,7 +314,19 @@ impl<'a> McpEngine<'a> {
         }
 
         let draft_vars: Vec<VarDecl> = vars_map.into_values().collect();
-        let fields = parse_draft_fields(entry_type, &req.fields);
+        let fields = if is_runbook {
+            let steps = req
+                .steps
+                .clone()
+                .or_else(|| req.fields.get("steps").and_then(|v| v.as_array()).cloned())
+                .unwrap_or_default();
+            if steps.is_empty() {
+                return Err(KbError::Unreadable("a runbook must have at least one step".into()));
+            }
+            DraftFields::Runbook { steps }
+        } else {
+            parse_draft_fields(entry_type, &req.fields)
+        };
 
         let draft = Draft {
             source: DraftSource::Stdin,
@@ -314,7 +335,7 @@ impl<'a> McpEngine<'a> {
             title: title.to_string(),
             tags: req.tags.clone(),
             fields,
-            body: if is_note {
+            body: if is_note || is_runbook {
                 String::new()
             } else {
                 req.payload.clone()
@@ -329,7 +350,23 @@ impl<'a> McpEngine<'a> {
             type_chosen: true,
         };
 
-        let check = draft.check(&id, &SystemClock);
+        let mut check = draft.check(&id, &SystemClock);
+
+        if is_runbook {
+            let parsed_entry = crate::entry::parse_entry(
+                &id,
+                &format!("{id}.md"),
+                check.bytes.clone(),
+            );
+            if let Some(entry) = parsed_entry.entry {
+                let rb_findings = crate::runbook::lint::check_runbooks(
+                    self.kb.root(),
+                    &[entry],
+                    &std::collections::HashSet::new(),
+                );
+                check.findings.extend(rb_findings);
+            }
+        }
 
         // Validate findings: any error blocks the write
         let mut finding_views: Vec<FindingView> = Vec::new();
@@ -458,6 +495,7 @@ impl<'a> McpEngine<'a> {
 
         // Construct updated values
         let is_note = entry_type == EntryType::Note;
+        let is_runbook = entry_type == EntryType::Runbook;
         if is_note {
             let c = &req.changes;
             if c.payload.is_some() {
@@ -669,12 +707,59 @@ impl<'a> McpEngine<'a> {
             crate::entry::TypeFields::Prompt
             | crate::entry::TypeFields::Note
             | crate::entry::TypeFields::Unknown => {}
+            crate::entry::TypeFields::Runbook { steps } => {
+                let step_vals: Vec<serde_json::Value> = steps
+                    .iter()
+                    .map(|step| {
+                        let mut obj = serde_json::Map::new();
+                        if step.id_explicit || !step.id.is_empty() {
+                            obj.insert("id".into(), serde_json::Value::String(step.id.clone()));
+                        }
+                        obj.insert("title".into(), serde_json::Value::String(step.title.clone()));
+                        match &step.target {
+                            crate::runbook::StepTarget::Entry(e) => {
+                                obj.insert("entry".into(), serde_json::Value::String(e.clone()));
+                            }
+                            crate::runbook::StepTarget::Do(d) => {
+                                obj.insert("do".into(), serde_json::Value::String(d.clone()));
+                            }
+                        }
+                        if let Some(note) = &step.note {
+                            obj.insert("note".into(), serde_json::Value::String(note.clone()));
+                        }
+                        if step.optional {
+                            obj.insert("optional".into(), serde_json::Value::Bool(true));
+                        }
+                        if step.confirm {
+                            obj.insert("confirm".into(), serde_json::Value::Bool(true));
+                        }
+                        if !step.vars.is_empty() {
+                            let mut vars_map = serde_json::Map::new();
+                            for (k, v) in &step.vars {
+                                let val = match v {
+                                    crate::runbook::StepVarBinding::RunbookVar(r) => {
+                                        serde_json::Value::String(format!("{{{{{}}}}}", r))
+                                    }
+                                    crate::runbook::StepVarBinding::Literal(lit) => lit.clone(),
+                                };
+                                vars_map.insert(k.clone(), val);
+                            }
+                            obj.insert("vars".into(), serde_json::Value::Object(vars_map));
+                        }
+                        serde_json::Value::Object(obj)
+                    })
+                    .collect();
+                fields_map.insert("steps".into(), serde_json::Value::Array(step_vals));
+            }
         }
 
         if let Some(ch_fields) = &req.changes.fields {
             for (k, v) in ch_fields {
                 fields_map.insert(k.clone(), v.clone());
             }
+        }
+        if let Some(new_steps) = &req.changes.steps {
+            fields_map.insert("steps".into(), serde_json::Value::Array(new_steps.clone()));
         }
 
         let fields = parse_draft_fields(entry_type, &fields_map);
@@ -687,7 +772,11 @@ impl<'a> McpEngine<'a> {
             title: new_title.to_string(),
             tags,
             fields,
-            body: new_payload,
+            body: if is_note || is_runbook {
+                String::new()
+            } else {
+                new_payload
+            },
             notes: new_notes,
             vars: draft_vars,
             suggestions: Vec::new(),
@@ -700,6 +789,22 @@ impl<'a> McpEngine<'a> {
         // an update changes `updated`, not when the entry was made
         if let Some(created) = entry.created() {
             check.bytes = keep_created(&check.bytes, created);
+        }
+
+        if is_runbook {
+            let parsed_entry = crate::entry::parse_entry(
+                &req.id,
+                &format!("{}.md", req.id),
+                check.bytes.clone(),
+            );
+            if let Some(entry) = parsed_entry.entry {
+                let rb_findings = crate::runbook::lint::check_runbooks(
+                    self.kb.root(),
+                    &[entry],
+                    &std::collections::HashSet::new(),
+                );
+                check.findings.extend(rb_findings);
+            }
         }
 
         // Validate findings
@@ -835,6 +940,7 @@ mod tests {
             content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
+            steps: None,
             path: None,
             dry_run: true,
         };
@@ -875,6 +981,7 @@ mod tests {
             content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
+            steps: None,
             path: None,
             dry_run: false,
         };
@@ -892,6 +999,7 @@ mod tests {
             content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
+            steps: None,
             path: None,
             dry_run: false,
         };
@@ -913,6 +1021,7 @@ mod tests {
             content: None,
             vars: BTreeMap::new(),
             fields: BTreeMap::new(),
+            steps: None,
             path: None,
             dry_run: false,
         };

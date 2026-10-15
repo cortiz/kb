@@ -438,6 +438,22 @@ impl Node {
         }
     }
 
+    /// The value when this is a plain boolean.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Node::Scalar {
+                value,
+                style: ScalarStyle::Plain,
+                ..
+            } => match value.as_str() {
+                "true" | "True" | "TRUE" => Some(true),
+                "false" | "False" | "FALSE" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// True for a plain integer or float.
     pub fn is_number(&self) -> bool {
         matches!(self, Node::Scalar { value, style: ScalarStyle::Plain, .. } if is_int(value) || is_float(value))

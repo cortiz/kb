@@ -518,3 +518,144 @@ fn rm_with_yes_says_what_it_leaves_dangling_and_unlinked_entries_are_not_questio
         .unwrap();
     assert_eq!(text(&out.stderr), "");
 }
+
+#[test]
+fn mv_updates_referencing_runbooks_in_one_git_commit() {
+    if !have_git() {
+        return;
+    }
+    let (_d, root) = search_kb();
+    git(&root, &["init", "-q"]);
+    git(&root, &["config", "user.name", "Carlos Ortiz"]);
+    git(&root, &["config", "user.email", "carlos@example.com"]);
+
+    // Create a runbook that references sumo/5xx-by-authorizer
+    let rb_path = root.join("runbook/deploy-service.md");
+    fs::create_dir_all(rb_path.parent().unwrap()).unwrap();
+    fs::write(
+        &rb_path,
+        r#"---
+kb_format: 1
+type: runbook
+title: Deploy service
+steps:
+  - id: check
+    title: Check error rate
+    entry: sumo/5xx-by-authorizer
+---
+Notes.
+"#,
+    )
+    .unwrap();
+
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "initial commit with runbook"]);
+
+    let out = kb_in(&root)
+        .args(["mv", A, "sumo/authorizer/5xx"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    let stdout = text(&out.stdout);
+    assert!(
+        stdout.contains("renamed sumo/5xx-by-authorizer -> sumo/authorizer/5xx"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("updated references in 1 runbook: runbook/deploy-service"),
+        "{stdout}"
+    );
+
+    // Verify runbook content updated format-preserving
+    let updated_rb = fs::read_to_string(&rb_path).unwrap();
+    assert!(
+        updated_rb.contains("entry: sumo/authorizer/5xx"),
+        "runbook step should be updated: {updated_rb}"
+    );
+    assert!(
+        !updated_rb.contains("entry: sumo/5xx-by-authorizer"),
+        "old entry id should not remain: {updated_rb}"
+    );
+
+    // Verify exactly one new commit in git log
+    let log_msg = git(&root, &["log", "-1", "--format=%B"]);
+    assert!(
+        log_msg.contains("mv sumo/5xx-by-authorizer -> sumo/authorizer/5xx"),
+        "{log_msg}"
+    );
+    assert!(
+        log_msg.contains("Updated references in:\n- runbook/deploy-service"),
+        "{log_msg}"
+    );
+
+    // Verify git status is completely clean
+    let status = git(&root, &["status", "--porcelain"]);
+    assert_eq!(status.trim(), "", "working tree must be clean: {status}");
+}
+
+#[test]
+fn rm_refuses_deletion_if_referenced_by_runbook() {
+    let (_d, root) = search_kb();
+
+    // Create a runbook that references cmd/deploy-service
+    let rb_path = root.join("runbook/test-rb.md");
+    fs::create_dir_all(rb_path.parent().unwrap()).unwrap();
+    fs::write(
+        &rb_path,
+        r#"---
+kb_format: 1
+type: runbook
+title: Test runbook
+steps:
+  - id: deploy
+    title: Deploy
+    entry: cmd/deploy-service
+---
+Notes.
+"#,
+    )
+    .unwrap();
+
+    // Try rm without --force: must refuse and exit 1
+    let out = kb_in(&root)
+        .args(["rm", "cmd/deploy-service", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = text(&out.stderr);
+    assert!(
+        stderr.contains("cannot delete 'cmd/deploy-service': referenced by runbook(s):"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("- runbook/test-rb (step: deploy)"), "{stderr}");
+    assert!(
+        root.join("cmd/deploy-service.md").is_file(),
+        "file must not be deleted"
+    );
+
+    // Now rm with --force: must succeed
+    let out_force = kb_in(&root)
+        .args(["rm", "cmd/deploy-service", "--force", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out_force.status.code(), Some(0), "{}", text(&out_force.stderr));
+    let stderr_force = text(&out_force.stderr);
+    assert!(
+        stderr_force.contains("warning: 'cmd/deploy-service' is referenced by runbook(s); deleting anyway"),
+        "{stderr_force}"
+    );
+    assert!(
+        !root.join("cmd/deploy-service.md").exists(),
+        "file must be deleted with --force"
+    );
+
+    // Lint now reports KB082 (broken reference) on the runbook
+    let lint = kb_in(&root).arg("lint").output().unwrap();
+    assert_eq!(lint.status.code(), Some(1));
+    let stdout_lint = text(&lint.stdout);
+    assert!(
+        stdout_lint.contains("KB082"),
+        "expected broken reference diagnostic: {stdout_lint}"
+    );
+}
+

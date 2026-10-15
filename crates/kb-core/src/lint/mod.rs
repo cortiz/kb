@@ -301,22 +301,39 @@ pub fn lint(root: &Path, scope: &[PathBuf]) -> Result<LintReport, LintError> {
         ..Default::default()
     };
     let mut linking_notes = Vec::new();
+    let mut runbooks = Vec::new();
     for file in &walked.files {
         let bytes = std::fs::read(&file.abs_path).map_err(|e| LintError::Io {
             path: file.abs_path.clone(),
             message: e.to_string(),
         })?;
-        if let Some(entry) = lint_file(file, bytes, &mut report)
-            && entry.entry_type() == Some(crate::entry::EntryType::Note)
-            && entry.notes().contains("[[")
-        {
-            linking_notes.push(entry);
+        if let Some(entry) = lint_file(file, bytes, &mut report) {
+            if entry.entry_type() == Some(crate::entry::EntryType::Note)
+                && entry.notes().contains("[[")
+            {
+                linking_notes.push(entry);
+            } else if entry.entry_type() == Some(crate::entry::EntryType::Runbook) {
+                runbooks.push(entry);
+            }
         }
     }
+    let files_with_errors: std::collections::HashSet<String> = report
+        .findings
+        .iter()
+        .filter(|f| f.severity == Severity::Error)
+        .filter_map(|f| f.id.clone())
+        .collect();
     if !linking_notes.is_empty() {
         report
             .findings
             .extend(broken_links(&report.root.clone(), &linking_notes));
+    }
+    if !runbooks.is_empty() {
+        report.findings.extend(crate::runbook::lint::check_runbooks(
+            &report.root.clone(),
+            &runbooks,
+            &files_with_errors,
+        ));
     }
     report
         .findings
@@ -670,7 +687,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture produces {code}"));
             assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
         }
-        assert_eq!(errors.len(), 41);
+        assert_eq!(errors.len(), 51);
     }
 
     #[test]
@@ -694,7 +711,7 @@ mod tests {
                 code.number()
             );
         }
-        assert_eq!(RuleCode::ALL.len(), 54);
+        assert_eq!(RuleCode::ALL.len(), 69);
     }
 
     #[test]
