@@ -3,7 +3,7 @@ members = ["crates/kb-core", "crates/kb"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 repository = "https://github.com/cortiz/kb"
@@ -22,8 +22,15 @@ regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 walkdir = "2"
-ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
-syntect = { version = "5", default-features = false, features = ["parsing", "default-syntaxes", "regex-fancy", "yaml-load"] }
+ratatui = { version = "0.30", default-features = false, features = [
+  "crossterm",
+] }
+syntect = { version = "5", default-features = false, features = [
+  "parsing",
+  "default-syntaxes",
+  "regex-fancy",
+  "yaml-load",
+] }
 signal-hook = "0.4"
 # the same crossterm ratatui uses; the feature lets the UI read keys from /dev/tty when stdin is a pipe
 crossterm = { version = "0.29", features = ["use-dev-tty"] }
@@ -33,7 +40,10 @@ portable-pty = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 unicode-normalization = "0.1"
 # parses the config file with line numbers and edits it without losing comments (kb config set)
-toml_edit = { version = "0.25", default-features = false, features = ["parse", "display"] }
+toml_edit = { version = "0.25", default-features = false, features = [
+  "parse",
+  "display",
+] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 assert_cmd = "2"
