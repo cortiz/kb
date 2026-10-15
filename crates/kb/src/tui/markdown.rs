@@ -85,6 +85,9 @@ pub struct Table {
     pub rows: Vec<Vec<Vec<Span>>>,
 }
 
+/// The longest code block that is syntax highlighted.
+pub const MAX_HIGHLIGHTED_LINES: usize = 400;
+
 /// A fenced code block. Its styled lines are made the first time they are needed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeBlock {
@@ -105,10 +108,13 @@ impl CodeBlock {
         }
     }
 
-    /// The lines with their token classes. Computed once, on first use.
+    /// The lines with their token classes. Computed once, on first use. A block of more than
+    /// [`MAX_HIGHLIGHTED_LINES`] lines stays plain: highlighting it would take longer than a frame.
     pub fn styled(&self) -> &[Vec<Span>] {
-        self.styled
-            .get_or_init(|| highlight_fenced(self.lang.as_deref(), &self.lines, self.color))
+        self.styled.get_or_init(|| {
+            let color = self.color && self.lines.len() <= MAX_HIGHLIGHTED_LINES;
+            highlight_fenced(self.lang.as_deref(), &self.lines, color)
+        })
     }
 
     pub fn is_highlighted(&self) -> bool {
@@ -1314,6 +1320,51 @@ impl Notes {
                 *cache = Some((cols, Arc::clone(&lines)));
                 lines
             }
+        }
+    }
+
+    /// The languages of the highlighted-to-be code blocks, once each.
+    pub fn code_languages(&self) -> Vec<String> {
+        fn walk(blocks: &[Block], out: &mut Vec<String>) {
+            for b in blocks {
+                match b {
+                    Block::Code(c) if c.color && c.lines.len() <= MAX_HIGHLIGHTED_LINES => {
+                        if let Some(l) = &c.lang
+                            && !out.contains(l)
+                        {
+                            out.push(l.clone());
+                        }
+                    }
+                    Block::List { items, .. } => {
+                        for i in items {
+                            walk(&i.blocks, out);
+                        }
+                    }
+                    Block::Quote(b) | Block::Callout { blocks: b, .. } => walk(b, out),
+                    Block::Footnotes(f) => {
+                        for (_, b) in f {
+                            walk(b, out);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.blocks, &mut out);
+        out
+    }
+
+    /// Gets a note ready for drawing in `cols` columns without any work left for the first
+    /// frame: the lines are laid out, the grammars of its code blocks are loaded, and the code in
+    /// the first `rows` lines is highlighted. Meant for the worker thread.
+    pub fn prepare(&self, cols: usize, rows: usize) {
+        let lines = self.lines(cols);
+        for lang in self.code_languages() {
+            super::highlight::warm_language(&lang);
+        }
+        for line in lines.iter().take(rows) {
+            let _ = line.spans();
         }
     }
 

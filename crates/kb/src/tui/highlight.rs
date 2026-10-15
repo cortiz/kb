@@ -344,6 +344,12 @@ fn restore_vars(spans: Vec<Span>, line_start: usize, vars: &[&(usize, String)]) 
     out
 }
 
+/// Loads the grammar for fenced code in `lang` (the first parse compiles its regexes, which takes
+/// 20 to 35 ms), so that highlighting a block later only costs the block.
+pub fn warm_language(lang: &str) {
+    let _ = highlight_fenced(Some(lang), &["x".to_string()], true);
+}
+
 /// Parses a few lines of every language once so the first real preview is not slow (the first
 /// parse compiles the grammar's regexes, about 20 to 35 ms each).
 pub fn warm_up() {

@@ -241,6 +241,8 @@ pub enum Effect {
         id: String,
         modified: Option<i64>,
         use_count: u64,
+        /// The columns the preview is drawn in now (0 when there is no preview pane).
+        cols: usize,
     },
     Refresh,
     /// Alt-S: run `kb sync` in the foreground.
@@ -578,6 +580,7 @@ impl AppState {
                     id,
                     modified,
                     use_count,
+                    cols: super::view::preview_cols(self).unwrap_or(0),
                 });
             }
         }

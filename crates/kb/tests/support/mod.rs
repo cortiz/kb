@@ -369,6 +369,60 @@ pub fn generate_kb(root: &Path, n: usize) {
     }
 }
 
+/// A deterministic note of about `kb` kilobytes: headings, lists, a table, a code block, a link
+/// and prose from the same Zipf vocabulary as the other entries.
+fn note(i: usize, kb: usize, rng: &mut Rng) -> String {
+    let words = |rng: &mut Rng, n: usize| -> String {
+        (0..n).map(|_| zipf_word(rng)).collect::<Vec<_>>().join(" ")
+    };
+    let mut body = format!("# Note {i} {}\n\n", words(rng, 2));
+    let mut section = 0;
+    while body.len() < kb * 1024 {
+        section += 1;
+        body.push_str(&format!(
+            "## Section {section} {}\n\n{}\n\n",
+            words(rng, 2),
+            words(rng, 80)
+        ));
+        body.push_str(&format!(
+            "- {}\n- {}\n- [ ] {}\n\n",
+            words(rng, 6),
+            words(rng, 6),
+            words(rng, 6)
+        ));
+        body.push_str(&format!(
+            "| {} | {} |\n|:--|--:|\n| {} | {} |\n| {} | {} |\n\n",
+            words(rng, 1),
+            words(rng, 1),
+            words(rng, 3),
+            words(rng, 1),
+            words(rng, 3),
+            words(rng, 1)
+        ));
+        body.push_str(&format!(
+            "```sh\n{}\nkubectl get pods -n {}\n```\n\n",
+            words(rng, 5),
+            words(rng, 1)
+        ));
+        body.push_str(&format!(
+            "See [[group-{:02}/entry-{:05}]].\n\n",
+            i % 50,
+            (i * 7) % 1000 / 8 * 8
+        ));
+    }
+    format!("---\nkb_format: 1\ntype: note\ntags: [notes, perf]\n---\n\n{body}")
+}
+
+/// Writes `n` deterministic notes of about `kb` kilobytes each under `root/note/`.
+pub fn generate_notes(root: &Path, n: usize, kb: usize) {
+    let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
+    let dir = root.join("note");
+    fs::create_dir_all(&dir).unwrap();
+    for i in 0..n {
+        fs::write(dir.join(format!("note-{i:05}.md")), note(i, kb, &mut rng)).unwrap();
+    }
+}
+
 /// Path of generated entry `i` (for tests that edit one).
 pub fn generated_path(root: &Path, i: usize) -> PathBuf {
     root.join(format!("group-{:02}", i % 50))

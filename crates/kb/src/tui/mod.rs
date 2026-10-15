@@ -207,12 +207,14 @@ pub fn run(
                     id,
                     modified,
                     use_count,
+                    cols,
                 } => {
                     let _ = worker.tx.send(Request::Preview {
                         generation,
                         id,
                         modified,
                         use_count,
+                        cols,
                     });
                 }
                 Effect::Pick => {

@@ -178,10 +178,10 @@
 
 **Purpose**: Performance benchmarks, binary size enforcement, documentation, and system quality assurance
 
-- [ ] T054 [P] Performance benchmarks validating search latency $\le 50$ ms on 10,000 entries (SC-002) and resident memory growth $\le 100$ MB browsing 200 notes (SC-003) in `crates/kb/tests/perf.rs`
-- [ ] T055 [P] Binary size verification script ensuring release build growth $<100$ KB over v0.2.0 (SC-005) in `scripts/release.sh`
-- [ ] T056 End-to-end validation of all scenarios in `specs/014-markdown-notes/quickstart.md`
-- [ ] T057 [P] Workspace code formatting and clippy validation via `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings`
+- [X] T054 [P] Performance benchmarks validating search latency $\le 50$ ms on 10,000 entries (SC-002) and resident memory growth $\le 100$ MB browsing 200 notes (SC-003) in `crates/kb/tests/perf.rs`
+- [X] T055 [P] Binary size verification script ensuring release build growth $<100$ KB over v0.2.0 (SC-005) in `scripts/check-binary-size.sh` (there is no `scripts/release.sh`). **SC-005 is not met**: the script measures +217,664 bytes over the binary built from `main` before this feature (+386,048 over the v0.2.0 tag, which also holds the milestones merged since). It is not wired into CI.
+- [X] T056 End-to-end validation of all scenarios in `specs/014-markdown-notes/quickstart.md`
+- [X] T057 [P] Workspace code formatting and clippy validation via `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings`
 
 ---
 
@@ -283,3 +283,17 @@ With multiple engineers:
 - Red-Green-Refactor: Verify tests fail before implementing features.
 - All tasks specify concrete file paths.
 - Stop at any checkpoint to validate individual stories independently.
+
+---
+
+## Implementation notes
+
+Where the work differs from the task text:
+
+- **Rule codes**: the lint rules are `KB070-note-title`, `KB071-note-vars`, `KB072-note-oversized`, `KB073-note-empty` and `KB074-entry-link-broken`, in the existing `KBnnn-slug` scheme. `E-SECRET-DETECTED` is the existing `KB060`–`KB065` scan, which already covers a note's whole body.
+- **T029**: previews are already built on the UI's worker thread, so there is no `async_render.rs`. The worker now also lays a note out for the pane's width, loads the grammars of its code blocks and highlights the first screenful, so the first frame costs under a millisecond; the preview pane says "rendering…" until it arrives.
+- **T036**: OSC 8 hyperlinks are emitted by `kb show` only (the TUI's cell buffer cannot carry them), for `http`, `https` and `mailto`, when stdout is a terminal that advertises support (`FORCE_HYPERLINK` overrides).
+- **T035**: titles, tags, variable descriptions, lint messages and search snippets are defused where they are read; a file whose name has control characters is not an entry.
+- **T054**: the budgets are `#[ignore]` tests in `crates/kb/tests/perf.rs` (run in release mode): search at 10,000 entries with 1,000 notes, a 240 KB note's first frame and scrolling, and resident memory while browsing 200 notes (+3 MB).
+- **MCP**: see "Implementation notes" in `contracts/mcp.md`.
+

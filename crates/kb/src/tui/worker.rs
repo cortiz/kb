@@ -14,6 +14,10 @@ use super::app::{Page, RefreshInfo};
 use super::preview::{PreviewModel, build_preview_with};
 use super::render_cache::RenderCache;
 
+/// How many lines of a note are made fully ready (code highlighted) before it is sent: a screenful
+/// and some.
+const PREPARED_ROWS: usize = 120;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Refresh,
@@ -27,6 +31,9 @@ pub enum Request {
         id: String,
         modified: Option<i64>,
         use_count: u64,
+        /// The columns the preview will be drawn in (0 when not known): a note is laid out for
+        /// them here, so the first frame does not have to.
+        cols: usize,
     },
     /// The tags in use, with how many entries have each (for the add form).
     Tags,
@@ -79,7 +86,7 @@ pub struct Batch {
     pub shutdown: bool,
     pub refresh: bool,
     pub search: Option<(u64, String, usize)>,
-    pub preview: Option<(u64, String, Option<i64>, u64)>,
+    pub preview: Option<(u64, String, Option<i64>, u64, usize)>,
     pub tags: bool,
 }
 
@@ -101,8 +108,9 @@ pub fn coalesce(requests: Vec<Request>) -> Batch {
                 id,
                 modified,
                 use_count,
+                cols,
             } => {
-                b.preview = Some((generation, id, modified, use_count));
+                b.preview = Some((generation, id, modified, use_count, cols));
             }
         }
     }
@@ -171,7 +179,7 @@ pub fn run(
                 return;
             }
         }
-        if let Some((generation, id, modified, use_count)) = batch.preview {
+        if let Some((generation, id, modified, use_count, cols)) = batch.preview {
             let mtime = modified.unwrap_or(0);
             let reply = if let Some(model) = cache.get(&id, mtime) {
                 let mut model = model.clone();
@@ -180,6 +188,9 @@ pub fn run(
                 if let Some(meta) = &mut model.meta {
                     meta.use_count = use_count;
                     meta.unreviewed = unreviewed;
+                }
+                if cols > 0 {
+                    model.notes.prepare(cols, PREPARED_ROWS);
                 }
                 Reply::Preview(generation, Box::new(model))
             } else {
@@ -197,6 +208,11 @@ pub fn run(
                             kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
                         if let Some(meta) = &mut model.meta {
                             meta.unreviewed = unreviewed;
+                        }
+                        if cols > 0 {
+                            // laying a long note out and loading the grammars of its code take
+                            // longer than a frame: do it here
+                            model.notes.prepare(cols, PREPARED_ROWS);
                         }
                         cache.put(model.clone());
                         Reply::Preview(generation, Box::new(model))
@@ -267,6 +283,7 @@ mod tests {
                 id: "x".into(),
                 modified: None,
                 use_count: 0,
+                cols: 0,
             },
             Request::Refresh,
             Request::Search {
@@ -279,11 +296,12 @@ mod tests {
                 id: "y".into(),
                 modified: Some(5),
                 use_count: 2,
+                cols: 70,
             },
         ]);
         assert!(b.refresh && !b.shutdown);
         assert_eq!(b.search, Some((4, "abc".into(), 0)));
-        assert_eq!(b.preview, Some((2, "y".into(), Some(5), 2)));
+        assert_eq!(b.preview, Some((2, "y".into(), Some(5), 2, 70)));
         assert!(coalesce(vec![Request::Refresh, Request::Shutdown]).shutdown);
     }
 
@@ -318,6 +336,7 @@ mod tests {
             id: "sumo/5xx-by-authorizer".into(),
             modified: Some(1),
             use_count: 4,
+            cols: 0,
         })
         .unwrap();
         let Reply::Preview(g, model) = recv(&w) else {

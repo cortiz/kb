@@ -68,10 +68,20 @@ This document specifies the Model Context Protocol (MCP) behavior for `note` ent
   - Creates file at `~/kb/note/<slug>.md`.
 
 ### 2.4 `update`
-- **Request Parameters**:
+- **Request Parameters** (the shape of spec 012's `update`, with `content` added to `changes`):
   - `id`: Target entry ID (e.g., `"note/role-cache-ttl"`).
-  - `content`: New Markdown content.
-  - `tags`: Optional updated tags.
+  - `version`: The `version` of the note as `get` returned it.
+  - `changes.content`: New Markdown body (`changes.notes` is accepted as a synonym).
+  - `changes.tags` / `add_tags` / `remove_tags`: Optional tag changes. `changes.title` sets an explicit title.
+  - `payload`, `vars`, `set_vars` and `remove_vars` are errors for a note.
 - **Validation**:
-  - Enforces secret scanning rules and format validity.
-  - Atomically writes updated file and refreshes index.
+  - Enforces secret scanning rules (`SecretDetected`) and format validity.
+  - Atomically writes the updated file and refreshes the index. `created` is kept; `updated` moves.
+  - A note whose title comes from its first `# heading` keeps doing so.
+
+### 2.5 Implementation notes (as built)
+- `search` also takes `types` (array) as spec 012 defined it; `type` (string) is the same filter for one type.
+- Private notes are hidden through `mcp.exclude_tags`, whose default is `["private"]`. Removing `private` from that setting is the administrative override; the tool call itself has no such parameter.
+- `get` returns the Markdown in `content` (without escape sequences), `notes` is empty for a note, and
+  `created` / `updated` are included for every type.
+- `create` takes `content` (or `notes`, or `payload`) as the body; `type: "note"` is implied when `content` is given.

@@ -9,7 +9,7 @@ use assert_cmd::Command;
 
 mod support;
 
-use support::{backdate, generate_kb, generated_path, kb_in};
+use support::{backdate, generate_kb, generate_notes, generated_path, kb_in};
 
 const ENTRIES: usize = 10_000;
 
@@ -669,4 +669,200 @@ fn auto_commit_adds_under_100ms() {
         Duration::from_millis(100)
     };
     assert!(extra < limit, "auto-commit added {extra:?}");
+}
+
+// ---- notes (SC-002, SC-003) ----
+
+/// 10,000 entries of which 1,000 are notes of about 8 KB, indexed, with old file mtimes.
+fn indexed_kb_with_notes() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    generate_kb(dir.path(), ENTRIES - 1_000);
+    generate_notes(dir.path(), 1_000, 8);
+    backdate(dir.path());
+    let start = Instant::now();
+    let out = kb_in(dir.path()).arg("reindex").output().unwrap();
+    assert!(out.status.success());
+    println!(
+        "kb reindex on {ENTRIES} entries (1,000 notes): {:?}",
+        start.elapsed()
+    );
+    dir
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn search_with_a_thousand_notes_under_50ms() {
+    let _serial = serial();
+    let dir = indexed_kb_with_notes();
+    for query in [
+        vec!["failed", "orders"],
+        vec!["section", "kubectl"],
+        vec!["in:body", "kubectl"],
+        vec!["type:note", "section"],
+    ] {
+        timed_search(dir.path(), &query);
+        let m = median((0..20).map(|_| timed_search(dir.path(), &query)).collect());
+        println!("warm search {query:?} with 1,000 notes: median {m:?}");
+        let limit = if std::env::var("CI").is_ok() {
+            Duration::from_millis(80)
+        } else {
+            Duration::from_millis(60)
+        };
+        assert!(m < limit, "{query:?}: median {m:?}");
+    }
+    // typo expansion scans the vocabulary: note bodies are not in it
+    timed_search(dir.path(), &["kubectll"]);
+    let m = median(
+        (0..10)
+            .map(|_| timed_search(dir.path(), &["kubectll"]))
+            .collect(),
+    );
+    println!("typo search with 1,000 notes: median {m:?}");
+    assert!(m < Duration::from_millis(100), "median {m:?}");
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn a_large_note_is_laid_out_once_and_drawn_under_16ms() {
+    let _serial = serial();
+    use kb_cli::tui::app::{Action, AppState, Options, Page};
+    use kb_cli::tui::theme::Theme;
+    use kb_core::entry::{EntryType, parse_entry};
+    use kb_core::search::{SearchResult, Tier};
+    let dir = tempfile::tempdir().unwrap();
+    generate_notes(dir.path(), 1, 240);
+    let text = fs::read_to_string(dir.path().join("note/note-00000.md")).unwrap();
+    println!("a note of {} KB", text.len() / 1024);
+    let entry = parse_entry("note/big", "note/big.md", text.into_bytes())
+        .entry
+        .unwrap();
+    let started = Instant::now();
+    let model = kb_cli::tui::preview::build_preview(&entry, Some(1_790_000_000), 0, true);
+    println!("parse and build a 240 KB note: {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_millis(100),
+        "worker: build took {:?}",
+        started.elapsed()
+    );
+    let result = SearchResult {
+        id: "note/big".into(),
+        use_count: 0,
+        updated: None,
+        modified: Some(1_790_000_000),
+        entry_type: EntryType::Note,
+        title: "Big".into(),
+        tags: vec![],
+        path: "note/big.md".into(),
+        score: 1.0,
+        tier: Tier::Exact,
+        matches: vec![],
+        snippet: None,
+        unreviewed: false,
+    };
+    let mut state = AppState::new(Options::default(), (200, 60), "", "~/kb".into());
+    state.update(
+        Action::Refreshed(kb_cli::tui::app::RefreshInfo {
+            indexed: 1,
+            skipped: 0,
+            duration: Duration::ZERO,
+        }),
+        Instant::now(),
+    );
+    let g = state.search_gen;
+    state.update(
+        Action::Results(
+            g,
+            Page {
+                results: vec![result],
+                total: 1,
+                type_counts: [0, 0, 0, 0, 0, 0, 0, 1],
+                indexed: 1,
+                skipped: 0,
+                notices: vec![],
+            },
+        ),
+        Instant::now(),
+    );
+    // the worker lays the note out for the width the UI said it will draw it in
+    let cols = kb_cli::tui::view::preview_cols(&state).expect("a preview pane");
+    let started = Instant::now();
+    model.notes.prepare(cols, 120);
+    println!(
+        "get a 240 KB note ready for {cols} columns (on the worker): {:?}",
+        started.elapsed()
+    );
+    let pg = state.preview_gen;
+    state.update(Action::PreviewReady(pg, Box::new(model)), Instant::now());
+    let theme = Theme::dark();
+    let area = ratatui::layout::Rect::new(0, 0, 200, 60);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    let started = Instant::now();
+    kb_cli::tui::view::draw(&state, &theme, area, &mut buf);
+    let first = started.elapsed();
+    println!("first frame of a 240 KB note: {first:?}");
+    assert!(
+        first < Duration::from_millis(16),
+        "first frame took {first:?}"
+    );
+    // scrolling reuses the layout: every frame after the first is a draw of one screenful
+    let times: Vec<Duration> = (0..100)
+        .map(|i| {
+            state.preview_scroll = i * 7;
+            let started = Instant::now();
+            kb_cli::tui::view::draw(&state, &theme, area, &mut buf);
+            started.elapsed()
+        })
+        .collect();
+    let m = median(times.clone());
+    println!(
+        "scrolling a 240 KB note: median {m:?}, worst {:?}",
+        times.iter().max().unwrap()
+    );
+    assert!(m < Duration::from_millis(16), "median {m:?}");
+}
+
+/// Resident memory of process `pid` in KiB (`ps` reports it on macOS and Linux).
+fn rss_kib(pid: u32) -> u64 {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .unwrap_or(0)
+}
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn browsing_two_hundred_notes_grows_memory_under_100mb() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("kb");
+    fs::create_dir_all(&root).unwrap();
+    generate_notes(&root, 200, 40);
+    backdate(&root);
+    let home = tempfile::tempdir().unwrap();
+    let mut spec = Spec::new(&["type:note"], home.path(), &root);
+    spec.size = (160, 50);
+    let mut s = Session::spawn(&spec);
+    s.wait_for("200 / 200");
+    s.wait_for("━━━");
+    let pid = s.pid().expect("the process id");
+    let before = rss_kib(pid);
+    for _ in 0..199 {
+        s.send(support::pty::DOWN);
+        std::thread::sleep(Duration::from_millis(15));
+    }
+    s.wait_for("200 / 200");
+    std::thread::sleep(Duration::from_millis(300));
+    let after = rss_kib(pid);
+    let growth_mb = after.saturating_sub(before) / 1024;
+    println!(
+        "resident memory: {} MB before, {} MB after browsing 200 notes (+{growth_mb} MB)",
+        before / 1024,
+        after / 1024
+    );
+    assert!(growth_mb <= 100, "grew by {growth_mb} MB");
+    s.send(support::pty::CTRL_C);
 }

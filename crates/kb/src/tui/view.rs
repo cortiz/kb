@@ -580,6 +580,12 @@ fn preview_inner(state: &AppState) -> Option<Rect> {
     (r.width > 2 && r.height > 2).then(|| Rect::new(r.x + 1, r.y + 1, r.width - 2, r.height - 2))
 }
 
+/// The columns the preview text is laid out in for the current size and layout mode.
+pub fn preview_cols(state: &AppState) -> Option<usize> {
+    let inner = preview_inner(state)?;
+    Some(usize::from(inner.width).saturating_sub(2).max(4))
+}
+
 /// `(rows in the preview, rows that fit)` for the selected entry, or `None` without a preview.
 pub fn preview_metrics(state: &AppState) -> Option<(usize, usize)> {
     let inner = preview_inner(state)?;
