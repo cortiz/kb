@@ -397,7 +397,7 @@ fn copy_by_id_under_450ms() {
 
 #[test]
 #[ignore = "performance budget; run in release mode"]
-fn config_list_under_100ms_and_doctor_measured() {
+fn config_list_under_300ms_and_doctor_measured() {
     // constitution VII: CLI cold start of 100 ms. `kb doctor` opens the index and probes tools, so
     // it has no budget; its time is printed so a regression is visible.
     let _serial = serial();
@@ -559,7 +559,7 @@ fn detecting_a_one_megabyte_paste_under_150ms() {
 
 #[test]
 #[ignore = "performance budget; run in release mode"]
-fn saving_a_new_entry_under_100ms_and_add_yes_cold_start_under_300ms() {
+fn saving_a_new_entry_under_300ms_and_add_yes_cold_start_under_300ms() {
     let _serial = serial();
     let dir = indexed_kb();
     let mut kb = kb_core::search::Kb::open(dir.path()).unwrap();
