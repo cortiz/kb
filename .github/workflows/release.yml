@@ -286,7 +286,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "chore/formula-$VERSION"
           git add Formula/kb.rb
-          git commit -m "chore(release): kb $VERSION formula"
+          # main moves on to the next patch as a -dev version, so it never equals a released tag
+          IFS=. read -r major minor patch <<<"$VERSION"
+          NEXT="$major.$minor.$((patch + 1))-dev"
+          echo "NEXT=$NEXT" >> "$GITHUB_ENV"
+          awk -v v="$NEXT" '!d && /^version = "/ { $0 = "version = \"" v "\""; d = 1 } 1' Cargo.toml > Cargo.toml.new
+          mv Cargo.toml.new Cargo.toml
+          cargo update --workspace --offline
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore(release): kb $VERSION formula, start $NEXT"
       # a broken formula never gets a pull request
       - name: Audit and test the formula
         if: env.changed == 'true'
@@ -307,8 +315,8 @@ jobs:
         run: |
           git push origin "chore/formula-$VERSION"
           if gh pr create --base main --head "chore/formula-$VERSION" \
-              --title "chore(release): kb $VERSION formula" \
-              --body "Formula for $TAG, generated from the release's SHA256SUMS.
+              --title "chore(release): kb $VERSION formula, start $NEXT" \
+              --body "Formula for $TAG, generated from the release's SHA256SUMS, and the version bumped to $NEXT.
 
           $(cat result.txt)"; then
             # a pull request opened with the workflow token starts no checks of its own
