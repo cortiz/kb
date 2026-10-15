@@ -18,7 +18,7 @@ chmod 600 "$TMP/kb"   # the archive must say 0755 regardless of the source mode
 export KB_PACKAGE_ROOT="$root" SOURCE_DATE_EPOCH=1700000000
 
 target=x86_64-unknown-linux-musl
-archive="$TMP/out/kb-0.2.0-$target.tar.gz"
+archive="$TMP/out/kb-0.2.0-linux-x86_64.tar.gz"
 assert_exit 0 "packages" -- "$script" 0.2.0 "$target" "$TMP/kb" "$TMP/out"
 [ -f "$archive" ] || _fail "no archive at $archive"
 
@@ -30,11 +30,11 @@ with tarfile.open(sys.argv[1]) as t:
         print(m.name, oct(m.mode), m.uid, m.gid, m.mtime, m.uname, m.gname)
 F
 }
-want="kb-0.2.0-$target 0o755 0 0 1700000000  
-kb-0.2.0-$target/LICENSE-APACHE 0o644 0 0 1700000000  
-kb-0.2.0-$target/LICENSE-MIT 0o644 0 0 1700000000  
-kb-0.2.0-$target/README.md 0o644 0 0 1700000000  
-kb-0.2.0-$target/kb 0o755 0 0 1700000000  "
+want="kb-0.2.0-linux-x86_64 0o755 0 0 1700000000  
+kb-0.2.0-linux-x86_64/LICENSE-APACHE 0o644 0 0 1700000000  
+kb-0.2.0-linux-x86_64/LICENSE-MIT 0o644 0 0 1700000000  
+kb-0.2.0-linux-x86_64/README.md 0o644 0 0 1700000000  
+kb-0.2.0-linux-x86_64/kb 0o755 0 0 1700000000  "
 # the directory first, then files in byte order (capitals before lower case)
 assert_eq "$want" "$(listing "$archive")" "layout and metadata"
 
@@ -56,7 +56,7 @@ sums="$TMP/out/SHA256SUMS"
 assert_eq 2 "$(wc -l < "$sums" | tr -d ' ')" "two lines"
 assert_eq "$(LC_ALL=C sort -k2 "$sums")" "$(cat "$sums")" "sorted by file name"
 case "$(head -1 "$sums")" in
-  [0-9a-f]*"  kb-0.2.0-aarch64-apple-darwin.tar.gz") ;;
+  [0-9a-f]*"  kb-0.2.0-linux-x86_64.tar.gz") ;;
   *) _fail "line format: $(head -1 "$sums")" ;;
 esac
 if command -v sha256sum >/dev/null 2>&1; then check_sums="sha256sum -c"; else check_sums="shasum -a 256 -c"; fi

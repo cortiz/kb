@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds a release archive: kb-<version>-<target>.tar.gz holding one top-level directory with the
+# Builds a release archive: kb-<version>-<platform>.tar.gz (the platform name comes from
+# platform-name.sh, e.g. macos-apple-silicon for aarch64-apple-darwin) holding one top-level directory with the
 # binary, README.md and the license files, and adds its checksum to SHA256SUMS in <outdir>.
 # The archive is reproducible: members in a fixed order, owner 0, modes fixed, modification time
 # SOURCE_DATE_EPOCH, and no name or time in the gzip header. Python's tarfile does the work so the
@@ -25,14 +26,15 @@ for f in "$kb" "$root/README.md" "$root/LICENSE-MIT" "$root/LICENSE-APACHE"; do
   }
 done
 mkdir -p "$outdir"
-archive="kb-$version-$target.tar.gz"
+platform=$("$(dirname "$0")/platform-name.sh" "$target")
+archive="kb-$version-$platform.tar.gz"
 
-SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} python3 - "$version" "$target" "$kb" "$root" "$outdir/$archive" <<'PY'
+SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-0} python3 - "$version" "$platform" "$kb" "$root" "$outdir/$archive" <<'PY'
 import gzip, os, sys, tarfile
 
-version, target, kb, root, out = sys.argv[1:6]
+version, platform, kb, root, out = sys.argv[1:6]
 epoch = int(os.environ["SOURCE_DATE_EPOCH"])
-top = f"kb-{version}-{target}"
+top = f"kb-{version}-{platform}"
 files = sorted(
     [
         ("LICENSE-APACHE", f"{root}/LICENSE-APACHE", 0o644),

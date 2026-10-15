@@ -23,7 +23,8 @@ text=$(cat "$root/.github/formula.rb.tmpl")
 text=${text//@VERSION@/$version}
 text=${text//@TAG@/$tag}
 for target in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
-  sum=$(awk -v f="kb-$version-$target.tar.gz" '$2 == f { print $1 }' "$sums")
+  platform=$("$root/scripts/platform-name.sh" "$target")
+  sum=$(awk -v f="kb-$version-$platform.tar.gz" '$2 == f { print $1 }' "$sums")
   if ! [[ $sum =~ ^[0-9a-f]{64}$ ]]; then
     echo "error: no checksum for $target in $sums" >&2
     exit 1

@@ -14,12 +14,12 @@ Download the archive for your machine from the
 
 ```sh
 shasum -a 256 -c --ignore-missing SHA256SUMS      # sha256sum -c --ignore-missing on Linux
-tar -xzf kb-<version>-<target>.tar.gz
-./kb-<version>-<target>/kb --version
+tar -xzf kb-<version>-<platform>.tar.gz
+./kb-<version>-<platform>/kb --version
 ```
 
-Targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `aarch64-unknown-linux-musl` and
-`x86_64-unknown-linux-musl` (static, no libraries needed). macOS warns about a downloaded binary
+Platforms: `macos-apple-silicon` (M1 and newer), `macos-intel`, `linux-x86_64` and `linux-arm64`
+(the Linux builds are static, no libraries needed). macOS warns about a downloaded binary
 because it is not notarized; run `xattr -d com.apple.quarantine kb` once, or install with Homebrew.
 
 Homebrew (once the repository is public, stable releases only):
