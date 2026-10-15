@@ -19,7 +19,7 @@ kb=$3
 outdir=$4
 root=${KB_PACKAGE_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 
-for f in "$kb" "$root/README.md" "$root/LICENSE-MIT" "$root/LICENSE-APACHE"; do
+for f in "$kb" "$root/README.md" "$root/LICENSE-MIT" "$root/LICENSE-APACHE" "$root/scripts/update.sh"; do
   [ -f "$f" ] || {
     echo "error: $f is missing" >&2
     exit 1
@@ -41,6 +41,7 @@ files = sorted(
         ("LICENSE-MIT", f"{root}/LICENSE-MIT", 0o644),
         ("README.md", f"{root}/README.md", 0o644),
         ("kb", kb, 0o755),
+        ("kb-update", f"{root}/scripts/update.sh", 0o755),
     ]
 )
 

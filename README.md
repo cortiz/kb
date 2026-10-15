@@ -9,6 +9,58 @@ them.
 
 ## Install
 
+### Quick install (Linux & macOS)
+
+Install the latest release directly into `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh
+```
+
+Or with `wget`:
+
+```sh
+wget -qO- https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh
+```
+
+The installer:
+- Detects your operating system and architecture (`linux-x86_64`, `linux-arm64`, `macos-apple-silicon`, `macos-intel`)
+- Downloads the matching release archive and verifies its SHA-256 checksum
+- Installs the `kb` binary into `~/.local/bin`
+- Prompts to configure your `$PATH` in `~/.bashrc`, `~/.zshrc`, or your shell profile if `~/.local/bin` is not yet in your PATH
+- Installs the `kb-update` helper into `~/.local/bin/kb-update`
+
+Customizing installation:
+
+```sh
+# Install to a custom directory without modifying shell config
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh -s -- --bin-dir /usr/local/bin --no-modify-path
+
+# Install a specific release version non-interactively
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/install.sh | sh -s -- --version v0.2.0 -y
+```
+
+### Updating kb
+
+To check for and install updates at any time, run:
+
+```sh
+kb-update
+```
+
+Options:
+- `kb-update --check`: check if an update is available without downloading
+- `kb-update --force`: force reinstall the latest version
+- `kb-update --version <tag>`: install a specific release version
+
+Or update directly via curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cortiz/kb/main/scripts/update.sh | sh
+```
+
+### Manual download
+
 Download the archive for your machine from the
 [releases page](https://github.com/cortiz/kb/releases) together with `SHA256SUMS`, then:
 
@@ -22,12 +74,19 @@ Platforms: `macos-apple-silicon` (M1 and newer), `macos-intel`, `linux-x86_64` a
 (the Linux builds are static, no libraries needed). macOS warns about a downloaded binary
 because it is not notarized; run `xattr -d com.apple.quarantine kb` once, or install with Homebrew.
 
-Homebrew (once the repository is public, stable releases only):
+Homebrew (stable releases only):
 
 ```sh
 brew tap cortiz/kb https://github.com/cortiz/kb
+brew trust cortiz/kb
 brew install kb
 ```
+
+> **Note on Homebrew trust**: Modern Homebrew (v4.4+) requires explicitly trusting non-official taps before loading third-party formulas. If Homebrew prints:
+> ```text
+> Error: Refusing to load formula cortiz/kb/kb from untrusted tap cortiz/kb.
+> ```
+> Run `brew trust cortiz/kb` (or `brew trust --formula cortiz/kb/kb`), then re-run `brew install kb`.
 
 Or build it yourself: `cargo install --git https://github.com/cortiz/kb kb`. Contributing and the
 release process are in [CONTRIBUTING.md](CONTRIBUTING.md).
