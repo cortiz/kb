@@ -17,7 +17,7 @@ S
 
 assert_exit 0 "renders" -- "$script" v0.2.0 "$TMP/SUMS" "$TMP/kb.rb"
 f=$(cat "$TMP/kb.rb")
-assert_contains 'version "0.2.0"' "$f" "version"
+assert_not_contains 'version ' "$f" "version inferred from URL per Homebrew rule"
 assert_contains 'license any_of: ["MIT", "Apache-2.0"]' "$f" "license"
 assert_eq 4 "$(grep -c '^ *url ' "$TMP/kb.rb")" "four url lines"
 assert_eq 4 "$(grep -c '^ *sha256 ' "$TMP/kb.rb")" "four sha256 lines"

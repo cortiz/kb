@@ -192,6 +192,7 @@ jobs:
       - name: Audit the formula
         run: |
           brew tap cortiz/kb "$GITHUB_WORKSPACE"
+          brew trust cortiz/kb
           brew audit --strict kb
       - name: Install and test
         if: github.event.repository.private == false
