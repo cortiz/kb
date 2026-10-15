@@ -200,7 +200,7 @@ fi
 if [ "$CHECK_ONLY" -eq 1 ]; then
   if [ "$CLEAN_CURRENT" != "$CLEAN_TARGET" ]; then
     printf "\n${YELLOW}${BOLD}Update available:${RESET} %s -> ${GREEN}${BOLD}%s${RESET}\n" "${CURRENT_VER:-none}" "$TAG"
-    printf "Run ${BOLD}kb-update${RESET} to install.\n\n"
+    printf "Run %skb-update%s to install.\n\n" "$BOLD" "$RESET"
   fi
   exit 0
 fi

@@ -7,7 +7,7 @@ new_tmp
 script="$(repo_root)/scripts/check-binary-size.sh"
 
 bytes() { head -c "$2" /dev/zero > "$TMP/$1"; }
-compare() { KB_SIZE_BASE_BIN="$TMP/base" KB_SIZE_NEW_BIN="$TMP/new" run "$script" "$@"; }
+compare() { KB_SIZE_BASE_BIN="$TMP/base" KB_SIZE_NEW_BIN="$TMP/new" run "$script"; }
 
 bytes base 1000000
 bytes new 1000000
