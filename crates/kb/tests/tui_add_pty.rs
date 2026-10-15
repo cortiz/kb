@@ -25,9 +25,11 @@ fn read_tool() -> (&'static str, Vec<(&'static str, &'static str)>) {
 fn spec(t: &tempfile::TempDir, home: &Path, root: &Path, args: &[&str], clipboard: &str) -> Spec {
     let content = t.path().join("clipboard.txt");
     fs::write(&content, clipboard).unwrap();
+    fs::create_dir_all(t.path().join("tmp")).unwrap();
     let (tool, env) = read_tool();
     let mut spec = Spec::new(args, home, root)
         .env("KB_TEST_NOW", NOW)
+        .env("TMPDIR", t.path().join("tmp").to_str().unwrap())
         .env("KB_TUI_NO_REFRESH_TIMER", "1")
         .with_fake_tool(tool, &format!("cat '{}'", content.display()));
     for (k, v) in env {
@@ -43,12 +45,14 @@ fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
     p
 }
 
-fn temp_files() -> Vec<String> {
-    fs::read_dir(std::env::temp_dir())
-        .unwrap()
-        .flatten()
+/// Files kb left in this test's own TMPDIR (the system one is shared with parallel tests).
+fn temp_files(t: &tempfile::TempDir) -> Vec<String> {
+    let Ok(dir) = fs::read_dir(t.path().join("tmp")) else {
+        return Vec::new();
+    };
+    dir.flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("kb-") && !n.contains("tmp"))
+        .filter(|n| n.starts_with("kb-"))
         .collect()
 }
 
@@ -157,7 +161,7 @@ fn ctrl_e_replaces_the_body_and_reruns_detection() {
         "editor.sh",
         "printf 'select state, count(*)\\nfrom pg_stat_activity\\ngroup by state;\\n' > \"$1\"",
     );
-    let before = temp_files();
+    let before = temp_files(&t);
     let spec = spec(&t, &home, &root, &[], CW).env("KB_EDITOR", editor.to_str().unwrap());
     let mut s = Session::spawn(&spec);
     s.wait_for("entries");
@@ -178,7 +182,7 @@ fn ctrl_e_replaces_the_body_and_reruns_detection() {
             .unwrap()
             .contains("group by state;")
     );
-    assert_eq!(temp_files(), before, "the temp file is gone");
+    assert_eq!(temp_files(&t), before, "the temp file is gone");
     s.send(CTRL_C);
 }
 
