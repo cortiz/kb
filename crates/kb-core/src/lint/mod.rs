@@ -105,6 +105,21 @@ rule_codes! {
     NoteOversized = 72, "note-oversized", Warning;
     NoteEmpty = 73, "note-empty", Info;
     EntryLinkBroken = 74, "entry-link-broken", Warning;
+    RunbookNoSteps = 80, "runbook-no-steps", Error;
+    StepEntryAndDo = 81, "step-entry-and-do", Error;
+    StepMissingEntry = 82, "step-missing-entry", Error;
+    StepIsRunbook = 83, "step-is-runbook", Error;
+    DuplicateStepId = 84, "duplicate-step-id", Error;
+    InvalidStepId = 85, "invalid-step-id", Error;
+    InvalidBinding = 86, "invalid-binding", Error;
+    BindingUnknownVar = 87, "binding-unknown-var", Error;
+    BindingNotInEntry = 88, "binding-not-in-entry", Error;
+    TooManySteps = 89, "too-many-steps", Error;
+    LongRunbook = 90, "long-runbook", Warning;
+    StepEntryHasErrors = 91, "step-entry-has-errors", Warning;
+    UnusedRunbookVar = 92, "unused-runbook-var", Warning;
+    UnboundStepVar = 93, "unbound-step-var", Info;
+    ImplicitStepId = 94, "implicit-step-id", Info;
 }
 
 impl fmt::Display for RuleCode {
@@ -117,11 +132,20 @@ impl std::str::FromStr for RuleCode {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        RuleCode::ALL
-            .iter()
-            .copied()
-            .find(|c| c.to_string() == s)
-            .ok_or_else(|| format!("unknown rule code {s:?}"))
+        if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.to_string() == s) {
+            return Ok(c);
+        }
+        if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == s) {
+            return Ok(c);
+        }
+        if let Some(rest) = s.strip_prefix("KB0") {
+            if let Some((_, slug)) = rest.split_once('-') {
+                if let Some(c) = RuleCode::ALL.iter().copied().find(|c| c.slug() == slug) {
+                    return Ok(c);
+                }
+            }
+        }
+        Err(format!("unknown rule code {s:?}"))
     }
 }
 
