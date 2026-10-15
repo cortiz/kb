@@ -602,6 +602,9 @@ fn ctrl_y_over_ssh_sends_through_the_terminal_without_disturbing_the_screen() {
     s.wait_for("32 entries");
     s.type_text("5xx auth");
     s.wait_for("sumo/5xx-by-authorizer.md"); // the preview has loaded
+    // the header shows "refreshing…" until the background refresh ends; on a slow machine that
+    // can be after the preview, and would change the row between the two readings
+    s.wait_until("the refresh is over", |t| !t.contains("refreshing…"));
     let before: Vec<String> = s.rows()[..4].to_vec();
     s.send(CTRL_Y);
     s.wait_for("Sent via terminal (OSC 52)");

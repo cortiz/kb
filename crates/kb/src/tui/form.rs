@@ -189,7 +189,7 @@ impl Field {
             return true;
         }
         if self.locked {
-            if key.same(Key::new(Code::Char('r'), CTRL)) {
+            if key == Key::new(Code::Char('r'), CTRL) {
                 self.locked = false;
                 self.editor = LineEditor::default();
                 self.touched();

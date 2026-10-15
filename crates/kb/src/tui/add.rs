@@ -564,6 +564,11 @@ impl AddState {
         }
     }
 
+    /// Typing into a field or answering the discard question: keys are taken as they are.
+    pub fn takes_raw_keys(&self) -> bool {
+        self.var_edit.is_some() || self.confirm_discard
+    }
+
     pub fn handle_key(&mut self, key: Key) -> AddEvent {
         self.message = None;
         if self.var_edit.is_some() {

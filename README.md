@@ -109,6 +109,7 @@ kb config list                      # every setting, its value and where the val
 | `theme` | `auto`, `dark`, `light` | `auto` |
 | `tui.enter` | `copy`, `print`, `primary` | `copy` |
 | `tui.mouse` | `true`, `false` | `false` |
+| `tui.keymap` | `emacs`, `vim` | `emacs` |
 | `clipboard.method` | `auto`, `native`, `osc52`, `stdout` | `auto` |
 | `clipboard.command` | a command that reads the text on stdin | none |
 | `clipboard.osc52_max_bytes` | a whole number, at least 1 | `74000` |
@@ -397,6 +398,73 @@ printed on stderr after the UI closes.
 Terminals that keep Shift-PgUp/PgDn or Ctrl-Home/End for themselves never send them to kb; use
 PgUp/PgDn, Shift-↑/↓ and Alt-P instead. Below 100 columns only the list shows and Alt-P zooms the
 preview; below 60×15 kb shows "Terminal too small" until you resize.
+
+### The vim keymap and your own keys
+
+`tui.keymap = "vim"` (or `KB_TUI_KEYMAP=vim`, or `kb --keymap vim`) adds a second mode to the list.
+kb still starts in **search** mode, where typing edits the query and every key above works. `Esc`
+switches to **normal** mode (the header shows `NORMAL` or `SEARCH`), where single letters act on the
+selected entry and the query stays as it is. Every Ctrl and Alt key above keeps working in both modes.
+
+| Normal-mode key | Action |
+|-----------------|--------|
+| `j`  `↓` / `k`  `↑` | select the next / previous result |
+| `gg`  `Home` / `G`  `End` | first / last result (`g` waits one second for the second `g`; `Esc` cancels) |
+| `Ctrl-D` / `Ctrl-U` | half a page down / up (`PgDn` / `PgUp` move a full page) |
+| `l`  `→` / `h`  `←` | next / previous type filter |
+| `J` / `K` | scroll the preview down / up (`Shift-↓` / `Shift-↑` too) |
+| `p` | full-screen preview |
+| `Enter` | pick |
+| `y` / `Y` | copy the payload / copy it with its `{{variables}}` left in |
+| `o` | open the link, console or code view |
+| `!` | run the command (with the usual confirmation) |
+| `m`  `.` | open the action menu |
+| `e` | edit the entry |
+| `n` | add an entry from the clipboard |
+| `R` / `D` | rename / delete the entry |
+| `s` / `H` | sync / history of the selected entry |
+| `/` | back to search mode with an empty query |
+| `i`  `a` | back to search mode, keeping the query |
+| `?` | this help, listing the keys of both modes |
+| `q` | exit |
+| `Esc` | clear the query; exit when it is empty |
+
+In search mode `Ctrl-U` still clears the line, and `Home` / `End` move within it.
+
+Every key can be changed, for either keymap, in `[tui.keys.<context>]` tables of the config file.
+The contexts are `global` (both list modes), `search`, `normal`, `action-menu`, `code-view`,
+`history`, `form` and `add`. A list replaces the command's keys in that context and an empty list
+unbinds it; commands you do not mention keep their keys:
+
+```toml
+[tui]
+keymap = "vim"
+
+[tui.keys.normal]
+run = ["x", "!"]
+
+[tui.keys.search]
+action-menu = ["ctrl-p", "alt-a", "f2"]
+
+[tui.keys.global]
+history = []
+```
+
+Keys are written `ctrl-o`, `alt-a`, `shift-down`, `enter`, `esc`, `tab`, `backtab`, `space`,
+`backspace`, `delete`, `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`, `f1` to
+`f12`, or one character (`G` is not `g`). Two keys separated by a space (`"g g"`) make a sequence,
+in normal mode only. Plain printable keys cannot be bound in `search`, `form` or `add`, where
+typing goes into a text field. A bad line is ignored with a warning naming the file and line, and kb
+still starts; `Ctrl-C` always quits, the `y` / `run` answers of confirmation questions cannot be
+changed, and each list mode keeps at least one key for help.
+
+```sh
+kb keys [--context normal] [--json]   # the keys in effect, and which come from your config
+kb keys check [--json]                # validate the config; exit 1 on any problem (also in kb doctor)
+kb keys defaults --keymap vim         # a commented [tui.keys.*] block to copy from
+```
+
+The inline shell picker keeps its own keys, and the conflict screen is not configurable yet.
 
 `theme = "auto"` reads `COLORFGBG` and otherwise assumes a dark background; `NO_COLOR` turns colors
 off. See [Configuration](#configuration) for the settings.

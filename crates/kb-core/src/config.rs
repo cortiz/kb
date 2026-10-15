@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The thirty-three settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The thirty-four settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -86,6 +86,13 @@ pub const SETTINGS: &[Setting] = &[
         default: "false",
         env: "KB_TUI_MOUSE",
         doc: "Wheel scrolling and click to select. Off keeps terminal text selection working.",
+    },
+    Setting {
+        key: "tui.keymap",
+        kind: Kind::Choice(&["emacs", "vim"]),
+        default: "emacs",
+        env: "KB_TUI_KEYMAP",
+        doc: "emacs | vim. vim adds a normal mode (Esc) with single-letter actions; rebind any key in [tui.keys.<context>] (see `kb keys`).",
     },
     Setting {
         key: "clipboard.method",
@@ -417,12 +424,14 @@ pub struct Settings {
     mcp_exclude_tags: Vec<String>,
     mcp_exclude_types: Vec<String>,
     mcp_write_types: Vec<String>,
+    key_overrides: Vec<crate::keys::KeyOverride>,
 }
 
 /// Values given on the command line that map to settings.
 #[derive(Debug, Clone, Default)]
 pub struct Flags {
     pub root: Option<String>,
+    pub keymap: Option<String>,
     pub clipboard_method: Option<String>,
 }
 
@@ -478,6 +487,7 @@ impl Settings {
             mcp_exclude_tags: vec!["private".to_string()],
             mcp_exclude_types: Vec::new(),
             mcp_write_types: Vec::new(),
+            key_overrides: Vec::new(),
         }
     }
 }
@@ -555,6 +565,17 @@ impl Settings {
 
     pub fn vars_remember(&self) -> bool {
         self.flag("vars.remember")
+    }
+
+    /// The `[tui.keys.<context>]` lines, as written.
+    pub fn key_overrides(&self) -> &[crate::keys::KeyOverride] {
+        &self.key_overrides
+    }
+
+    /// The keymap preset (`tui.keymap`).
+    pub fn keymap(&self) -> crate::keys::Keymap {
+        crate::keys::Keymap::from_name(self.text("tui.keymap"))
+            .unwrap_or(crate::keys::Keymap::Emacs)
     }
 
     pub fn tui_mouse(&self) -> bool {
@@ -870,6 +891,8 @@ fn collect(table: &dyn toml_edit::TableLike, prefix: &str, text: &str, out: &mut
             || key == "run.destructive_patterns"
             || key == "actions"
             || key.starts_with("actions.")
+            || key == "tui.keys"
+            || key.starts_with("tui.keys.")
             || key == "mcp.exclude_tags"
             || key == "mcp.exclude_types"
             || key == "mcp.write_types"
@@ -1108,6 +1131,15 @@ impl Loader {
             }
         }
 
+        // 3b. [tui.keys.<context>]
+        if let Some(keys_item) = doc
+            .get("tui")
+            .and_then(|t| t.as_table_like())
+            .and_then(|t| t.get("keys"))
+        {
+            self.key_tables(path, text, keys_item);
+        }
+
         // 4. mcp lists
         if let Some(mcp_item) = doc.get("mcp")
             && let Some(mcp_tbl) = mcp_item.as_table_like()
@@ -1206,6 +1238,52 @@ impl Loader {
                     Some(path),
                     s.key,
                 ),
+            }
+        }
+    }
+
+    fn key_tables(&mut self, path: &Path, text: &str, keys_item: &toml_edit::Item) {
+        let Some(contexts) = keys_item.as_table_like() else {
+            let line = keys_item.span().map(|r| line_of(text, r.start));
+            self.warn(
+                Some(path),
+                line,
+                "tui.keys: expected tables, one per context".into(),
+            );
+            return;
+        };
+        for (context, table) in contexts.iter() {
+            let Some(table) = table.as_table_like() else {
+                let line = table.span().map(|r| line_of(text, r.start));
+                self.warn(
+                    Some(path),
+                    line,
+                    format!("tui.keys.{context}: expected a table of command = [keys]"),
+                );
+                continue;
+            };
+            for (command, item) in table.iter() {
+                let line = item.span().map(|r| line_of(text, r.start));
+                let mut o = crate::keys::KeyOverride {
+                    context: context.to_string(),
+                    command: command.to_string(),
+                    keys: Vec::new(),
+                    file: Some(path.to_path_buf()),
+                    line,
+                    error: None,
+                };
+                match item.as_array() {
+                    Some(arr) => {
+                        for v in arr.iter() {
+                            match v.as_str() {
+                                Some(k) => o.keys.push(k.to_string()),
+                                None => o.error = Some("expected a list of strings".into()),
+                            }
+                        }
+                    }
+                    None => o.error = Some("expected a list of key names".into()),
+                }
+                self.settings.key_overrides.push(o);
             }
         }
     }
@@ -1315,6 +1393,19 @@ pub fn load(files: &[PathBuf], get_env: &dyn Fn(&str) -> Option<String>, flags: 
             None,
             None,
             "--root",
+        );
+    }
+    if let Some(v) = &flags.keymap
+        && let Some(s) = setting("tui.keymap")
+    {
+        l.apply(
+            s,
+            &Raw::Str(v.clone()),
+            true,
+            Source::Flag("--keymap"),
+            None,
+            None,
+            "--keymap",
         );
     }
     if let Some(v) = &flags.clipboard_method
@@ -1513,7 +1604,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 33, "thirty-three settings, no duplicates");
+        assert_eq!(keys.len(), 34, "thirty-four settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -1553,7 +1644,7 @@ mod settings_tests {
         assert_eq!(s.mcp_exclude_tags(), &["private"]);
         assert!(s.mcp_exclude_types().is_empty());
         assert!(s.mcp_write_types().is_empty());
-        assert_eq!(s.iter().count(), 33);
+        assert_eq!(s.iter().count(), 34);
         assert_eq!(s.path_template(), PathTemplate::default());
     }
 
@@ -1635,6 +1726,7 @@ write_types = ["sql", "sumo"]
         let flags = Flags {
             clipboard_method: Some("osc52".into()),
             root: Some("/flag/kb".into()),
+            keymap: None,
         };
         let l = load(files, &env, &flags);
         assert_eq!(l.settings.clipboard_method(), ClipboardChoice::Osc52);
@@ -2341,5 +2433,61 @@ preview = false
         assert_eq!(bad.warnings.len(), 2);
         assert_eq!(bad.settings.widget_default_type(), "cmd");
         assert_eq!(bad.settings.widget_buffer(), "query");
+    }
+}
+
+#[cfg(test)]
+mod key_config_tests {
+    use super::*;
+
+    fn load_text(text: &str) -> Loaded {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("config.toml");
+        std::fs::write(&p, text).unwrap();
+        load(&[p], &|_| None, &Flags::default())
+    }
+
+    #[test]
+    fn keymap_defaults_to_emacs_and_follows_env_and_flag() {
+        use crate::keys::Keymap;
+        assert_eq!(load_text("").settings.keymap(), Keymap::Emacs);
+        assert_eq!(
+            load_text("[tui]\nkeymap = \"vim\"\n").settings.keymap(),
+            Keymap::Vim
+        );
+        let env = |n: &str| (n == "KB_TUI_KEYMAP").then(|| "vim".to_string());
+        assert_eq!(
+            load(&[], &env, &Flags::default()).settings.keymap(),
+            Keymap::Vim
+        );
+        let flags = Flags {
+            keymap: Some("emacs".into()),
+            ..Flags::default()
+        };
+        assert_eq!(
+            load(&[], &env, &flags).settings.keymap(),
+            Keymap::Emacs,
+            "flag beats env"
+        );
+        let bad = load_text("[tui]\nkeymap = \"nano\"\n");
+        assert_eq!(bad.settings.keymap(), Keymap::Emacs);
+        assert_eq!(bad.warnings.len(), 1);
+    }
+
+    #[test]
+    fn key_tables_are_collected_with_their_lines() {
+        let l = load_text(
+            "[tui]\nkeymap = \"vim\"\n\n[tui.keys.normal]\nrun = [\"x\", \"!\"]\n\n[tui.keys.global]\nhistory = []\nsync = \"s\"\n",
+        );
+        assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+        let o = l.settings.key_overrides();
+        assert_eq!(o.len(), 3);
+        assert_eq!(
+            (o[1].context.as_str(), o[1].command.as_str(), o[1].line),
+            ("global", "history", Some(8))
+        );
+        assert_eq!(o[0].keys, ["x", "!"]);
+        assert_eq!(o[0].line, Some(5));
+        assert!(o[2].error.is_some(), "a string is not a list");
     }
 }

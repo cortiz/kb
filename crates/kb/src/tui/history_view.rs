@@ -46,6 +46,11 @@ impl HistoryState {
             .map(|c| c.hash.clone())
     }
 
+    /// The restore question takes its answer as it is, whatever the keymap says.
+    pub fn takes_raw_keys(&self) -> bool {
+        self.confirm_restore
+    }
+
     pub fn key(&mut self, e: KeyEvent) -> HistoryOutcome {
         self.message = None;
         if e.modifiers.contains(KeyModifiers::CONTROL) {

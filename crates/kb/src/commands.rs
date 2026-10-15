@@ -2,6 +2,7 @@ pub mod clone;
 pub mod complete;
 pub mod history;
 pub mod hooks;
+pub mod keys;
 pub mod mcp;
 pub mod pick;
 pub mod review;
@@ -1348,7 +1349,7 @@ pub fn run_ui(
         clipboard: ClipboardSettings::from_settings(&loaded.settings),
         editor: loaded.settings.editor().map(str::to_string),
         settings: loaded.settings.clone(),
-        config_problems: loaded.warnings.len(),
+        config_problems: loaded.warnings.len() + keys::effective(loaded).warnings.len(),
         fill_variables: matches!(
             post,
             PostPick::Copy
@@ -1448,7 +1449,7 @@ pub fn run_add_ui(
         clipboard: ClipboardSettings::from_settings(&loaded.settings),
         editor: loaded.settings.editor().map(str::to_string),
         settings: loaded.settings.clone(),
-        config_problems: loaded.warnings.len(),
+        config_problems: loaded.warnings.len() + keys::effective(loaded).warnings.len(),
         fill_variables: false,
         remember_vars: false,
         refresh_timer: false,

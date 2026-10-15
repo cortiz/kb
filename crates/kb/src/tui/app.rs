@@ -16,6 +16,7 @@ use super::keys::{self, Command, Key, Mode};
 use super::layout::{self, Screen};
 use super::preview::PreviewModel;
 use super::run_modal::RunModalState;
+use kb_core::keys::{Context, EffectiveKeymap, Translated};
 
 /// Results asked for at first; doubled when the selection nears the end.
 pub const PAGE: usize = 60;
@@ -359,11 +360,36 @@ pub struct AppState {
     pub started_by_add: bool,
     /// The question on the key bar, when Ctrl-R or Ctrl-X asked one.
     pub prompt: Option<ListPrompt>,
+    /// The keys: the preset plus the user's overrides, built once at startup.
+    pub keymap: std::sync::Arc<kb_core::keys::EffectiveKeymap>,
+    /// Vim's normal mode: letters are commands (never true with the emacs keymap).
+    pub normal: bool,
+    /// The first key of a two-key sequence (`g`) and when it was pressed.
+    pub pending: Option<(Key, Instant)>,
 }
+
+/// The key a view should see: the user's binding mapped to the view's own default key, or
+/// nothing for a default key the user moved elsewhere.
+fn translated(map: &EffectiveKeymap, ctx: Context, key: Key) -> Option<Key> {
+    match map.translate(ctx, key) {
+        Translated::Key(k) => Some(k),
+        Translated::Swallow => None,
+    }
+}
+
+/// How long the first key of a sequence waits for the second.
+pub const SEQUENCE_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl AppState {
     pub fn new(options: Options, size: (u16, u16), initial_query: &str, root: String) -> AppState {
+        let keymap = std::sync::Arc::new(kb_core::keys::EffectiveKeymap::build(
+            options.settings.keymap(),
+            options.settings.key_overrides(),
+        ));
         AppState {
+            keymap,
+            normal: false,
+            pending: None,
             root,
             sync_status: None,
             fetch_failed: false,
@@ -438,6 +464,8 @@ impl AppState {
             Mode::Help
         } else if self.layout_mode == LayoutMode::FullPreview {
             Mode::FullPreview
+        } else if self.normal {
+            Mode::Normal
         } else {
             Mode::Search
         }
@@ -570,6 +598,16 @@ impl AppState {
                 if let Some(h) = self.history.as_mut() {
                     use super::history_view::HistoryOutcome as O;
                     let id = h.history.id.clone();
+                    let e = if h.takes_raw_keys() {
+                        e
+                    } else {
+                        match keys::from_event(e)
+                            .and_then(|k| translated(&self.keymap, Context::History, k))
+                        {
+                            Some(k) => keys::to_event(k),
+                            None => return Vec::new(),
+                        }
+                    };
                     return match h.key(e) {
                         O::Nothing => Vec::new(),
                         O::Close => {
@@ -589,10 +627,10 @@ impl AppState {
                 if self.code_view.is_some() {
                     return self.code_view_key(e, now);
                 }
-                match Key::from_event(e).and_then(|k| keys::resolve(k, self.mode())) {
-                    Some(command) => self.command(command, now),
-                    None => Vec::new(),
-                }
+                let Some(key) = keys::from_event(e) else {
+                    return Vec::new();
+                };
+                self.list_key(key, now)
             }
             Action::Paste(text) => {
                 if let Some(add) = &mut self.add {
@@ -606,6 +644,7 @@ impl AppState {
                 if self.mode() != Mode::Search {
                     return Vec::new();
                 }
+                self.pending = None;
                 let mut changed = false;
                 for c in text.chars().filter(|c| *c != '\n' && *c != '\r') {
                     changed |= self.input.insert(c) != Change::None;
@@ -624,6 +663,12 @@ impl AppState {
                 Vec::new()
             }
             Action::Tick => {
+                if self
+                    .pending
+                    .is_some_and(|(_, at)| now.duration_since(at) > SEQUENCE_TIMEOUT)
+                {
+                    self.pending = None;
+                }
                 if self
                     .message
                     .as_ref()
@@ -878,10 +923,10 @@ impl AppState {
 
     /// A key while Ctrl-R or Ctrl-X is asking.
     fn prompt_key(&mut self, e: KeyEvent, _now: Instant) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
         self.message = None;
@@ -924,14 +969,22 @@ impl AppState {
 
     /// A key while the add form is open.
     fn add_key(&mut self, e: KeyEvent) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
         let Some(add) = self.add.as_mut() else {
             return Vec::new();
+        };
+        let key = if add.takes_raw_keys() {
+            key
+        } else {
+            let Some(k) = translated(&self.keymap, Context::Add, key) else {
+                return Vec::new();
+            };
+            k
         };
         match add.handle_key(key) {
             AddEvent::None => Vec::new(),
@@ -950,12 +1003,15 @@ impl AppState {
 
     /// A key while the variable form is open: the form handles it, and may ask for something.
     fn form_key(&mut self, e: KeyEvent) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
+        let Some(key) = translated(&self.keymap, Context::Form, key) else {
+            return Vec::new();
+        };
         let Some(form) = self.form.as_mut() else {
             return Vec::new();
         };
@@ -980,10 +1036,10 @@ impl AppState {
 
     /// A key while the run confirmation / pause modal is open.
     fn run_modal_key(&mut self, e: KeyEvent) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
         let Some(modal) = self.run_modal.as_mut() else {
@@ -1000,7 +1056,7 @@ impl AppState {
                 input,
                 error,
             } => {
-                if key.same(Key::new(keys::Code::Esc, 0)) {
+                if key == Key::new(keys::Code::Esc, 0) {
                     self.run_modal = None;
                     return Vec::new();
                 }
@@ -1053,14 +1109,22 @@ impl AppState {
 
     /// A key while Screen 3 (Code View) is open.
     fn code_view_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
         let Some(cv) = self.code_view.as_mut() else {
             return Vec::new();
+        };
+        let key = if cv.takes_raw_keys() {
+            key
+        } else {
+            let Some(k) = translated(&self.keymap, Context::CodeView, key) else {
+                return Vec::new();
+            };
+            k
         };
         match cv.handle_key(key) {
             super::code_view::CodeViewEvent::None => Vec::new(),
@@ -1127,12 +1191,15 @@ impl AppState {
 
     /// A key while Action Menu modal is open.
     fn action_menu_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
-        let Some(key) = Key::from_event(e) else {
+        let Some(key) = keys::from_event(e) else {
             return Vec::new();
         };
-        if key.same(Key::new(keys::Code::Char('c'), keys::CTRL)) {
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
             return vec![Effect::Quit(130)];
         }
+        let Some(key) = translated(&self.keymap, Context::ActionMenu, key) else {
+            return Vec::new();
+        };
         if key.code == keys::Code::Esc {
             self.action_menu = None;
             return Vec::new();
@@ -1229,8 +1296,67 @@ impl AppState {
         self.selection_moved()
     }
 
+    /// A key on the main list: a pending `g` first, then the keymap.
+    fn list_key(&mut self, key: Key, now: Instant) -> Vec<Effect> {
+        let ctx = keys::list_context(self.normal);
+        if let Some((first, at)) = self.pending.take()
+            && now.duration_since(at) <= SEQUENCE_TIMEOUT
+        {
+            if key.code == keys::Code::Esc && key.mods == 0 {
+                return Vec::new();
+            }
+            if let Some(cmd) = self.keymap.lookup_seq(ctx, first, key) {
+                return keys::resolve_core(cmd, key)
+                    .map_or_else(Vec::new, |c| self.command(c, now));
+            }
+            // anything else ends the sequence and counts as a key of its own
+        }
+        if self.normal
+            && self.mode() == Mode::Normal
+            && self.keymap.lookup(ctx, key).is_none()
+            && self.keymap.starts_sequence(ctx, key)
+        {
+            self.pending = Some((key, now));
+            return Vec::new();
+        }
+        match keys::resolve(&self.keymap, key, self.mode(), self.normal) {
+            Some(command) => self.command(command, now),
+            None => Vec::new(),
+        }
+    }
+
+    /// Back to the query line (vim): from an empty one, or as it was.
+    fn enter_search(&mut self, clear: bool) -> Vec<Effect> {
+        self.normal = false;
+        self.pending = None;
+        if clear {
+            self.input.clear_all();
+            return self.query_changed();
+        }
+        self.input.editor.end();
+        Vec::new()
+    }
+
     fn command(&mut self, command: Command, now: Instant) -> Vec<Effect> {
         match command {
+            Command::NormalMode => {
+                if self.layout_mode == LayoutMode::FullPreview {
+                    self.layout_mode = LayoutMode::Split;
+                    self.ensure_visible();
+                }
+                self.normal = true;
+                Vec::new()
+            }
+            Command::SearchClear => self.enter_search(true),
+            Command::SearchKeep => self.enter_search(false),
+            Command::HalfPageDown => {
+                let rows = (self.list_rows() / 2).max(1);
+                self.move_to(self.selected + rows)
+            }
+            Command::HalfPageUp => {
+                let rows = (self.list_rows() / 2).max(1);
+                self.move_to(self.selected.saturating_sub(rows))
+            }
             Command::Insert(c) => {
                 let change = self.input.insert(c);
                 self.edited(change)
@@ -1450,7 +1576,9 @@ impl AppState {
     fn mouse(&mut self, m: MouseEvent) -> Vec<Effect> {
         use ratatui::crossterm::event::{MouseButton, MouseEventKind};
         use ratatui::layout::Position;
-        if !self.options.mouse || self.mode() != Mode::Search && self.mode() != Mode::FullPreview {
+        if !self.options.mouse
+            || !matches!(self.mode(), Mode::Search | Mode::Normal | Mode::FullPreview)
+        {
             return Vec::new();
         }
         let area = ratatui::layout::Rect::new(0, 0, self.size.0, self.size.1);
