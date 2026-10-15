@@ -101,7 +101,8 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
                 "type": "object",
                 "properties": {
                     "query": { "type": "string", "description": "Search query keywords or syntax" },
-                    "types": { "type": "array", "items": { "type": "string" }, "description": "Filter by entry types (cmd, sumo, cw, sql, link, code, prompt, runbook)" },
+                    "types": { "type": "array", "items": { "type": "string" }, "description": "Filter by entry types (cmd, sumo, cw, sql, link, code, prompt, note, runbook)" },
+                    "type": { "type": "string", "description": "Filter by one entry type (same as a one-item 'types')" },
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Filter by tags" },
                     "limit": { "type": "integer", "default": 20, "maximum": 100, "description": "Maximum results to return" }
                 }
@@ -109,7 +110,7 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
         }),
         serde_json::json!({
             "name": "get",
-            "description": "Retrieve detailed entry data by ID, optionally resolving declared variables and generating action links.",
+            "description": "Retrieve detailed entry data by ID, optionally resolving declared variables and generating action links. A note's whole Markdown body is returned as 'content'.",
             "inputSchema": {
                 "type": "object",
                 "required": ["id"],
@@ -138,12 +139,12 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
             "description": "Create a new entry in the knowledge base through the validated save path.",
             "inputSchema": {
                 "type": "object",
-                "required": ["title", "payload"],
                 "properties": {
-                    "type": { "type": "string", "description": "Entry type (detected if omitted)" },
-                    "title": { "type": "string", "description": "Entry title (max 120 chars)" },
+                    "type": { "type": "string", "description": "Entry type (detected if omitted; 'note' for free-form Markdown)" },
+                    "title": { "type": "string", "description": "Entry title (max 120 chars). Required unless this is a note whose content starts with '# Title'" },
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Entry tags" },
-                    "payload": { "type": "string", "description": "Code or query payload" },
+                    "payload": { "type": "string", "description": "Code or query payload (required except for notes)" },
+                    "content": { "type": "string", "description": "A note's Markdown body" },
                     "notes": { "type": "string", "description": "Markdown body notes" },
                     "vars": { "type": "object", "description": "Variable declarations" },
                     "fields": { "type": "object", "description": "Type-specific fields (url, shell, range, etc.)" },
@@ -167,6 +168,7 @@ fn get_tools_list(write_allowed: bool) -> serde_json::Value {
                             "title": { "type": "string" },
                             "payload": { "type": "string" },
                             "notes": { "type": "string" },
+                            "content": { "type": "string", "description": "A note's new Markdown body" },
                             "fields": { "type": "object" },
                             "tags": { "type": "array", "items": { "type": "string" } },
                             "add_tags": { "type": "array", "items": { "type": "string" } },
@@ -281,7 +283,7 @@ impl McpServer {
                             .get("query")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
-                        let types: Vec<String> = arguments
+                        let mut types: Vec<String> = arguments
                             .get("types")
                             .and_then(|v| v.as_array())
                             .map(|arr| {
@@ -290,6 +292,11 @@ impl McpServer {
                                     .collect()
                             })
                             .unwrap_or_default();
+                        if let Some(one) = arguments.get("type").and_then(|v| v.as_str())
+                            && !types.iter().any(|t| t == one)
+                        {
+                            types.push(one.to_string());
+                        }
                         let tags: Vec<String> = arguments
                             .get("tags")
                             .and_then(|v| v.as_array())

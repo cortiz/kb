@@ -199,6 +199,13 @@ pub enum Action {
     Removed(String),
     /// A rename or delete from the list did not work.
     OpFailed(String),
+    /// Show this entry: search for its title and select it.
+    GoToEntry {
+        id: String,
+        title: String,
+    },
+    /// "Follow entry link" on a note with several links.
+    OpenLinkPicker(Box<super::action_view::LinkPickerState>),
     /// Alt-S finished: the one-line summary, and whether it worked.
     SyncDone(String, bool),
     GitStatus(Box<kb_core::git::status::SyncStatus>),
@@ -259,6 +266,8 @@ pub enum Effect {
     CopyPayload,
     /// Copy a note as plain text, the way it is drawn, without Markdown or styling.
     CopyRenderedText,
+    /// "Follow entry link" in a note's action menu.
+    FollowLink(String),
     /// Alt-C: copy the payload as it is in the file.
     CopyTemplate,
     /// The form passed validation: check the entry did not change, then use it.
@@ -357,6 +366,8 @@ pub struct AppState {
     pub code_view: Option<Box<super::code_view::CodeViewState>>,
     /// Action Menu modal, when it is open.
     pub action_menu: Option<Box<super::action_view::ActionMenuState>>,
+    /// The list of entries a note links to, when there is more than one.
+    pub link_picker: Option<Box<super::action_view::LinkPickerState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
     pub tags: Vec<(String, u32)>,
     /// The UI was started by `kb add`: it ends with the form.
@@ -430,6 +441,7 @@ impl AppState {
             run_modal: None,
             code_view: None,
             action_menu: None,
+            link_picker: None,
             tags: Vec::new(),
             started_by_add: false,
             prompt: None,
@@ -460,6 +472,7 @@ impl AppState {
             || self.add.is_some()
             || self.code_view.is_some()
             || self.action_menu.is_some()
+            || self.link_picker.is_some()
             || self.history.is_some()
         {
             Mode::Form
@@ -597,6 +610,9 @@ impl AppState {
                 }
                 if self.action_menu.is_some() {
                     return self.action_menu_key(e, now);
+                }
+                if self.link_picker.is_some() {
+                    return self.link_picker_key(e, now);
                 }
                 if let Some(h) = self.history.as_mut() {
                     use super::history_view::HistoryOutcome as O;
@@ -914,6 +930,11 @@ impl AppState {
                 self.action_menu = Some(menu);
                 Vec::new()
             }
+            Action::OpenLinkPicker(picker) => {
+                self.link_picker = Some(picker);
+                Vec::new()
+            }
+            Action::GoToEntry { id, title } => self.go_to(id, &title),
             Action::EditorReturned(error) => {
                 self.status.refreshing = true;
                 if let Some(text) = error {
@@ -1227,6 +1248,7 @@ impl AppState {
                     kb_core::action::ActionKind::CopyPayload => vec![Effect::CopyPayload],
                     kb_core::action::ActionKind::CopyRenderedText => vec![Effect::CopyRenderedText],
                     kb_core::action::ActionKind::EditEntry => vec![Effect::EditEntry(id)],
+                    kb_core::action::ActionKind::FollowLink => vec![Effect::FollowLink(id)],
                     kb_core::action::ActionKind::OpenUrl => vec![Effect::OpenEntry(id)],
                     kb_core::action::ActionKind::RunCommand => vec![Effect::RunEntry(id)],
                     kb_core::action::ActionKind::CodeView => vec![Effect::OpenEntry(id)],
@@ -1261,6 +1283,69 @@ impl AppState {
                     }
                 };
             }
+        }
+        Vec::new()
+    }
+
+    /// Show `id`: the search becomes its title (an exact title is ranked first) and `id` is the
+    /// entry that gets selected when the results arrive.
+    fn go_to(&mut self, id: String, title: &str) -> Vec<Effect> {
+        self.input.clear_all();
+        for c in title.chars().filter(|c| !c.is_control()) {
+            self.input.insert(c);
+        }
+        self.normal = false;
+        let effects = self.query_changed();
+        self.selected_id = Some(id);
+        effects
+    }
+
+    /// A key while the list of linked entries is open.
+    fn link_picker_key(&mut self, e: KeyEvent, now: Instant) -> Vec<Effect> {
+        let Some(key) = keys::from_event(e) else {
+            return Vec::new();
+        };
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(picker) = self.link_picker.as_mut() else {
+            return Vec::new();
+        };
+        let last = picker.choices.len().saturating_sub(1);
+        match (key.code, key.mods) {
+            (keys::Code::Esc, 0) => self.link_picker = None,
+            (keys::Code::Down, 0) | (keys::Code::Char('j'), 0) => {
+                picker.selected = (picker.selected + 1).min(last);
+            }
+            (keys::Code::Up, 0) | (keys::Code::Char('k'), 0) => {
+                picker.selected = picker.selected.saturating_sub(1);
+            }
+            (keys::Code::Char(c @ '1'..='9'), 0) => {
+                let n = usize::from(c as u8 - b'1');
+                if n <= last {
+                    picker.selected = n;
+                }
+            }
+            (keys::Code::Enter, 0) => {
+                let choice = picker.choices.get(picker.selected).cloned();
+                self.link_picker = None;
+                return match choice {
+                    Some(c) => match c.target {
+                        Some((_, title)) => self.go_to(c.id, &title),
+                        None => {
+                            self.say(
+                                &format!("No entry named {}", c.id),
+                                MessageKind::Warning,
+                                now,
+                                true,
+                            );
+                            Vec::new()
+                        }
+                    },
+                    None => Vec::new(),
+                };
+            }
+            _ => {}
         }
         Vec::new()
     }

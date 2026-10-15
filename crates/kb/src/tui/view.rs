@@ -61,6 +61,9 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     if let Some(ref menu) = state.action_menu {
         super::action_view::draw_action_menu(state, menu, theme, area, buf);
     }
+    if let Some(ref picker) = state.link_picker {
+        super::action_view::draw_link_picker(picker, theme, area, buf);
+    }
     if let Some(ref h) = state.history {
         super::history_view::draw_history(h, theme, area, buf);
     }

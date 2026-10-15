@@ -4,8 +4,7 @@ use clap::Args;
 
 use crate::author::{AddArgs, SourceFlag};
 
-/// The tag that keeps a note away from AI agents.
-pub const PRIVATE_TAG: &str = "private";
+pub use kb_core::entry::PRIVATE_TAG;
 
 #[derive(Args, Debug, Clone)]
 pub struct NoteArgs {

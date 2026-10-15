@@ -506,6 +506,41 @@ impl Kb {
         counts
     }
 
+    /// The notes that link to `id` with `[[id]]`, by ID. The index is brought up to date first and
+    /// answers; without one the notes are read.
+    pub fn notes_linking_to(&mut self, id: &str) -> Vec<String> {
+        let _ = self.refresh();
+        let from_index = self.held.as_ref().and_then(|index| {
+            let mut stmt = index
+                .conn
+                .prepare(
+                    "SELECT source_id FROM entry_links WHERE target_id = ?1 ORDER BY source_id",
+                )
+                .ok()?;
+            let rows = stmt.query_map([id], |r| r.get::<_, String>(0)).ok()?;
+            Some(rows.flatten().collect::<Vec<_>>())
+        });
+        if let Some(found) = from_index {
+            return found;
+        }
+        let mut found = Vec::new();
+        for file in self.walk().map(|w| w.files).unwrap_or_default() {
+            let Ok(bytes) = self.reader.read(&file.abs_path) else {
+                continue;
+            };
+            if let Some(entry) = parse_entry(&file.id, &file.rel_path, bytes).entry
+                && entry.entry_type() == Some(EntryType::Note)
+                && crate::entry::link::extract_links(entry.notes())
+                    .iter()
+                    .any(|l| l.target_id == id)
+            {
+                found.push(file.id.clone());
+            }
+        }
+        found.sort();
+        found
+    }
+
     /// The errors `kb lint` would report for this entry's file (empty when it is valid).
     pub fn lint_entry(&self, id: &str) -> Result<Vec<crate::lint::Finding>, KbError> {
         let (path, rel) = self.entry_file(id)?;

@@ -251,6 +251,11 @@ pub fn run(
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
+                Effect::FollowLink(id) => {
+                    let action = follow_links(&ui_kb, &id);
+                    pending.extend(state.update(action, Instant::now()));
+                    dirty = true;
+                }
                 Effect::CopyRenderedText => {
                     let report = copy_rendered_text(platform, &clipboard_settings, &state, &ui_kb);
                     pending.extend(state.update(Action::CopyDone(report), Instant::now()));
@@ -948,7 +953,7 @@ pub fn run(
                         &to,
                         &state.options.settings,
                     ) {
-                        Ok((renamed, _)) => Action::Renamed {
+                        Ok((renamed, _, _)) => Action::Renamed {
                             from: renamed.from,
                             to: renamed.to,
                         },
@@ -1242,6 +1247,45 @@ fn copy_selected(
     CopyReport {
         message: outcome.message_short(),
         sent: outcome.sent(),
+    }
+}
+
+/// What "Follow entry link" does for note `id`: go straight to the only linked entry, or list them.
+fn follow_links(kb: &Kb, id: &str) -> Action {
+    let say = |message: String| {
+        Action::CopyDone(CopyReport {
+            message,
+            sent: false,
+        })
+    };
+    let entry = match kb.entry(id) {
+        Ok(e) => e,
+        Err(e) => return say(format!("Error loading entry '{id}': {e}")),
+    };
+    let mut choices: Vec<action_view::LinkChoice> = Vec::new();
+    for link in kb_core::entry::link::extract_links(entry.notes()) {
+        if choices.iter().any(|c| c.id == link.target_id) {
+            continue;
+        }
+        let target = crate::show::link_lookup(kb, &link.target_id);
+        choices.push(action_view::LinkChoice {
+            id: link.target_id,
+            target,
+        });
+    }
+    match choices.as_slice() {
+        [] => say("This note has no entry links".into()),
+        [only] => match &only.target {
+            Some((_, title)) => Action::GoToEntry {
+                id: only.id.clone(),
+                title: title.clone(),
+            },
+            None => say(format!("No entry named {}", only.id)),
+        },
+        _ => Action::OpenLinkPicker(Box::new(action_view::LinkPickerState {
+            choices,
+            selected: 0,
+        })),
     }
 }
 

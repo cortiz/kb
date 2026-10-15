@@ -924,3 +924,330 @@ fn test_mcp_prompts_list_and_get() {
         client.close();
     }
 }
+
+// ---- notes ----
+
+struct Tool<'a> {
+    client: &'a mut McpClient,
+    next: u64,
+}
+
+impl<'a> Tool<'a> {
+    fn start(client: &'a mut McpClient) -> Self {
+        client.send(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"clientInfo": {"name": "note-test"}}}));
+        let _ = client.recv();
+        Tool { client, next: 2 }
+    }
+
+    /// Calls a tool; returns (isError, the first text part).
+    fn call(&mut self, name: &str, arguments: Value) -> (bool, String) {
+        let id = self.next;
+        self.next += 1;
+        self.client
+            .send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments}}));
+        let resp = self.client.recv();
+        assert_eq!(resp["id"], id);
+        (
+            resp["result"]["isError"].as_bool().unwrap(),
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        )
+    }
+
+    fn json(&mut self, name: &str, arguments: Value) -> Value {
+        let (is_error, text) = self.call(name, arguments);
+        assert!(!is_error, "{name} failed: {text}");
+        serde_json::from_str(&text).unwrap()
+    }
+}
+
+fn notes_root() -> (tempfile::TempDir, std::path::PathBuf) {
+    let (d, root) = support::notes_kb();
+    (d, root)
+}
+
+#[test]
+fn test_mcp_search_returns_notes_and_never_private_ones() {
+    let (_d, root) = notes_root();
+    let mut client = McpClient::spawn(kb_mcp_cmd(&root));
+    let mut t = Tool::start(&mut client);
+    let found = t.json("search", json!({"query": "redis", "type": "note"}));
+    let ids: Vec<&str> = found["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids.first(), Some(&"note/role-cache-ttl"), "{ids:?}");
+    assert!(
+        found["results"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("Redis")
+    );
+    assert_eq!(found["results"][0]["type"], "note");
+    // `types` works too
+    let found = t.json(
+        "search",
+        json!({"query": "redis", "types": ["note", "sumo"]}),
+    );
+    assert!(!found["results"].as_array().unwrap().is_empty());
+    // the private note is in the KB (the CLI finds it) but agents never see it
+    let cli = support::kb_in(&root)
+        .args(["search", "compensation", "--ids"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(cli.stdout).unwrap().trim(),
+        "note/private-note"
+    );
+    let found = t.json("search", json!({"query": "compensation"}));
+    assert!(found["results"].as_array().unwrap().is_empty(), "{found}");
+    let found = t.json("search", json!({"query": "planning", "tags": ["private"]}));
+    assert!(found["results"].as_array().unwrap().is_empty(), "{found}");
+    let (is_error, text) = t.call("get", json!({"id": "note/private-note"}));
+    assert!(is_error && text.contains("no entry with ID"), "{text}");
+    client.close();
+}
+
+#[test]
+fn test_mcp_get_returns_the_markdown_body_as_content() {
+    let (_d, root) = notes_root();
+    let mut client = McpClient::spawn(kb_mcp_cmd(&root));
+    let mut t = Tool::start(&mut client);
+    let got = t.json("get", json!({"id": "note/role-cache-ttl"}));
+    assert_eq!(got["type"], "note");
+    assert_eq!(got["title"], "Role cache TTL and Redis architecture");
+    assert_eq!(got["tags"], json!(["auth", "redis", "architecture"]));
+    assert_eq!(got["created"], "2026-10-14");
+    assert_eq!(got["updated"], "2026-10-14");
+    let content = got["content"].as_str().unwrap();
+    assert!(
+        content.starts_with("# Role cache TTL and Redis architecture\n"),
+        "{content}"
+    );
+    assert!(content.contains("[[sumo/5xx-by-authorizer]]") && content.contains("| Role Revoke |"));
+    assert!(!content.contains("kb_format"), "no frontmatter");
+    assert_eq!(got["notes"], "", "the body is not repeated");
+    assert_eq!(got["payload"], "");
+    // other entry types keep their shape: no `content`
+    let other = t.json("get", json!({"id": "sumo/5xx-by-authorizer"}));
+    assert!(other.get("content").is_none());
+    // a hostile note arrives without anything a terminal could act on
+    let evil = t.json("get", json!({"id": "note/malicious"}));
+    let body = evil["content"].as_str().unwrap();
+    assert!(
+        body.chars()
+            .all(|c| c == '\n' || c == '\t' || !c.is_control()),
+        "{body:?}"
+    );
+    assert!(
+        body.contains("<script>alert(1)</script>"),
+        "HTML is data, kept as written"
+    );
+    client.close();
+}
+
+fn git_init(root: &Path) {
+    for args in [
+        vec!["init"],
+        vec!["config", "user.name", "Test Agent"],
+        vec!["config", "user.email", "agent@example.com"],
+        vec!["add", "-A"],
+        vec!["commit", "-m", "initial commit"],
+    ] {
+        Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+    }
+}
+
+#[test]
+fn test_mcp_create_a_note() {
+    let (_d, root) = notes_root();
+    git_init(&root);
+    let mut client = McpClient::spawn(kb_mcp_cmd_with_args(&root, &["--allow-write"]));
+    let mut t = Tool::start(&mut client);
+    // a title may come from the heading
+    let made = t.json(
+        "create",
+        json!({"type": "note", "content": "# Rotate the `signing` key\n\nSteps follow.\n\n- one\n- two\n", "tags": ["ops"]}),
+    );
+    assert_eq!(made["id"], "note/rotate-the-signing-key");
+    let file = std::fs::read_to_string(root.join("note/rotate-the-signing-key.md")).unwrap();
+    assert!(
+        file.contains("type: note\n") && file.contains("title: Rotate the signing key\n"),
+        "{file}"
+    );
+    assert!(
+        file.contains("tags: [ops]\n") && file.contains("- one\n- two"),
+        "{file}"
+    );
+    assert!(!file.contains("```"), "no payload fence for a note: {file}");
+    // it is searchable at once, and flagged for review
+    let found = t.json("search", json!({"query": "signing", "type": "note"}));
+    assert_eq!(found["results"][0]["id"], "note/rotate-the-signing-key");
+    assert_eq!(found["results"][0]["unreviewed"], true);
+    // an explicit title wins; the type is implied by `content`
+    let made = t.json(
+        "create",
+        json!({"title": "Explicit", "content": "# Other heading\n\nText.\n"}),
+    );
+    assert_eq!(made["id"], "note/explicit");
+    // dry runs write nothing
+    let dry = t.json(
+        "create",
+        json!({"type": "note", "title": "Dry", "content": "# Dry\n", "dry_run": true}),
+    );
+    assert!(
+        dry["dry_run_content"]
+            .as_str()
+            .unwrap()
+            .contains("type: note")
+    );
+    assert!(!root.join("note/dry.md").exists());
+    // the commit carries the agent's trailers
+    let log = Command::new("git")
+        .args(["log", "-1", "--format=%B"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    let log = String::from_utf8(log.stdout).unwrap();
+    assert!(
+        log.contains("Kb-Source: mcp") && log.contains("Kb-Client: note-test"),
+        "{log}"
+    );
+    client.close();
+}
+
+#[test]
+fn test_mcp_create_refuses_secrets_missing_titles_and_variables() {
+    let (_d, root) = notes_root();
+    let mut client = McpClient::spawn(kb_mcp_cmd_with_args(&root, &["--allow-write"]));
+    let mut t = Tool::start(&mut client);
+    let (is_error, text) = t.call(
+        "create",
+        json!({"type": "note", "title": "Keys", "content": "# Keys\n\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"}),
+    );
+    assert!(
+        is_error && text.contains("SecretDetected") && !text.contains("AKIAIOSFODNN7EXAMPLE"),
+        "{text}"
+    );
+    assert!(!root.join("note/keys.md").exists());
+    let (is_error, text) = t.call(
+        "create",
+        json!({"type": "note", "content": "no heading, no title"}),
+    );
+    assert!(is_error && text.contains("level-1 heading"), "{text}");
+    let (is_error, text) = t.call(
+        "create",
+        json!({"type": "note", "title": "V", "content": "# V\n", "vars": {"x": {"kind": "text"}}}),
+    );
+    assert!(is_error && text.contains("variables"), "{text}");
+    // `{{x}}` in a note is just text
+    let made = t.json("create", json!({"type": "note", "title": "Braces", "content": "# Braces\n\nwrite {{x}} literally\n"}));
+    let file =
+        std::fs::read_to_string(root.join(format!("{}.md", made["id"].as_str().unwrap()))).unwrap();
+    assert!(!file.contains("vars:"), "{file}");
+    // other types still need a payload
+    let (is_error, text) = t.call("create", json!({"type": "cmd", "title": "No payload"}));
+    assert!(is_error && text.contains("payload"), "{text}");
+    client.close();
+}
+
+#[test]
+fn test_mcp_update_a_note() {
+    let (_d, root) = notes_root();
+    git_init(&root);
+    let mut client = McpClient::spawn(kb_mcp_cmd_with_args(&root, &["--allow-write"]));
+    let mut t = Tool::start(&mut client);
+    let before = t.json("get", json!({"id": "note/heading-title"}));
+    let version = before["version"].as_str().unwrap().to_string();
+    assert_eq!(before["title"], "Rotate the signing key");
+    let done = t.json(
+        "update",
+        json!({"id": "note/heading-title", "version": version,
+               "changes": {"content": "# Rotate the signing key twice\n\nNew steps with zebrafish.\n", "add_tags": ["reviewed"]}}),
+    );
+    let file = std::fs::read_to_string(root.join("note/heading-title.md")).unwrap();
+    assert!(
+        file.contains("zebrafish") && file.contains("tags: [ops, reviewed]"),
+        "{file}"
+    );
+    assert!(
+        !file.contains("title:"),
+        "the title still comes from the heading: {file}"
+    );
+    let after = t.json("get", json!({"id": "note/heading-title"}));
+    assert_eq!(after["title"], "Rotate the signing key twice");
+    assert_eq!(after["version"], done["version"]);
+    let found = t.json("search", json!({"query": "zebrafish"}));
+    assert_eq!(
+        found["results"][0]["id"], "note/heading-title",
+        "the index is current"
+    );
+    // a stale version is refused
+    let (is_error, text) = t.call(
+        "update",
+        json!({"id": "note/heading-title", "version": version, "changes": {"content": "# X\n"}}),
+    );
+    assert!(is_error && text.contains("version mismatch"), "{text}");
+    // secrets are refused and nothing changes
+    let version = after["version"].as_str().unwrap().to_string();
+    let (is_error, text) = t.call(
+        "update",
+        json!({"id": "note/heading-title", "version": version,
+               "changes": {"content": "# Rotate\n\ntoken = AKIAIOSFODNN7EXAMPLE\n"}}),
+    );
+    assert!(
+        is_error && text.contains("SecretDetected") && !text.contains("AKIAIOSFODNN7EXAMPLE"),
+        "{text}"
+    );
+    assert!(
+        std::fs::read_to_string(root.join("note/heading-title.md"))
+            .unwrap()
+            .contains("zebrafish")
+    );
+    // a note has no payload and no variables
+    let (is_error, text) = t.call(
+        "update",
+        json!({"id": "note/heading-title", "version": version, "changes": {"payload": "x"}}),
+    );
+    assert!(is_error && text.contains("content"), "{text}");
+    let (is_error, _) = t.call(
+        "update",
+        json!({"id": "note/heading-title", "version": version, "changes": {"set_vars": {"a": {"kind": "text"}}}}),
+    );
+    assert!(is_error);
+    client.close();
+}
+
+#[test]
+fn test_mcp_update_keeps_created_and_moves_updated() {
+    let (_d, root) = notes_root();
+    let mut client = McpClient::spawn(kb_mcp_cmd_with_args(&root, &["--allow-write"]));
+    let mut t = Tool::start(&mut client);
+    let before = t.json("get", json!({"id": "note/role-cache-ttl"}));
+    let version = before["version"].as_str().unwrap().to_string();
+    t.json(
+        "update",
+        json!({"id": "note/role-cache-ttl", "version": version, "changes": {"add_tags": ["x"]}}),
+    );
+    let after = t.json("get", json!({"id": "note/role-cache-ttl"}));
+    assert_eq!(
+        after["created"], "2026-10-14",
+        "created is when the note was made"
+    );
+    assert_ne!(after["updated"], "2026-10-14", "updated moved");
+    assert!(
+        after["updated"].as_str().unwrap().starts_with("20"),
+        "{after}"
+    );
+    client.close();
+}

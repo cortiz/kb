@@ -132,15 +132,15 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T038 [P] [US4] Integration tests for MCP server note operations (`search`, `get`, `create`, `update`, secret detection error, and `private` tag exclusion) in `crates/kb/tests/cli_mcp.rs`
+- [X] T038 [P] [US4] Integration tests for MCP server note operations (`search`, `get`, `create`, `update`, secret detection error, and `private` tag exclusion) in `crates/kb/tests/cli_mcp.rs`
 
 ### Implementation for User Story 4
 
-- [ ] T039 [P] [US4] Update MCP `search` tool in `crates/kb-core/src/mcp/engine.rs` to return note entries and automatically exclude notes tagged `"private"` by default
-- [ ] T040 [US4] Update MCP `get` tool in `crates/kb-core/src/mcp/engine.rs` to return complete note Markdown body as `content` and structured frontmatter fields, applying text sanitization
-- [ ] T041 [US4] Update MCP `create` tool in `crates/kb-core/src/mcp/write.rs` to validate `type: "note"`, enforce secret detection rules, and write note to `note/<slug>.md`
-- [ ] T042 [US4] Update MCP `update` tool in `crates/kb-core/src/mcp/write.rs` to validate updated note content, enforce secret scanning, refresh timestamps, and update search index
-- [ ] T043 [US4] Integrate agent review workflow and badge display for agent-created/modified notes in `crates/kb-core/src/mcp/review.rs` and `crates/kb/src/tui/preview.rs`
+- [X] T039 [P] [US4] Update MCP `search` tool in `crates/kb-core/src/mcp/engine.rs` to return note entries and automatically exclude notes tagged `"private"` by default
+- [X] T040 [US4] Update MCP `get` tool in `crates/kb-core/src/mcp/engine.rs` to return complete note Markdown body as `content` and structured frontmatter fields, applying text sanitization
+- [X] T041 [US4] Update MCP `create` tool in `crates/kb-core/src/mcp/write.rs` to validate `type: "note"`, enforce secret detection rules, and write note to `note/<slug>.md`
+- [X] T042 [US4] Update MCP `update` tool in `crates/kb-core/src/mcp/write.rs` to validate updated note content, enforce secret scanning, refresh timestamps, and update search index
+- [X] T043 [US4] Integrate agent review workflow and badge display for agent-created/modified notes in `crates/kb-core/src/mcp/review.rs` and `crates/kb/src/tui/preview.rs`
 
 **Checkpoint**: At this point, User Stories 1 through 4 are fully functional and testable
 
@@ -157,18 +157,18 @@
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T044 [P] [US5] Unit tests for `[[entry-id]]` link parsing, escaped `\[[` syntax, and `EntryLink` extraction in `crates/kb-core/src/entry/link.rs`
-- [ ] T045 [P] [US5] Integration tests for atomic link refactoring on `kb mv` and reference warning prompt on `kb rm` in `crates/kb/tests/cli_mv_rm.rs`
-- [ ] T046 [P] [US5] PTY tests for "Follow entry link" direct jump and link picker modal navigation in `crates/kb/tests/tui_action_pty.rs`
+- [X] T045 [P] [US5] Integration tests for atomic link refactoring on `kb mv` and reference warning prompt on `kb rm` in `crates/kb/tests/cli_mv_rm.rs`
+- [X] T046 [P] [US5] PTY tests for "Follow entry link" direct jump and link picker modal navigation in `crates/kb/tests/tui_action_pty.rs`
 
 ### Implementation for User Story 5
 
 - [X] T047 [P] [US5] Implement `EntryLink` extraction and `[[entry-id]]` syntax parsing (treating `\[[` as literal `[[`) in `crates/kb-core/src/entry/link.rs`
 - [X] T048 [US5] Implement `entry_links` table synchronization and target entry title indexing into `meta` column in `crates/kb-core/src/index/sync.rs`
-- [ ] T049 [US5] Implement `W-ENTRY-LINK-BROKEN` lint rule: "Entry reference `[[<target-id>]]` does not exist in the knowledge base" ("Fix target ID or create missing entry (fuzzy match suggestion)") in `crates/kb-core/src/lint/rules.rs`
+- [X] T049 [US5] Implement `W-ENTRY-LINK-BROKEN` lint rule: "Entry reference `[[<target-id>]]` does not exist in the knowledge base" ("Fix target ID or create missing entry (fuzzy match suggestion)") in `crates/kb-core/src/lint/rules.rs`
 - [X] T050 [US5] Implement entry link rendering with type badge and title, and broken link rendering as `[?] <entry-id>` in warning/red text in `crates/kb/src/tui/markdown.rs`
-- [ ] T051 [US5] Implement "Follow entry link" action in action menu (direct jump for single link, link picker modal for multiple links) in `crates/kb/src/tui/action_view.rs`
-- [ ] T052 [US5] Implement atomic entry link refactoring on `kb mv` across referencing notes in a single git commit in `crates/kb/src/author.rs` and `crates/kb-core/src/git/commit.rs`
-- [ ] T053 [US5] Implement referencing notes detection and deletion confirmation prompt on `kb rm` in `crates/kb/src/author.rs`
+- [X] T051 [US5] Implement "Follow entry link" action in action menu (direct jump for single link, link picker modal for multiple links) in `crates/kb/src/tui/action_view.rs`
+- [X] T052 [US5] Implement atomic entry link refactoring on `kb mv` across referencing notes in a single git commit in `crates/kb/src/author.rs` and `crates/kb-core/src/git/commit.rs`
+- [X] T053 [US5] Implement referencing notes detection and deletion confirmation prompt on `kb rm` in `crates/kb/src/author.rs`
 
 **Checkpoint**: All user stories (1 through 5) are independently functional, integrated, and verified
 

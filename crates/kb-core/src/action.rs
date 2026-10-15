@@ -11,6 +11,7 @@ pub enum ActionKind {
     CopyPayload,
     CopyRenderedText,
     EditEntry,
+    FollowLink,
     CopyCodeLocation,
     CopyWebPermalink,
     OpenUrl,
@@ -407,6 +408,20 @@ impl ActionService {
                     false,
                     false,
                 ));
+                if !crate::entry::link::extract_links(entry.notes()).is_empty() {
+                    actions.push(Action::builtin(
+                        "follow-link",
+                        "Follow entry link",
+                        'f',
+                        "Go to an entry this note links to",
+                        ActionKind::FollowLink,
+                        false,
+                        false,
+                        false,
+                        false,
+                        false,
+                    ));
+                }
             }
             Some(EntryType::Sql) | Some(EntryType::Prompt) | None => {
                 actions.push(Action::builtin(

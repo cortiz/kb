@@ -16,8 +16,7 @@ use super::input::LineEditor;
 use super::keys::{ALT, CTRL, Code, Key, SHIFT};
 use super::preview::{PreviewModel, build_preview};
 
-/// The tag that keeps an entry away from AI agents.
-pub const PRIVATE_TAG: &str = "private";
+pub use kb_core::entry::PRIVATE_TAG;
 
 /// How many tag completions are offered.
 pub const COMPLETIONS: usize = 5;

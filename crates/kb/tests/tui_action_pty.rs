@@ -204,3 +204,98 @@ fn edit_opens_the_note_in_the_editor() {
     );
     s.send(CTRL_C);
 }
+
+fn linking_note(root: &std::path::Path, name: &str, body: &str) {
+    fs::write(
+        root.join(format!("note/{name}.md")),
+        format!(
+            "---\nkb_format: 1\ntype: note\ntitle: {name} note\n---\n\n# {name} note\n\n{body}\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn open_menu_for(query: &[&str], home: &std::path::Path, root: &std::path::Path) -> Session {
+    let mut spec = Spec::new(query, home, root);
+    spec.size = (120, 40);
+    let mut s = Session::spawn(&spec);
+    s.wait_until("one result", |screen| screen.contains("1 / 1")); // selected and previewed
+    s.wait_for("━━━"); // the note's preview is drawn
+    s.send(ALT_A);
+    s.wait_for("[t] Copy Text");
+    s
+}
+
+#[test]
+fn follow_entry_link_with_one_link_goes_straight_to_the_entry() {
+    let (_dir, root, home) = notes_pty_env();
+    linking_note(
+        &root,
+        "single",
+        "See [[sumo/5xx-by-authorizer]] for the query.",
+    );
+    let mut s = open_menu_for(&["single", "note"], &home, &root);
+    s.wait_for("[f] Follow entry link");
+    s.send(b"f");
+    // the search became the target's title and the target is selected and previewed
+    s.wait_until("the linked entry", |screen| {
+        screen.contains("› 5xx by authorizer") && screen.contains("_sourceCategory")
+    });
+    assert!(!s.screen().contains("Follow entry link"), "{}", s.screen());
+    s.send(CTRL_C);
+}
+
+#[test]
+fn follow_entry_link_with_several_links_opens_a_picker() {
+    let (_dir, root, home) = notes_pty_env();
+    linking_note(
+        &root,
+        "several",
+        "Query [[sumo/5xx-by-authorizer]], latency [[cw-latency]], and a stale one [[gone/entry]].",
+    );
+    let mut s = open_menu_for(&["several", "note"], &home, &root);
+    s.send(b"f");
+    s.wait_for("Follow entry link ");
+    s.wait_for("[sumo] 5xx by authorizer");
+    s.wait_for("[cw]");
+    s.wait_for("[?] gone/entry");
+    s.wait_for("↑↓ choose");
+    // Esc closes it without moving
+    s.send(ESC);
+    s.wait_until("the picker to close", |screen| {
+        !screen.contains("↑↓ choose")
+    });
+    assert!(s.screen().contains("› several note"), "{}", s.screen());
+    // choose the second one
+    s.send(ALT_A);
+    s.wait_for("[f] Follow entry link");
+    s.send(b"f");
+    s.wait_for("↑↓ choose");
+    s.send(b"\x1b[B"); // Down
+    s.send(b"\r");
+    s.wait_until("the cw entry", |screen| {
+        screen.contains("› ") && !screen.contains("↑↓ choose") && screen.contains("cw")
+    });
+    let rows = s.rows();
+    assert!(
+        rows[1].contains('›') && !rows[1].contains("several"),
+        "{}",
+        rows[1]
+    );
+    s.send(CTRL_C);
+}
+
+#[test]
+fn a_broken_link_says_so_and_a_note_without_links_has_no_such_action() {
+    let (_dir, root, home) = notes_pty_env();
+    linking_note(&root, "broken", "Only [[gone/entry]] here.");
+    let mut s = open_menu_for(&["broken", "note"], &home, &root);
+    s.send(b"f");
+    s.wait_for("No entry named gone/entry");
+    s.send(CTRL_C);
+    linking_note(&root, "plain", "No links at all.");
+    let mut s = open_menu_for(&["plain", "note"], &home, &root);
+    s.wait_for("[e] Edit");
+    assert!(!s.screen().contains("Follow entry link"), "{}", s.screen());
+    s.send(CTRL_C);
+}

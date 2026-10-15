@@ -319,3 +319,202 @@ fn rm_without_a_terminal_needs_yes() {
     assert!(text(&out.stderr).contains("kb rm needs --yes when there is no terminal"));
     assert!(root.join(format!("{A}.md")).is_file());
 }
+
+// ---- entry links ----
+
+fn note_with(root: &Path, id: &str, body: &str) {
+    let path = root.join(format!("{id}.md"));
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        path,
+        format!("---\nkb_format: 1\ntype: note\ntitle: {id}\nupdated: 2026-01-01\n---\n\n{body}"),
+    )
+    .unwrap();
+}
+
+fn link_kb() -> (tempfile::TempDir, std::path::PathBuf) {
+    let (d, root) = search_kb();
+    note_with(
+        &root,
+        "note/auth-guide",
+        "# Guide\n\nSee [[sumo/5xx-by-authorizer]] and `[[sumo/5xx-by-authorizer]]`.\n",
+    );
+    note_with(
+        &root,
+        "note/incident-42",
+        "# Incident\n\nQuery: [[sumo/5xx-by-authorizer]]. Other: [[cw/authorizer-latency]].\n\n```\n[[sumo/5xx-by-authorizer]]\n```\n",
+    );
+    note_with(
+        &root,
+        "note/unrelated",
+        "# Unrelated\n\nNothing to see: [[cw/authorizer-latency]].\n",
+    );
+    (d, root)
+}
+
+#[test]
+fn mv_points_the_links_of_notes_at_the_new_id_and_touches_nothing_else() {
+    let (_d, root) = link_kb();
+    let out = kb_in(&root)
+        .args(["mv", A, "sumo/5xx-by-gateway"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(
+        text(&out.stdout),
+        "renamed sumo/5xx-by-authorizer -> sumo/5xx-by-gateway (rename)\nupdated links in 2 notes: note/auth-guide, note/incident-42\n"
+    );
+    let guide = fs::read_to_string(root.join("note/auth-guide.md")).unwrap();
+    assert_eq!(
+        guide,
+        "---\nkb_format: 1\ntype: note\ntitle: note/auth-guide\nupdated: 2026-01-01\n---\n\n# Guide\n\nSee [[sumo/5xx-by-gateway]] and `[[sumo/5xx-by-authorizer]]`.\n",
+        "links in code stay, everything else is byte for byte, `updated` included"
+    );
+    let incident = fs::read_to_string(root.join("note/incident-42.md")).unwrap();
+    assert!(
+        incident.contains("Query: [[sumo/5xx-by-gateway]]. Other: [[cw/authorizer-latency]]."),
+        "{incident}"
+    );
+    assert!(
+        incident.contains("```\n[[sumo/5xx-by-authorizer]]\n```"),
+        "{incident}"
+    );
+    assert!(
+        fs::read_to_string(root.join("note/unrelated.md"))
+            .unwrap()
+            .contains("[[cw/authorizer-latency]]")
+    );
+    // lint now finds no broken links to the old id
+    let lint = kb_in(&root).arg("lint").output().unwrap();
+    assert!(
+        !text(&lint.stdout).contains("KB074"),
+        "{}",
+        text(&lint.stdout)
+    );
+    // the index follows
+    let json = kb_in(&root)
+        .args(["mv", "cw/authorizer-latency", "cw/latency", "--json"])
+        .output()
+        .unwrap();
+    let v: Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        v["links_updated"],
+        serde_json::json!(["note/incident-42", "note/unrelated"])
+    );
+}
+
+#[test]
+fn a_note_that_links_to_itself_follows_its_own_rename() {
+    let (_d, root) = search_kb();
+    note_with(&root, "note/self", "# Self\n\nI am [[note/self]].\n");
+    let out = kb_in(&root)
+        .args(["mv", "note/self", "note/me"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(
+        fs::read_to_string(root.join("note/me.md"))
+            .unwrap()
+            .contains("I am [[note/me]].")
+    );
+}
+
+#[test]
+fn mv_commits_the_rename_and_the_edited_notes_together() {
+    if !have_git() {
+        return;
+    }
+    let (_d, root) = link_kb();
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "-A"]);
+    git(
+        &root,
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "init",
+        ],
+    );
+    git(&root, &["config", "user.name", "t"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    let out = kb_in(&root)
+        .args(["mv", A, "sumo/5xx-by-gateway"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert_eq!(
+        git(&root, &["rev-list", "--count", "HEAD"]).trim(),
+        "2",
+        "one commit, not one per file"
+    );
+    let changed = git(&root, &["show", "--name-status", "--format=%s", "HEAD"]);
+    for want in [
+        "sumo/5xx-by-gateway.md",
+        "note/auth-guide.md",
+        "note/incident-42.md",
+    ] {
+        assert!(changed.contains(want), "{want} missing:\n{changed}");
+    }
+    assert!(!changed.contains("note/unrelated.md"), "{changed}");
+    assert_eq!(
+        git(&root, &["status", "--porcelain"]).trim(),
+        "",
+        "nothing is left over"
+    );
+}
+
+#[test]
+fn rm_warns_about_notes_that_link_to_the_entry() {
+    let (_t, home, root) = kb_home("search");
+    note_with(
+        &root,
+        "note/auth-guide",
+        "# Guide\n\nSee [[sumo/5xx-by-authorizer]].\n",
+    );
+    note_with(
+        &root,
+        "note/incident-42",
+        "# Incident\n\n[[sumo/5xx-by-authorizer]]\n",
+    );
+    let question = "Entry 'sumo/5xx-by-authorizer' is referenced by 2 notes (note/auth-guide, note/incident-42). Delete anyway? [y/N]";
+    // no: nothing changes and the exit is clean
+    let mut s = Session::spawn(&Spec::new(&["rm", A], &home, &root));
+    s.wait_for(question);
+    s.send(ENTER);
+    assert_eq!(s.wait_exit(), 0, "{}", s.screen());
+    assert!(root.join(format!("{A}.md")).is_file());
+    // yes: it goes
+    let mut s = Session::spawn(&Spec::new(&["rm", A], &home, &root));
+    s.wait_for("Delete anyway? [y/N]");
+    s.type_text("y");
+    s.send(ENTER);
+    assert_eq!(s.wait_exit(), 0, "{}", s.screen());
+    assert!(!root.join(format!("{A}.md")).exists());
+}
+
+#[test]
+fn rm_with_yes_says_what_it_leaves_dangling_and_unlinked_entries_are_not_questioned() {
+    let (_d, root) = link_kb();
+    let out = kb_in(&root).args(["rm", A, "--yes"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
+    assert!(
+        text(&out.stderr).contains("kb: Entry 'sumo/5xx-by-authorizer' is referenced by 2 notes (note/auth-guide, note/incident-42); deleting anyway"),
+        "{}",
+        text(&out.stderr)
+    );
+    let lint = kb_in(&root).arg("lint").output().unwrap();
+    assert!(
+        text(&lint.stdout).contains("KB074"),
+        "the notes now have broken links"
+    );
+    let out = kb_in(&root)
+        .args(["rm", "link/payments-runbook", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(text(&out.stderr), "");
+}

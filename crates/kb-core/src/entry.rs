@@ -43,6 +43,9 @@ const ALL_KEYS: [&str; 16] = [
 
 const TYPE_LIST: &str = "sql, sumo, cw, cmd, prompt, link, code, note";
 
+/// The tag that keeps an entry away from AI agents (the default of `mcp.exclude_tags`).
+pub const PRIVATE_TAG: &str = "private";
+
 /// The highest `kb_format` this version of kb reads and writes.
 pub const MAX_KB_FORMAT: u32 = 1;
 
