@@ -6,6 +6,42 @@
 pub const TRUE_COLOR_ADVICE: &str = "set COLORTERM=truecolor if your terminal supports it";
 pub const TRUE_COLOR_ADVERTISED: &str = "advertised (COLORTERM)";
 
+/// Whether the terminal advertises OSC 8 hyperlinks. `FORCE_HYPERLINK` (the convention other tools
+/// follow) decides when set; otherwise only terminals known to support them count, and never
+/// inside tmux or screen, which swallow the sequence unless they are configured to pass it on.
+fn hyperlinks(var: &dyn Fn(&str) -> Option<String>) -> bool {
+    if let Some(force) = var("FORCE_HYPERLINK") {
+        return force != "0";
+    }
+    let set = |name: &str| var(name).is_some();
+    let term = var("TERM").unwrap_or_default();
+    if set("TMUX") || set("STY") || term == "dumb" || term == "linux" || term.starts_with("screen")
+    {
+        return false;
+    }
+    let program = var("TERM_PROGRAM").unwrap_or_default();
+    let vte = var("VTE_VERSION")
+        .and_then(|v| v.parse::<u32>().ok())
+        .is_some_and(|v| v >= 5000);
+    [
+        "iTerm.app",
+        "WezTerm",
+        "vscode",
+        "ghostty",
+        "Hyper",
+        "mintty",
+        "rio",
+    ]
+    .contains(&program.as_str())
+        || set("KITTY_WINDOW_ID")
+        || set("WT_SESSION")
+        || set("DOMTERM")
+        || vte
+        || ["kitty", "alacritty", "foot", "wezterm", "ghostty"]
+            .iter()
+            .any(|t| term.contains(t))
+}
+
 /// The operating system kb was built for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
@@ -65,6 +101,8 @@ pub struct Environment {
     pub true_color: bool,
     pub term: Option<String>,
     pub term_program: Option<String>,
+    /// The terminal is known to understand OSC 8 hyperlinks (or `FORCE_HYPERLINK` says so).
+    pub hyperlinks: bool,
 }
 
 impl Environment {
@@ -93,6 +131,7 @@ impl Environment {
                 .is_some_and(|c| c.contains("truecolor") || c.contains("24bit")),
             term: var("TERM"),
             term_program: var("TERM_PROGRAM"),
+            hyperlinks: hyperlinks(&var),
         }
     }
 
@@ -211,6 +250,37 @@ mod tests {
         );
         assert_eq!(e.term.as_deref(), Some("xterm-256color"));
         assert_eq!(e.term_program.as_deref(), Some("Apple_Terminal"));
+    }
+
+    #[test]
+    fn hyperlinks_need_a_terminal_known_to_support_them() {
+        let links = |vars: &[(&str, &str)]| detect(Os::MacOs, vars).hyperlinks;
+        assert!(!links(&[]));
+        assert!(!links(&[
+            ("TERM", "xterm-256color"),
+            ("TERM_PROGRAM", "Apple_Terminal")
+        ]));
+        assert!(links(&[("TERM_PROGRAM", "iTerm.app")]));
+        assert!(links(&[("TERM", "xterm-kitty")]));
+        assert!(links(&[("TERM", "alacritty")]));
+        assert!(links(&[("VTE_VERSION", "6800")]));
+        assert!(!links(&[("VTE_VERSION", "4000")]));
+        assert!(links(&[("WT_SESSION", "x")]));
+        // multiplexers swallow the sequence
+        assert!(!links(&[
+            ("TERM_PROGRAM", "iTerm.app"),
+            ("TMUX", "/tmp/tmux-1/default,1,0")
+        ]));
+        assert!(!links(&[
+            ("TERM_PROGRAM", "WezTerm"),
+            ("TERM", "screen-256color")
+        ]));
+        // the override wins both ways
+        assert!(links(&[("FORCE_HYPERLINK", "1")]));
+        assert!(!links(&[
+            ("FORCE_HYPERLINK", "0"),
+            ("TERM_PROGRAM", "iTerm.app")
+        ]));
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub mod keys;
 pub mod layout;
 pub mod markdown;
 pub mod preview;
+pub mod render_cache;
 pub mod run_modal;
 pub mod terminal;
 pub mod theme;

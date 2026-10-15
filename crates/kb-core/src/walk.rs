@@ -84,6 +84,12 @@ fn add_file(root: &Path, path: &Path, w: &mut Walk) {
     if rel_path.split('/').any(|c| c.starts_with('.')) {
         return;
     }
+    // ponytail: a file name with control characters (an escape sequence in a name committed to a
+    // shared repo) is not an entry, rather than a string every command would have to defuse;
+    // report it with a finding if anyone ever has such a file on purpose
+    if rel_path.chars().any(char::is_control) {
+        return;
+    }
     let id = rel_path
         .strip_suffix(".md")
         .unwrap_or(&rel_path)
@@ -310,5 +316,16 @@ mod tests {
             "{}",
             found[0].message
         );
+    }
+
+    #[test]
+    fn files_with_control_characters_in_their_names_are_not_entries() {
+        let (_d, root) = kb();
+        touch(&root, "ok/fine.md");
+        touch(&root, "ok/evil\x1b]52;c;aGk=\x07.md");
+        touch(&root, "dir\x1b[2J/inside.md");
+        let w = walk(&root, std::slice::from_ref(&root)).unwrap();
+        let ids: Vec<&str> = w.files.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, ["ok/fine"]);
     }
 }

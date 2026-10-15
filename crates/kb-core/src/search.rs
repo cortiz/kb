@@ -946,6 +946,8 @@ fn highlight(conn: &Connection, expr: &str, r: &mut SearchResult) -> Result<(), 
         if ranges.is_empty() {
             continue;
         }
+        // snippets are printed on terminals: nothing in a file may reach one as an escape sequence
+        let (plain, ranges) = clean_text(plain, ranges);
         if r.snippet.is_none() {
             r.snippet = Some(
                 if r.entry_type == EntryType::Note && field == Field::Payload {
@@ -958,6 +960,34 @@ fn highlight(conn: &Connection, expr: &str, r: &mut SearchResult) -> Result<(), 
         r.matches.push(FieldMatch { field, ranges });
     }
     Ok(())
+}
+
+/// `text` without control characters and escape sequences, with `ranges` (in characters) moved to
+/// where their text went.
+fn clean_text(text: String, ranges: Vec<Range<usize>>) -> (String, Vec<Range<usize>>) {
+    use crate::terminal::{Mode, Sanitizer};
+    if matches!(
+        crate::terminal::sanitize(&text, Mode::Display),
+        std::borrow::Cow::Borrowed(_)
+    ) {
+        return (text, ranges);
+    }
+    let mut s = Sanitizer::new(Mode::Display);
+    let mut out = String::with_capacity(text.len());
+    // where each input character ends up: the output length after taking it in
+    let mut at = vec![0usize];
+    for c in text.chars() {
+        s.push(c, &mut out);
+        at.push(out.chars().count());
+    }
+    s.finish(&mut out);
+    let last = out.chars().count();
+    let ranges = ranges
+        .into_iter()
+        .map(|r| at[r.start.min(at.len() - 1)]..at[r.end.min(at.len() - 1)].min(last))
+        .filter(|r| r.start < r.end)
+        .collect();
+    (out, ranges)
 }
 
 /// Removes the `\u{1}…\u{2}` markers; returns the text and the marked ranges in characters.

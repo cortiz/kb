@@ -243,6 +243,8 @@ impl Sink<'_> {
         fix: Option<String>,
     ) {
         let (line, column) = self.source.position(offset);
+        // messages quote what the file says (a type, a key); they are printed on terminals
+        let message: String = message.into();
         self.findings.push(Finding {
             path: self.path.to_string(),
             id: Some(self.id.to_string()),
@@ -250,8 +252,8 @@ impl Sink<'_> {
             column,
             severity: code.severity(),
             code,
-            message: message.into(),
-            fix,
+            message: crate::terminal::display(&message).into_owned(),
+            fix: fix.map(|f| crate::terminal::display(&f).into_owned()),
         });
     }
 }

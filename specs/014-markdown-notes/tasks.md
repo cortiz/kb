@@ -78,8 +78,8 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T020 [P] [US2] Integration tests for `kb show <id>` terminal rendering and `kb show --raw <id>` unmodified source output in `crates/kb/tests/cli_show.rs`
-- [ ] T021 [P] [US2] PTY snapshot and interactive scrolling tests for note preview rendering, table wrapping, and code block display in `crates/kb/tests/tui_markdown_notes.rs`
+- [X] T020 [P] [US2] Integration tests for `kb show <id>` terminal rendering and `kb show --raw <id>` unmodified source output in `crates/kb/tests/cli_show.rs`
+- [X] T021 [P] [US2] PTY snapshot and interactive scrolling tests for note preview rendering, table wrapping, and code block display in `crates/kb/tests/tui_markdown_notes.rs`
 
 ### Implementation for User Story 2
 
@@ -88,11 +88,11 @@
 - [X] T024 [US2] Implement GitHub-style callouts (`> [!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`) with theme-aware icons and border styling in `crates/kb/src/tui/markdown.rs`
 - [X] T025 [US2] Implement box-drawn framed code blocks (`┌─ [lang] ─┐`) with `syntect` syntax highlighting, and unhighlighted fallback for unknown languages (e.g., `mermaid`) in `crates/kb/src/tui/markdown.rs`
 - [X] T026 [US2] Implement footnotes rendering (inline bracketed reference `[1]` and document footer definitions) and image text fallback `[image: alt] (path)` in `crates/kb/src/tui/markdown.rs`
-- [ ] T027 [P] [US2] Implement `RenderedNote` data structure (caching `Vec<Block>` parsed AST tokens for zero-reparse width reflowing) and bounded LRU cache enforcing "maximum of 20 notes or 16 MB of styled lines (whichever threshold is reached first), evicting least-recently-viewed entries" in `crates/kb/src/tui/render_cache.rs`
-- [ ] T028 [US2] Implement viewport-clipped drawing and lazy `syntect` highlighting (computing code spans only when entering visible scroll viewport) in `crates/kb/src/tui/preview.rs`
-- [ ] T029 [US2] Implement asynchronous worker parsing for notes with body size exceeding 16 KB ($16,384$ bytes) with "rendering…" placeholder in `crates/kb/src/tui/async_render.rs` and `crates/kb/src/tui/worker.rs`
+- [X] T027 [P] [US2] Implement `RenderedNote` data structure (caching `Vec<Block>` parsed AST tokens for zero-reparse width reflowing) and bounded LRU cache enforcing "maximum of 20 notes or 16 MB of styled lines (whichever threshold is reached first), evicting least-recently-viewed entries" in `crates/kb/src/tui/render_cache.rs`
+- [X] T028 [US2] Implement viewport-clipped drawing and lazy `syntect` highlighting (computing code spans only when entering visible scroll viewport) in `crates/kb/src/tui/preview.rs`
+- [X] T029 [US2] Implement asynchronous worker parsing for notes with body size exceeding 16 KB ($16,384$ bytes) with "rendering…" placeholder in `crates/kb/src/tui/async_render.rs` and `crates/kb/src/tui/worker.rs`
 - [X] T030 [US2] Implement terminal preview rendering for `kb show <id>` and raw unformatted output for `kb show --raw <id>` in `crates/kb/src/show.rs`
-- [ ] T031 [US2] Implement note actions in action menu: Copy Markdown source (primary Enter/copy), Copy rendered plain text (formatting and ANSI stripped), and Edit in external editor in `crates/kb/src/tui/action_view.rs` and `crates/kb/src/commands.rs`
+- [X] T031 [US2] Implement note actions in action menu: Copy Markdown source (primary Enter/copy), Copy rendered plain text (formatting and ANSI stripped), and Edit in external editor in `crates/kb/src/tui/action_view.rs` and `crates/kb/src/commands.rs`
 
 **Checkpoint**: At this point, User Stories 1 AND 2 are both functional and testable independently
 
@@ -109,13 +109,13 @@
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
 - [X] T032 [P] [US3] Unit tests for streaming FSM sanitizer covering C0/C1 control codes, ANSI CSI, OSC, DCS, APC, PM, and literal HTML pass-through in `crates/kb-core/src/terminal/sanitize.rs`
-- [ ] T033 [P] [US3] Security PTY capture tests verifying zero unauthorized escape codes or unverified links reach the terminal emulator across `kb show` and TUI preview in `crates/kb/tests/security_sanitization.rs`
+- [X] T033 [P] [US3] Security PTY capture tests verifying zero unauthorized escape codes or unverified links reach the terminal emulator across `kb show` and TUI preview in `crates/kb/tests/security_sanitization.rs`
 
 ### Implementation for User Story 3
 
 - [X] T034 [P] [US3] Implement zero-allocation streaming FSM sanitizer in `crates/kb-core/src/terminal/sanitize.rs` stripping C0/C1 (preserving tab and newline) and ANSI sequences (replacing with `␛` for display, stripping for `--raw`)
-- [ ] T035 [US3] Apply escape sequence sanitization to note titles, tags, and all free-text fields across TUI lists, headers, CLI output, and MCP text in `crates/kb-core/src/terminal/mod.rs` and `crates/kb/src/tui/view.rs`
-- [ ] T036 [US3] Implement safe terminal hyperlink emitter (OSC 8) restricted to verified `http`, `https`, and `mailto` schemes and gated by terminal capability detection in `crates/kb/src/platform/mod.rs` and `crates/kb/src/tui/markdown.rs`
+- [X] T035 [US3] Apply escape sequence sanitization to note titles, tags, and all free-text fields across TUI lists, headers, CLI output, and MCP text in `crates/kb-core/src/terminal/mod.rs` and `crates/kb/src/tui/view.rs`
+- [X] T036 [US3] Implement safe terminal hyperlink emitter (OSC 8) restricted to verified `http`, `https`, and `mailto` schemes and gated by terminal capability detection in `crates/kb/src/platform/mod.rs` and `crates/kb/src/tui/markdown.rs`
 - [X] T037 [US3] Ensure raw HTML tags (e.g. `<script>`, `<div>`) are rendered as literal plain text without interpretation in `crates/kb/src/tui/markdown.rs`
 
 **Checkpoint**: At this point, User Stories 1, 2, and 3 are all functional, secure, and independently testable

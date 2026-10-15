@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kb_cli::tui::app::{Action, AppState, Options, Page, RefreshInfo};
-use kb_cli::tui::preview::build_preview;
+use kb_cli::tui::preview::build_preview_with;
 use kb_cli::tui::theme::{Theme, ThemeName};
 use kb_cli::tui::view;
 use kb_core::query::Query;
@@ -130,7 +130,8 @@ pub fn state_for(
     if let Some(r) = state.selected_result() {
         let (id, modified, uses) = (r.id.clone(), r.modified, r.use_count);
         let entry = kb.entry(&id).unwrap();
-        let model = build_preview(&entry, modified, uses, theme.is_color());
+        let lookup = |target: &str| kb_cli::show::link_lookup(&kb, target);
+        let model = build_preview_with(&entry, modified, uses, theme.is_color(), Some(&lookup));
         state.update(Action::PreviewReady(state.preview_gen, Box::new(model)), t0);
     }
     state.status.refreshing = false;

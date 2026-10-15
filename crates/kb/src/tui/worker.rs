@@ -11,7 +11,8 @@ use kb_core::query::Query;
 use kb_core::search::Kb;
 
 use super::app::{Page, RefreshInfo};
-use super::preview::{PreviewCache, PreviewModel, build_preview_with};
+use super::preview::{PreviewModel, build_preview_with};
+use super::render_cache::RenderCache;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -121,7 +122,7 @@ pub fn run(
             return;
         }
     };
-    let mut cache = PreviewCache::default();
+    let mut cache = RenderCache::default();
     let mut warmed = false;
     loop {
         let Ok(first) = requests.recv() else {

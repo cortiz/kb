@@ -506,7 +506,9 @@ fn show_entry(
             } else {
                 show::DEFAULT_WIDTH
             };
-            show::preview_text(kb, id, &theme, color, width).map_err(io_error)
+            // links are only emitted on a terminal that advertises support, never into a pipe
+            let hyperlinks = color && platform.env().hyperlinks;
+            show::preview_text(kb, id, &theme, color, hyperlinks, width).map_err(io_error)
         }
     }
 }

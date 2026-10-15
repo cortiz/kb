@@ -406,3 +406,139 @@ fn test_show_and_search_json_mentions_unreviewed() {
         "unreviewed:false should not match {id}"
     );
 }
+
+// ---- notes ----
+
+const NOTE: &str = "note/role-cache-ttl";
+
+#[test]
+fn a_note_is_shown_as_formatted_markdown_when_piped() {
+    let (_d, root) = support::notes_kb();
+    let out = show(&root, &[NOTE]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(
+        !text.contains('\x1b'),
+        "no escape codes when piped: {text:?}"
+    );
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0].trim(), "Role cache TTL and Redis architecture");
+    assert!(
+        lines[1].starts_with("note") && lines[1].contains("#redis"),
+        "{}",
+        lines[1]
+    );
+    assert_eq!(lines[2].trim(), "note/role-cache-ttl.md");
+    for want in [
+        "━━━━",  // the level-1 underline
+        "┌────", // the table, with its box borders
+        "│ Role Revoke",
+        "├────",
+        "└────",
+        "▌ ⚠ Warning", // the callout
+        "☐ Check the hit ratio",
+        "☑ Read the runbook",
+        "┌─ python ──", // the framed code block
+        "│ import redis",
+        "[sumo] 5xx by authorizer", // an entry link, resolved
+        "footnote[1]",
+        "[1] Footnote text.",
+    ] {
+        assert!(text.contains(want), "{want:?} missing from:\n{text}");
+    }
+    assert!(
+        !text.contains("── notes"),
+        "a note has no 'notes' label:\n{text}"
+    );
+    assert!(
+        !text.contains("[[") && !text.contains("**") && !text.contains("```"),
+        "{text}"
+    );
+    for l in text.lines() {
+        assert!(unicode_width::UnicodeWidthStr::width(l) <= 100, "{l:?}");
+    }
+}
+
+#[test]
+fn a_broken_entry_link_is_marked_and_an_escaped_one_is_literal() {
+    let (_d, root) = support::notes_kb();
+    let text = stdout(&show(&root, &["note/links"]));
+    assert!(text.contains("[sumo] 5xx by authorizer"), "{text}");
+    assert!(text.contains("[?] no/such-entry"), "{text}");
+    assert!(text.contains("[[not-a-link]]"), "{text}");
+}
+
+#[test]
+fn raw_prints_the_markdown_without_frontmatter() {
+    let (_d, root) = support::notes_kb();
+    let out = show(&root, &[NOTE, "--raw"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let file = std::fs::read_to_string(root.join("note/role-cache-ttl.md")).unwrap();
+    let body = file
+        .split_once("\n---\n")
+        .unwrap()
+        .1
+        .trim_start_matches('\n');
+    assert_eq!(stdout(&out), body);
+    assert!(!stdout(&out).contains("kb_format"));
+    assert!(
+        stdout(&out).contains("[[sumo/5xx-by-authorizer]]"),
+        "links stay as written"
+    );
+    // and it is what a pick prints
+    assert_eq!(
+        stdout(&out),
+        Kb::open(&root)
+            .unwrap()
+            .pick(NOTE, PrintMode::Payload)
+            .unwrap()
+    );
+}
+
+#[test]
+fn hostile_notes_are_inert_in_the_preview_and_raw() {
+    let (_d, root) = support::notes_kb();
+    let shown = stdout(&show(&root, &["note/malicious"]));
+    assert!(
+        shown.contains('␛'),
+        "sequences leave a visible mark: {shown}"
+    );
+    assert!(
+        shown.contains("<script>alert(1)</script>"),
+        "HTML is shown as text: {shown}"
+    );
+    assert!(
+        shown.chars().all(|c| c == '\n' || !c.is_control()),
+        "no control characters: {shown:?}"
+    );
+    let raw = stdout(&show(&root, &["note/malicious", "--raw"]));
+    assert!(!raw.contains('␛'), "raw leaves no marker");
+    assert!(
+        raw.chars()
+            .all(|c| c == '\n' || c == '\t' || !c.is_control()),
+        "no control characters in raw: {raw:?}"
+    );
+    assert!(raw.contains("Clear screen:  and move."), "{raw}");
+    assert!(
+        raw.contains("[click me](javascript:alert(1))"),
+        "text itself is kept: {raw}"
+    );
+    let json = stdout(&show(&root, &["note/malicious", "--json"]));
+    assert!(!json.contains('\x1b'), "JSON escapes control characters");
+}
+
+#[test]
+fn an_oversized_note_still_shows_and_warns_in_lint() {
+    let (_d, root) = support::notes_kb();
+    support::add_oversized_note(&root);
+    let out = show(&root, &["note/big"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(stdout(&out).contains("A line of prose that repeats"));
+    let lint = kb_in(&root).args(["lint", "note/big.md"]).output().unwrap();
+    assert!(
+        stdout(&lint).contains("KB072-note-oversized"),
+        "{}",
+        stdout(&lint)
+    );
+    assert_eq!(lint.status.code(), Some(0), "a warning, not an error");
+}

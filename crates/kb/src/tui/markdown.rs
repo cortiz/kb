@@ -701,14 +701,17 @@ pub fn render_notes(text: &str) -> Vec<Block> {
     render_markdown(text, &Ctx::default()).blocks
 }
 
-/// Words with the class they came from; `None` text is a forced line break.
-fn words(spans: &[Span]) -> Vec<(String, Class, bool)> {
-    let mut out: Vec<(String, Class, bool)> = Vec::new(); // (word, class, space_before)
+/// A word: its text, the class and link it came from, and whether a space comes before it. An
+/// empty word is a forced line break.
+type Word = (String, Class, Option<Arc<str>>, bool);
+
+fn words(spans: &[Span]) -> Vec<Word> {
+    let mut out: Vec<Word> = Vec::new();
     let mut space = false;
     for s in spans {
         for (i, part) in s.text.split('\n').enumerate() {
             if i > 0 {
-                out.push((String::new(), s.class, false)); // break marker
+                out.push((String::new(), s.class, None, false)); // break marker
                 space = false;
             }
             let mut first = true;
@@ -722,6 +725,7 @@ fn words(spans: &[Span]) -> Vec<(String, Class, bool)> {
                 out.push((
                     w.to_string(),
                     s.class,
+                    s.url.clone(),
                     lead && !out.is_empty() && !out.last().is_some_and(|l| l.0.is_empty()),
                 ));
                 first = false;
@@ -756,8 +760,8 @@ fn fill(
     };
     start(first, &mut cur, &mut used);
     let mut at_start = true;
-    let mut prev: Option<Class> = None;
-    for (word, class, space) in words(spans) {
+    let mut prev: Option<(Class, Option<Arc<str>>)> = None;
+    for (word, class, url, space) in words(spans) {
         if word.is_empty() {
             lines.push(std::mem::take(&mut cur));
             start(rest, &mut cur, &mut used);
@@ -771,17 +775,17 @@ fn fill(
                 if space && !at_start {
                     // a space inside one style carries it (an unbroken underline); between two
                     // styles it is plain, so a badge's color stops at the badge
-                    let between = if prev == Some(class) {
-                        class
+                    let same = prev.as_ref().is_some_and(|(c, u)| *c == class && *u == url);
+                    if same {
+                        push_linked(&mut cur, " ", class, url.as_ref());
                     } else {
-                        Class::Plain
-                    };
-                    push(&mut cur, " ", between);
+                        push(&mut cur, " ", Class::Plain);
+                    }
                     used += 1;
                 }
                 used += width(&word);
-                push(&mut cur, &word, class);
-                prev = Some(class);
+                push_linked(&mut cur, &word, class, url.as_ref());
+                prev = Some((class, url.clone()));
                 at_start = false;
                 break;
             }
@@ -805,7 +809,7 @@ fn fill(
                 w += cw;
                 tail.next();
             }
-            push(&mut cur, &head, class);
+            push_linked(&mut cur, &head, class, url.as_ref());
             lines.push(std::mem::take(&mut cur));
             start(rest, &mut cur, &mut used);
             word = tail.collect();
