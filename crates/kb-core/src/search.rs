@@ -160,7 +160,7 @@ pub struct SearchOutcome {
     pub total: usize,
     /// Candidates per entry type (index = `EntryType::ALL` order) for the text and non-type
     /// filters, before the type filter and paging.
-    pub type_counts: [usize; 7],
+    pub type_counts: [usize; EntryType::COUNT],
     /// Entries in the index.
     pub indexed: usize,
     /// Entries left out of the index because of errors.
@@ -642,7 +642,7 @@ impl Kb {
                 }
             }
         }
-        let mut type_counts = [0usize; 7];
+        let mut type_counts = [0usize; EntryType::COUNT];
         for c in &cands {
             if let Some(i) = EntryType::ALL.iter().position(|t| *t == c.ty) {
                 type_counts[i] += 1;
@@ -947,7 +947,13 @@ fn highlight(conn: &Connection, expr: &str, r: &mut SearchResult) -> Result<(), 
             continue;
         }
         if r.snippet.is_none() {
-            r.snippet = Some(snippet(field, &plain, &ranges));
+            r.snippet = Some(
+                if r.entry_type == EntryType::Note && field == Field::Payload {
+                    note_snippet(&plain, &ranges)
+                } else {
+                    snippet(field, &plain, &ranges)
+                },
+            );
         }
         r.matches.push(FieldMatch { field, ranges });
     }
@@ -977,6 +983,36 @@ fn split_marks(s: &str) -> (String, Vec<Range<usize>>) {
         }
     }
     (plain, ranges)
+}
+
+/// A note's body is flattened to plain paragraphs when it is indexed, so the snippet only has to
+/// pick the paragraph with the most matches (the first one on a tie) and cut around the first.
+fn note_snippet(text: &str, ranges: &[Range<usize>]) -> Snippet {
+    let mut best: Option<(usize, Range<usize>)> = None;
+    let mut start = 0;
+    for para in text.split("\n\n") {
+        let end = start + para.chars().count();
+        let hits = ranges
+            .iter()
+            .filter(|r| r.start >= start && r.end <= end)
+            .count();
+        if hits > best.as_ref().map_or(0, |b| b.0) {
+            best = Some((hits, start..end));
+        }
+        start = end + 2;
+    }
+    let Some((_, span)) = best else {
+        return snippet(Field::Payload, text, ranges);
+    };
+    let para: String = text.chars().skip(span.start).take(span.len()).collect();
+    let rel: Vec<Range<usize>> = ranges
+        .iter()
+        .filter(|r| r.start >= span.start && r.end <= span.end)
+        .map(|r| r.start - span.start..r.end - span.start)
+        .collect();
+    // line breaks inside a paragraph are list items or table rows: show them on one line
+    let flat: String = para.replace('\n', " ");
+    snippet(Field::Payload, &flat, &rel)
 }
 
 fn snippet(field: Field, text: &str, ranges: &[Range<usize>]) -> Snippet {

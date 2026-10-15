@@ -298,7 +298,13 @@ struct AddArgs {
     /// The title (otherwise a leading comment, a link's host, or you are asked).
     #[arg(short, long)]
     title: Option<String>,
-    /// sql, sumo, cw, cmd, prompt, link or code (otherwise detected).
+    /// The title, as a word instead of `--title`.
+    #[arg(value_name = "TITLE", conflicts_with = "title")]
+    title_word: Option<String>,
+    /// Keep AI agents away from the new entry (adds the `private` tag).
+    #[arg(long)]
+    private: bool,
+    /// sql, sumo, cw, cmd, prompt, link, code or note (otherwise detected).
     #[arg(long = "type", value_name = "TYPE")]
     ty: Option<String>,
     /// A tag (repeatable, or comma-separated).
@@ -337,9 +343,9 @@ impl AddArgs {
             _ => SourceFlag::Auto,
         };
         kb_cli::author::AddArgs {
-            title: self.title,
+            title: self.title.or(self.title_word),
             ty: self.ty,
-            tags: self.tags,
+            tags: commands::note::with_private(self.tags, self.private),
             path: self.path,
             source,
             editor: self.editor,
@@ -382,6 +388,8 @@ enum Command {
     Edit(EditArgs),
     /// Add an entry from the clipboard, stdin or an editor template.
     Add(AddArgs),
+    /// Write a Markdown note in your editor (or from stdin with --yes).
+    Note(commands::note::NoteArgs),
     /// Rename an entry, keeping its usage and remembered values.
     Mv(MvArgs),
     /// Delete an entry (asks first).
@@ -574,6 +582,7 @@ fn main() -> ExitCode {
         Command::Show(a) => a.json,
         Command::Edit(a) => a.json,
         Command::Add(a) => a.json,
+        Command::Note(a) => a.json,
         Command::Mv(a) => a.json,
         Command::Rm(a) => a.json,
         Command::Doctor(a) => a.json,
@@ -722,6 +731,11 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
             kb_cli::author::run_rm(&platform, &root, &loaded, &args.id, args.yes, args.json)
         }
         Command::Add(args) => kb_cli::author::run_add(&platform, &root, &loaded, args.into_run()),
+        Command::Note(args) => {
+            use std::io::IsTerminal;
+            let add = args.into_add(std::io::stdin().is_terminal());
+            kb_cli::author::run_add(&platform, &root, &loaded, add)
+        }
         Command::Doctor(a) => commands::run_doctor(&platform, &root, &loaded, a.copy_test, a.json),
         Command::Config(c) => match c {
             ConfigCommand::Init(a) => commands::config_init(&platform, a.json),

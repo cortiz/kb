@@ -208,7 +208,10 @@ impl Draft {
         let now = rfc3339_utc(clock.now());
         let mut out = String::from("---\nkb_format: 1\n");
         out.push_str(&format!("type: {}\n", self.entry_type.name()));
-        out.push_str(&format!("title: {}\n", scalar(&self.title)));
+        // a note may take its title from its first `# heading`
+        if !(self.entry_type == EntryType::Note && self.title.is_empty()) {
+            out.push_str(&format!("title: {}\n", scalar(&self.title)));
+        }
         if !self.tags.is_empty() {
             let tags: Vec<String> = self.tags.iter().map(|t| flow_scalar(t)).collect();
             out.push_str(&format!("tags: [{}]\n", tags.join(", ")));
@@ -266,6 +269,13 @@ impl Draft {
     /// the optional type fields as `# key: value` comments, and an empty fence to fill in.
     pub fn template(&self, clock: &dyn Clock) -> String {
         let mut draft = self.clone();
+        if draft.entry_type == EntryType::Note && draft.notes.trim().is_empty() {
+            // a note starts with its heading, which is also its title when `title:` is left out
+            draft.notes = format!(
+                "# {}\n\nExplain the operational background here.",
+                draft.title
+            );
+        }
         // placeholders where the lint step would otherwise only find empty strings
         if let DraftFields::Code {
             repo,
@@ -296,6 +306,10 @@ impl Draft {
             EntryType::Cmd => &["# shell: bash", "# cwd: ~/work"],
             EntryType::Code => &["  # symbol: Class.method", "  # end_line: 20"],
             EntryType::Prompt | EntryType::Link => &[],
+            EntryType::Note => &[
+                "# title: optional when the body starts with a \"# Heading\"",
+                "# Add \"private\" to tags to exclude this note from AI agents",
+            ],
         };
         let at = text
             .find("\nvars:")
@@ -373,7 +387,9 @@ mod tests {
             }
         }
         let mut draft = Draft::from_text(body, DraftSource::Stdin, &opts);
-        draft.notes = notes;
+        if !notes.is_empty() {
+            draft.notes = notes;
+        }
         draft
     }
 
@@ -477,6 +493,7 @@ mod tests {
                 EntryType::Link => "url: ",
                 EntryType::Code => "# symbol: ",
                 EntryType::Prompt => "type: prompt",
+                EntryType::Note => "# Add \"private\" to tags",
             };
             assert!(t.contains(optional), "{}:\n{t}", ty.name());
             assert_eq!(t.contains("```"), ty.has_payload(), "{}:\n{t}", ty.name());
@@ -516,7 +533,7 @@ mod tests {
     #[test]
     fn every_golden_input_renders_byte_for_byte() {
         let all = goldens();
-        assert_eq!(all.len(), 7, "one golden per type");
+        assert_eq!(all.len(), 8, "one golden per type");
         for (name, input, want) in all {
             let got = text(&golden_draft(&input));
             assert_eq!(got, want, "{name}");

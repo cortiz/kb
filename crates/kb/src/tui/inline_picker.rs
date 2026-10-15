@@ -560,6 +560,7 @@ fn render_inline_ui(
             Some(EntryType::Prompt) => "prompt",
             Some(EntryType::Link) => "link",
             Some(EntryType::Code) => "code",
+            Some(EntryType::Note) => "note",
             None => "all",
         };
 

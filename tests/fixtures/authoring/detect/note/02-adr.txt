@@ -1,0 +1,13 @@
+# ADR 12: Use SQLite for the index
+
+## Status
+
+Accepted
+
+## Context
+
+We need a disposable local index.
+
+## Decision
+
+Use FTS5.

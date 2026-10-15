@@ -11,7 +11,7 @@ use kb_core::query::Query;
 use kb_core::search::Kb;
 
 use super::app::{Page, RefreshInfo};
-use super::preview::{PreviewCache, PreviewModel, build_preview};
+use super::preview::{PreviewCache, PreviewModel, build_preview_with};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
@@ -184,7 +184,14 @@ pub fn run(
             } else {
                 match kb.entry(&id) {
                     Ok(entry) => {
-                        let mut model = build_preview(&entry, modified, use_count, highlight);
+                        let lookup = |target: &str| crate::show::link_lookup(&kb, target);
+                        let mut model = build_preview_with(
+                            &entry,
+                            modified,
+                            use_count,
+                            highlight,
+                            Some(&lookup),
+                        );
                         let unreviewed =
                             kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), &id);
                         if let Some(meta) = &mut model.meta {

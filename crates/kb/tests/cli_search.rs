@@ -356,3 +356,148 @@ fn print_search_colors_only_when_asked() {
         .unwrap();
     assert!(!stdout(&out).contains('\x1b'));
 }
+
+// ---- notes ----
+
+fn write_note(root: &std::path::Path, name: &str, body: &str, tags: &str) {
+    let dir = root.join("note");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join(format!("{name}.md")),
+        format!("---\nkb_format: 1\ntype: note\ntitle: {name}\ntags: [{tags}]\n---\n\n{body}"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn type_note_finds_only_notes_and_the_fixture_notes_are_searchable() {
+    let (_d, root) = support::notes_kb();
+    let found = ids(&root, &["type:note"]);
+    assert!(
+        found.contains(&"note/role-cache-ttl".to_string()),
+        "{found:?}"
+    );
+    assert!(found.iter().all(|id| id.starts_with("note/")), "{found:?}");
+    let all = ids(&root, &["redis"]);
+    assert_eq!(
+        all.first().map(String::as_str),
+        Some("note/role-cache-ttl"),
+        "{all:?}"
+    );
+    let by_flag = ids(&root, &["--type", "note", "ttl"]);
+    assert!(
+        by_flag.iter().all(|id| id.starts_with("note/")),
+        "{by_flag:?}"
+    );
+}
+
+#[test]
+fn a_heading_outranks_the_body() {
+    let (_d, root) = search_kb();
+    write_note(
+        &root,
+        "alpha",
+        "Nothing relevant here, except that the zebrafish is mentioned once.\n",
+        "",
+    );
+    write_note(
+        &root,
+        "beta",
+        "# Beta\n\n## Zebrafish handling\n\nSome text.\n",
+        "",
+    );
+    write_note(
+        &root,
+        "gamma",
+        "Another body mention of zebrafish, and a second zebrafish.\n",
+        "",
+    );
+    let found = ids(&root, &["zebrafish", "type:note"]);
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("note/beta"),
+        "{found:?}"
+    );
+    assert_eq!(found.len(), 3, "{found:?}");
+}
+
+#[test]
+fn in_body_searches_the_body_only() {
+    let (_d, root) = search_kb();
+    write_note(
+        &root,
+        "a",
+        "# A\n\n## Zebrafish heading\n\nplain text.\n",
+        "",
+    );
+    write_note(&root, "b", "# B\n\nthe zebrafish is in the body.\n", "");
+    let found = ids(&root, &["zebrafish", "in:body"]);
+    assert_eq!(found, ["note/b"]);
+    let found = ids(&root, &["zebrafish", "in:payload", "type:note"]);
+    assert_eq!(found, ["note/b"], "in:body is the payload column");
+    let out = kb_in(&root)
+        .args(["search", "zebrafish", "in:nothing"])
+        .output()
+        .unwrap();
+    assert!(stderr(&out).contains("in:nothing"), "{}", stderr(&out));
+}
+
+#[test]
+fn a_note_snippet_is_plain_text_from_the_best_paragraph() {
+    let (_d, root) = search_kb();
+    write_note(
+        &root,
+        "ttl",
+        "# TTL\n\nIntro with **no** match at all.\n\nThe `authorizer` checks Redis with a **cache TTL** of 300 s to protect the [database](https://example.com/db). Cache TTL tuning matters.\n\n```\nunrelated\n```\n",
+        "",
+    );
+    let out = kb_in(&root)
+        .args(["search", "cache", "ttl", "in:body", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let doc: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let r = &doc["results"][0];
+    assert_eq!(r["id"], "note/ttl");
+    let snippet = &r["snippet"];
+    assert_eq!(snippet["field"], "payload");
+    let text = snippet["text"].as_str().unwrap();
+    assert!(text.contains("cache TTL of 300 s"), "{text}");
+    assert!(
+        !text.contains("**") && !text.contains('`') && !text.contains("]("),
+        "{text}"
+    );
+    assert!(
+        !text.contains("Intro"),
+        "the best paragraph, not the first: {text}"
+    );
+    let ranges = snippet["ranges"].as_array().unwrap();
+    assert!(!ranges.is_empty());
+    let chars: Vec<char> = text.chars().collect();
+    let first = &ranges[0];
+    let hit: String = chars
+        [first[0].as_u64().unwrap() as usize..first[1].as_u64().unwrap() as usize]
+        .iter()
+        .collect();
+    assert!(
+        hit.eq_ignore_ascii_case("cache") || hit.eq_ignore_ascii_case("ttl"),
+        "{hit}"
+    );
+}
+
+#[test]
+fn note_body_words_are_not_typo_candidates_but_titles_and_headings_are() {
+    let (_d, root) = search_kb();
+    write_note(
+        &root,
+        "plain",
+        "# Plain\n\nthe quokkaword lives only in the body.\n\n## Wombatheading\n\ntext\n",
+        "",
+    );
+    // exact search finds body words
+    assert_eq!(ids(&root, &["quokkaword"]), ["note/plain"]);
+    // a typo of a heading word is corrected
+    assert_eq!(ids(&root, &["wombatheadng"]), ["note/plain"]);
+    // a typo of a body-only word is not
+    assert!(ids(&root, &["quokkaward"]).is_empty());
+}

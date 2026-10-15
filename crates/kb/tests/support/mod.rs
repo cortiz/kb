@@ -44,6 +44,35 @@ pub fn vars_kb() -> (tempfile::TempDir, PathBuf) {
     (dir, root)
 }
 
+/// The note fixtures in `crates/kb/tests/fixtures/notes`: a standard note, one titled by its
+/// `# heading`, one with `[[entry links]]`, a `private` one and a hostile one (escape sequences,
+/// raw HTML). They are written to `note/<name>.md` in the KB at `root`.
+pub fn note_fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/notes")
+}
+
+pub fn add_notes(root: &Path) {
+    copy_dir(&note_fixtures(), &root.join("note"));
+}
+
+/// A note whose body is a little over 64 KB (`KB072-note-oversized`), written to `note/big.md`.
+pub fn add_oversized_note(root: &Path) {
+    let mut text =
+        String::from("---\nkb_format: 1\ntype: note\ntitle: Big note\n---\n\n# Big note\n\n");
+    while text.len() <= 65_536 + 1024 {
+        text.push_str("A line of prose that repeats to fill the note body.\n");
+    }
+    fs::create_dir_all(root.join("note")).unwrap();
+    fs::write(root.join("note/big.md"), text).unwrap();
+}
+
+/// `search_kb()` plus the note fixtures.
+pub fn notes_kb() -> (tempfile::TempDir, PathBuf) {
+    let (dir, root) = search_kb();
+    add_notes(&root);
+    (dir, root)
+}
+
 /// A home that does not exist: tests that do not care about config get no config.
 pub const NOWHERE: &str = "/nonexistent-kb-test-home";
 

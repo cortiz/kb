@@ -1,0 +1,9 @@
+# Rotate the signing key
+
+1. Generate a new key.
+2. Deploy it as `next`.
+3. Swap `next` to `current`.
+
+## Rollback
+
+Keep the old key for a day.

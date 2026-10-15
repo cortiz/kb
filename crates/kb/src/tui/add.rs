@@ -16,6 +16,9 @@ use super::input::LineEditor;
 use super::keys::{ALT, CTRL, Code, Key, SHIFT};
 use super::preview::{PreviewModel, build_preview};
 
+/// The tag that keeps an entry away from AI agents.
+pub const PRIVATE_TAG: &str = "private";
+
 /// How many tag completions are offered.
 pub const COMPLETIONS: usize = 5;
 
@@ -348,13 +351,31 @@ impl AddState {
     /// The stops of Tab, in order, for the current type.
     pub fn order(&self) -> Vec<Field> {
         let mut order = vec![Field::Type, Field::Title, Field::Tags];
-        order.push(if self.draft.entry_type.has_payload() {
-            Field::Variables
-        } else {
-            Field::Fields
-        });
+        match self.draft.entry_type {
+            // a note has neither variables nor type fields: just its Markdown
+            EntryType::Note => {}
+            t if t.has_payload() => order.push(Field::Variables),
+            _ => order.push(Field::Fields),
+        }
         order.extend([Field::Path, Field::Notes]);
         order
+    }
+
+    /// Whether the draft is tagged `private`.
+    pub fn is_private(&self) -> bool {
+        self.draft.tags.iter().any(|t| t == PRIVATE_TAG)
+    }
+
+    /// Ctrl-T on a note: adds or removes the `private` tag.
+    fn toggle_private(&mut self) {
+        let mut tags = self.draft.tags.clone();
+        if let Some(i) = tags.iter().position(|t| t == PRIVATE_TAG) {
+            tags.remove(i);
+        } else {
+            tags.push(PRIVATE_TAG.to_string());
+        }
+        self.tags = LineEditor::new(&tags.join(", "));
+        self.tags_changed();
     }
 
     fn clock(&self) -> FixedClock {
@@ -520,6 +541,15 @@ impl AddState {
             ));
             return;
         }
+        if self.draft.entry_type == EntryType::Note {
+            // for a note the editor holds the whole Markdown
+            let text = new.replace("\r\n", "\n");
+            self.draft.notes = text.trim_end().to_string();
+            self.notes = TextArea::new(&self.draft.notes);
+            self.changed = true;
+            self.error = None;
+            return;
+        }
         let before = self.draft.entry_type;
         if self.draft.set_body(new, true) {
             self.note = Some(format!(
@@ -594,8 +624,14 @@ impl AddState {
                 AddEvent::None
             }
             (Code::Char('s'), CTRL) => self.submit(),
+            (Code::Char('t'), CTRL) if self.draft.entry_type == EntryType::Note => {
+                self.toggle_private();
+                AddEvent::None
+            }
             (Code::Char('e'), CTRL) => {
-                if self.draft.entry_type.has_payload() {
+                if self.draft.entry_type == EntryType::Note {
+                    AddEvent::EditBody(self.draft.notes.clone())
+                } else if self.draft.entry_type.has_payload() {
                     AddEvent::EditBody(self.draft.body.clone())
                 } else {
                     self.message = Some("this type has no body to edit".into());
@@ -899,6 +935,14 @@ impl AddState {
     /// Ctrl-S: checks everything the write would check and either hands the draft out or says
     /// what is wrong and focuses it. There is no "save anyway" here.
     fn submit(&mut self) -> AddEvent {
+        if self.draft.entry_type == EntryType::Note
+            && self.draft.title.trim().is_empty()
+            && let Some(title) = kb_core::entry::note_title_from_body(&self.draft.notes)
+        {
+            // a note may take its title from its first `# heading`
+            self.title = LineEditor::new(&title);
+            self.draft.title = title;
+        }
         if self.draft.title.trim().is_empty() {
             self.fail(Field::Title, "a title is required");
             return AddEvent::None;
@@ -987,7 +1031,8 @@ fn token_end(text: &str, offset: usize) -> usize {
 /// The field a lint rule is about.
 fn field_of(code: RuleCode) -> Field {
     match code {
-        RuleCode::MissingTitle | RuleCode::InvalidTitle => Field::Title,
+        RuleCode::MissingTitle | RuleCode::InvalidTitle | RuleCode::NoteTitle => Field::Title,
+        RuleCode::NoteVars | RuleCode::NoteOversized | RuleCode::NoteEmpty => Field::Notes,
         RuleCode::InvalidTag | RuleCode::DuplicateTag => Field::Tags,
         RuleCode::MissingUrl
         | RuleCode::InvalidUrl

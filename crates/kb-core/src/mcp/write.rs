@@ -139,7 +139,7 @@ fn parse_draft_fields(
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
         },
-        EntryType::Prompt => DraftFields::None,
+        EntryType::Prompt | EntryType::Note => DraftFields::None,
     }
 }
 
@@ -578,7 +578,9 @@ impl<'a> McpEngine<'a> {
                     }
                 }
             }
-            crate::entry::TypeFields::Prompt | crate::entry::TypeFields::Unknown => {}
+            crate::entry::TypeFields::Prompt
+            | crate::entry::TypeFields::Note
+            | crate::entry::TypeFields::Unknown => {}
         }
 
         if let Some(ch_fields) = &req.changes.fields {

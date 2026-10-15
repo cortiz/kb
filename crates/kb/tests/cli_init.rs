@@ -64,7 +64,7 @@ fn new_kb_with_examples_that_lint_clean() {
         .args(["lint", "--strict"]));
     assert_eq!(
         (out.as_str(), code),
-        ("7 entries, 0 errors, 0 warnings\n", 0)
+        ("8 entries, 0 errors, 0 warnings\n", 0)
     );
 }
 
@@ -132,7 +132,7 @@ fn json_report() {
     assert_eq!(v["version"], 1);
     assert_eq!(v["examples"], "created");
     assert_eq!(v["created"][0], ".");
-    assert_eq!(v["created"].as_array().unwrap().len(), 10);
+    assert_eq!(v["created"].as_array().unwrap().len(), 11);
     let (out, _, _) = run(kb(dir.path()).arg("init").arg(&root).arg("--json"));
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["created"].as_array().unwrap().len(), 0);

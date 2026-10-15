@@ -100,6 +100,11 @@ rule_codes! {
     SecretJwt = 63, "secret-jwt", Error;
     SecretPrivateKey = 64, "secret-private-key", Error;
     SecretHighEntropy = 65, "secret-high-entropy", Error;
+    NoteTitle = 70, "note-title", Error;
+    NoteVars = 71, "note-vars", Error;
+    NoteOversized = 72, "note-oversized", Warning;
+    NoteEmpty = 73, "note-empty", Info;
+    EntryLinkBroken = 74, "entry-link-broken", Warning;
 }
 
 impl fmt::Display for RuleCode {
@@ -591,7 +596,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture produces {code}"));
             assert_eq!(has_fix, *code != RuleCode::YamlSyntax, "{code}");
         }
-        assert_eq!(errors.len(), 39);
+        assert_eq!(errors.len(), 41);
     }
 
     #[test]
@@ -615,7 +620,7 @@ mod tests {
                 code.number()
             );
         }
-        assert_eq!(RuleCode::ALL.len(), 49);
+        assert_eq!(RuleCode::ALL.len(), 54);
     }
 
     #[test]

@@ -290,7 +290,7 @@ fn one_frame_with_ten_thousand_results_under_16ms() {
             Page {
                 results,
                 total: 10_000,
-                type_counts: [1_429, 1_429, 1_429, 1_429, 1_428, 1_428, 1_428],
+                type_counts: [1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250, 1_250],
                 indexed: 10_000,
                 skipped: 0,
                 notices: vec![],

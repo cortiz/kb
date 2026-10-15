@@ -476,7 +476,7 @@ struct PreviewLayout {
     rows: Vec<Row>,
     urls: Vec<String>,
     code: Vec<(&'static str, String)>,
-    notes: Vec<Vec<TokSpan>>,
+    notes: std::sync::Arc<Vec<markdown::NoteLine>>,
 }
 
 /// Splits `s` into pieces of at most `cols` columns (URLs have no spaces to wrap at).
@@ -541,10 +541,13 @@ fn preview_layout(m: &PreviewModel, cols: usize) -> PreviewLayout {
         rows.push(Row::Rule("fields"));
         rows.extend((0..m.fields.len()).map(Row::Field));
     }
-    let notes = markdown::wrap(&m.notes, cols);
+    let notes = m.notes.lines(cols);
     if !notes.is_empty() {
         rows.push(Row::Blank);
-        rows.push(Row::Rule("notes"));
+        // a note is all body: no label over it
+        if m.meta.as_ref().map(|x| x.entry_type) != Some(EntryType::Note) {
+            rows.push(Row::Rule("notes"));
+        }
         rows.extend((0..notes.len()).map(Row::Notes));
     }
     PreviewLayout {
@@ -736,7 +739,7 @@ fn draw_preview_rows(
                     Span::styled(truncate(v, cols.saturating_sub(11)), theme.text()),
                 ]
             }
-            Row::Notes(i) => tok(&lay.notes[i], theme),
+            Row::Notes(i) => tok(&lay.notes[i].spans(), theme),
         };
         buf.set_line(x, y, &Line::from(spans), inner.width.saturating_sub(1));
     }
@@ -1135,10 +1138,10 @@ pub(crate) mod tests {
             "~/kb".into(),
         );
         s.loaded = true;
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
         let g = s.search_gen;
         s.update(Action::Results(g, page(&["a"])), std::time::Instant::now());
-        s.type_counts = [5, 4, 6, 5, 6, 3, 3];
+        s.type_counts = [5, 4, 6, 5, 6, 3, 3, 0];
         let row = render(&s, &Theme::dark(), 80, 24)[2].clone();
         assert!(
             row.contains("tag:prod ×") && row.contains("-tag:stage ×"),

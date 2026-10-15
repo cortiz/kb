@@ -6,6 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::platform::clipboard::{ClipboardSettings, ReadOutcome};
 use kb_core::author::{Draft, DraftOptions, DraftSource};
 use kb_core::config::{PathTemplate, ThemeChoice};
+use kb_core::entry::EntryType;
 use kb_core::search::{Notice, SearchResult};
 use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 
@@ -107,7 +108,7 @@ impl Default for Options {
 pub struct Page {
     pub results: Vec<SearchResult>,
     pub total: usize,
-    pub type_counts: [usize; 7],
+    pub type_counts: [usize; EntryType::COUNT],
     pub indexed: usize,
     pub skipped: usize,
     pub notices: Vec<Notice>,
@@ -256,6 +257,8 @@ pub enum Effect {
     /// Enter on the selected entry: leave the UI and let the caller copy or print it.
     Pick,
     CopyPayload,
+    /// Copy a note as plain text, the way it is drawn, without Markdown or styling.
+    CopyRenderedText,
     /// Alt-C: copy the payload as it is in the file.
     CopyTemplate,
     /// The form passed validation: check the entry did not change, then use it.
@@ -319,7 +322,7 @@ pub struct AppState {
     pub input: SearchInput,
     pub results: Vec<SearchResult>,
     pub total: usize,
-    pub type_counts: [usize; 7],
+    pub type_counts: [usize; EntryType::COUNT],
     pub selected: usize,
     pub selected_id: Option<String>,
     pub list_offset: usize,
@@ -397,7 +400,7 @@ impl AppState {
             input: SearchInput::from_text(initial_query),
             results: Vec::new(),
             total: 0,
-            type_counts: [0; 7],
+            type_counts: [0; EntryType::COUNT],
             selected: 0,
             selected_id: None,
             list_offset: 0,
@@ -1222,6 +1225,8 @@ impl AppState {
                 self.action_menu = None;
                 return match kind {
                     kb_core::action::ActionKind::CopyPayload => vec![Effect::CopyPayload],
+                    kb_core::action::ActionKind::CopyRenderedText => vec![Effect::CopyRenderedText],
+                    kb_core::action::ActionKind::EditEntry => vec![Effect::EditEntry(id)],
                     kb_core::action::ActionKind::OpenUrl => vec![Effect::OpenEntry(id)],
                     kb_core::action::ActionKind::RunCommand => vec![Effect::RunEntry(id)],
                     kb_core::action::ActionKind::CodeView => vec![Effect::OpenEntry(id)],
@@ -1743,7 +1748,7 @@ pub(crate) mod tests {
         );
         assert_eq!(s.results, before);
         let mut p = page(&["n1", "n2", "n3"]);
-        p.type_counts = [3, 0, 0, 0, 0, 0, 0];
+        p.type_counts = [3, 0, 0, 0, 0, 0, 0, 0];
         p.indexed = 50;
         p.skipped = 2;
         let g = s.search_gen;
@@ -2187,7 +2192,7 @@ pub(crate) mod tests {
     fn tab_cycles_through_the_types_and_back_to_all() {
         let mut s = loaded(&["a"]);
         let now = Instant::now();
-        let order = ["sql", "sumo", "cw", "cmd", "prompt", "link", "code"];
+        let order = ["sql", "sumo", "cw", "cmd", "prompt", "link", "code", "note"];
         for ty in order {
             let e = s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
             assert_eq!(type_chips(&s), vec![ty]);
@@ -2205,10 +2210,10 @@ pub(crate) mod tests {
         let mut s = loaded(&["a"]);
         let now = Instant::now();
         s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
-        assert_eq!(type_chips(&s), vec!["code"]);
+        assert_eq!(type_chips(&s), vec!["note"]);
         s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
-        assert_eq!(type_chips(&s), vec!["link"]);
-        for _ in 0..5 {
+        assert_eq!(type_chips(&s), vec!["code"]);
+        for _ in 0..6 {
             s.update(key(KeyCode::BackTab, KeyModifiers::SHIFT), now);
         }
         assert_eq!(type_chips(&s), vec!["sql"]);
@@ -2297,10 +2302,10 @@ pub(crate) mod tests {
         let now = Instant::now();
         s.update(key(KeyCode::Tab, KeyModifiers::NONE), now);
         let mut p = page(&["x"]);
-        p.type_counts = [4, 3, 2, 1, 0, 0, 0];
+        p.type_counts = [4, 3, 2, 1, 0, 0, 0, 0];
         let g = s.search_gen;
         s.update(Action::Results(g, p), now);
-        assert_eq!(s.type_counts, [4, 3, 2, 1, 0, 0, 0]);
+        assert_eq!(s.type_counts, [4, 3, 2, 1, 0, 0, 0, 0]);
     }
 
     // ---- editing (US4) ----

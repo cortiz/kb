@@ -16,6 +16,7 @@ use super::theme::Theme;
 /// The key bar when nothing else needs saying.
 pub const KEY_BAR: &str = "^S save · ^E edit body · ^P preview · Tab next · Esc discard";
 const KEY_BAR_NO_BODY: &str = "^S save · ^P preview · Tab next · Esc discard";
+const KEY_BAR_NOTE: &str = "^S save · ^E editor · ^T private · ^P preview · Tab next · Esc discard";
 /// Where the label ends and the input begins in the left column.
 const LABEL: u16 = 11;
 
@@ -174,6 +175,28 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         }
         y += 1;
     }
+    if add.draft.entry_type == EntryType::Note && y < end {
+        let mark = if add.is_private() { "[x]" } else { "[ ]" };
+        let style = if add.is_private() {
+            theme.text()
+        } else {
+            theme.muted()
+        };
+        buf.set_string(input_x, y, format!("{mark} private  (^T)"), style);
+        y += 1;
+        if y < end {
+            buf.set_string(
+                r.x + 2,
+                y,
+                truncate(
+                    "Private entries are excluded from AI agent tools by default",
+                    usize::from(r.width).saturating_sub(3),
+                ),
+                theme.muted(),
+            );
+            y += 1;
+        }
+    }
     let completions = add.completions();
     if y < end && !completions.is_empty() {
         let chips: Vec<Span<'_>> = completions
@@ -309,6 +332,10 @@ fn draw_left(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
 
 fn draw_right(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
     if r.height < 3 {
+        return;
+    }
+    if add.draft.entry_type == EntryType::Note {
+        draw_notes(add, theme, r, buf);
         return;
     }
     let notes_h = (r.height / 3).clamp(4, 8).min(r.height - 2);
@@ -460,7 +487,12 @@ fn draw_details(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
 }
 
 fn draw_notes(add: &AddState, theme: &Theme, r: Rect, buf: &mut Buffer) {
-    let inner = boxed("Notes (optional)", add.focus == Field::Notes, theme, r, buf);
+    let title = if add.draft.entry_type == EntryType::Note {
+        "Note (Markdown; a first-line `# Title` can be the title)"
+    } else {
+        "Notes (optional)"
+    };
+    let inner = boxed(title, add.focus == Field::Notes, theme, r, buf);
     if inner.width < 4 || inner.height == 0 {
         return;
     }
@@ -570,7 +602,9 @@ fn draw_keybar(state: &AppState, add: &AddState, theme: &Theme, r: Rect, buf: &m
             },
         )
     } else {
-        let bar = if add.draft.entry_type.has_payload() {
+        let bar = if add.draft.entry_type == EntryType::Note {
+            KEY_BAR_NOTE
+        } else if add.draft.entry_type.has_payload() {
             KEY_BAR
         } else {
             KEY_BAR_NO_BODY

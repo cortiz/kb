@@ -46,7 +46,7 @@ fn status_reports_the_index() {
     let text = stdout(&out);
     for prefix in [
         "Index:      ",
-        "Version:    2",
+        "Version:    3",
         "Entries:    32 indexed, 1 skipped due to errors",
         "Size:       ",
         "Last build: ",

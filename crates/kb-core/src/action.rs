@@ -9,6 +9,8 @@ use regex::Regex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionKind {
     CopyPayload,
+    CopyRenderedText,
+    EditEntry,
     CopyCodeLocation,
     CopyWebPermalink,
     OpenUrl,
@@ -368,6 +370,44 @@ impl ActionService {
                     false,
                 ));
             }
+            Some(EntryType::Note) => {
+                actions.push(Action::builtin(
+                    "copy",
+                    "Copy Markdown",
+                    'c',
+                    "Copy the Markdown source to clipboard",
+                    ActionKind::CopyPayload,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "copy-text",
+                    "Copy Text",
+                    't',
+                    "Copy the rendered plain text to clipboard",
+                    ActionKind::CopyRenderedText,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+                actions.push(Action::builtin(
+                    "edit",
+                    "Edit",
+                    'e',
+                    "Edit the note in your editor",
+                    ActionKind::EditEntry,
+                    false,
+                    false,
+                    false,
+                    false,
+                    false,
+                ));
+            }
             Some(EntryType::Sql) | Some(EntryType::Prompt) | None => {
                 actions.push(Action::builtin(
                     "copy",
@@ -495,6 +535,7 @@ impl ActionService {
                 "link" | "sumo" | "cw" => &['c', 'o', '?', 'q'],
                 "cmd" => &['c', 'r', '?', 'q'],
                 "code" => &['y', 'Y', 'o', 'g', 'v', 'i', 'u', 'F', '?', 'q'],
+                "note" => &['c', 't', 'e', 'f', '?', 'q'],
                 _ => &['c', '?', 'q'],
             };
             if reserved.contains(&custom.key) {

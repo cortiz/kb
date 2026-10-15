@@ -7,7 +7,7 @@ use kb_core::payload::payload_pieces;
 use kb_core::vars::VarKind;
 
 use super::highlight::{Span, highlight, lang_for};
-use super::markdown::{Block, render_notes};
+use super::markdown::{Ctx, Lookup, Notes, render_markdown};
 use crate::output::utc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,7 +51,7 @@ pub struct PreviewModel {
     pub payload: Vec<Vec<Span>>,
     pub vars: Vec<VarRow>,
     pub fields: Vec<(String, String)>,
-    pub notes: Vec<Block>,
+    pub notes: Notes,
     pub mtime: i64,
 }
 
@@ -101,6 +101,7 @@ fn fields_of(entry: &Entry) -> Vec<(String, String)> {
         TypeFields::Link { .. }
         | TypeFields::Code { .. }
         | TypeFields::Prompt
+        | TypeFields::Note
         | TypeFields::Unknown => {}
     }
     out
@@ -113,6 +114,17 @@ pub fn build_preview(
     modified: Option<i64>,
     use_count: u64,
     highlight_syntax: bool,
+) -> PreviewModel {
+    build_preview_with(entry, modified, use_count, highlight_syntax, None)
+}
+
+/// [`build_preview`] with a way to look up the entries a note links to.
+pub fn build_preview_with(
+    entry: &Entry,
+    modified: Option<i64>,
+    use_count: u64,
+    highlight_syntax: bool,
+    lookup: Option<Lookup<'_>>,
 ) -> PreviewModel {
     let ty = entry.entry_type();
     let edited = entry
@@ -172,7 +184,14 @@ pub fn build_preview(
         payload,
         vars,
         fields: fields_of(entry),
-        notes: render_notes(entry.notes().trim()),
+        notes: Notes::new(render_markdown(
+            entry.notes().trim(),
+            &Ctx {
+                color: highlight_syntax,
+                entry_links: ty == Some(EntryType::Note),
+                lookup,
+            },
+        )),
         mtime: modified.unwrap_or(0),
     }
 }
@@ -342,6 +361,7 @@ mod tests {
 
     #[test]
     fn markdown_notes_are_parsed() {
+        use crate::tui::markdown::Block;
         let m = build_preview(&load("tui", "sumo/long-query"), None, 0, true);
         assert!(
             m.notes

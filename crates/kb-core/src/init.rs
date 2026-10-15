@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 pub const KB_GITIGNORE: &str = "*\n";
 
 /// One example entry per type, as (path relative to the root, content).
-pub const EXAMPLES: [(&str, &str); 7] = [
+pub const EXAMPLES: [(&str, &str); 8] = [
     (
         "sql/example-active-connections.md",
         include_str!("examples/sql.md"),
@@ -32,6 +32,10 @@ pub const EXAMPLES: [(&str, &str); 7] = [
     (
         "code/example-request-handler.md",
         include_str!("examples/code.md"),
+    ),
+    (
+        "note/example-authorizer-role-cache.md",
+        include_str!("examples/note.md"),
     ),
 ];
 
@@ -264,7 +268,7 @@ mod tests {
 
         let report = apply_init(&plan).unwrap();
         assert_eq!(report.root, root.canonicalize().unwrap());
-        assert_eq!(report.created.len(), 10);
+        assert_eq!(report.created.len(), 11);
         assert!(report.existing.is_empty());
         assert_eq!(
             fs::read_to_string(root.join(".kb/.gitignore")).unwrap(),
@@ -353,7 +357,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         apply_init(&plan_init(dir.path(), true).unwrap()).unwrap();
         let report = crate::lint::lint(dir.path(), &[]).unwrap();
-        assert_eq!(report.entries, 7);
+        assert_eq!(report.entries, 8);
         assert!(report.findings.is_empty(), "{:#?}", report.findings);
         let mut types: Vec<_> = EXAMPLES
             .iter()

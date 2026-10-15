@@ -79,7 +79,7 @@ fn unknown_type_is_reported_with_fix() {
     .unwrap();
     let (out, code) = stdout(kb().arg("--root").arg(&root).arg("lint"));
     assert!(
-        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code\n  fix: use \"sumo\"\n"),
+        out.contains("sumo/bad.md:3:7: error[KB001-unknown-type]: unknown type \"sumologic\"; expected one of sql, sumo, cw, cmd, prompt, link, code, note\n  fix: use \"sumo\"\n"),
         "{out}"
     );
     assert!(out.ends_with(", 1 error, 0 warnings\n"), "{out}");

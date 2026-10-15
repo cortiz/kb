@@ -234,7 +234,7 @@ impl<'a> McpEngine<'a> {
                     );
                 }
             }
-            TypeFields::Prompt | TypeFields::Unknown => {}
+            TypeFields::Prompt | TypeFields::Note | TypeFields::Unknown => {}
         }
 
         let payload_text = entry.payload().map(|p| p.text.clone()).unwrap_or_default();
@@ -464,7 +464,7 @@ impl<'a> McpEngine<'a> {
                     );
                 }
             }
-            TypeFields::Prompt | TypeFields::Unknown => {}
+            TypeFields::Prompt | TypeFields::Note | TypeFields::Unknown => {}
         }
 
         let links = EntryLinksView {

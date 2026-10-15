@@ -25,6 +25,14 @@ pub enum Class {
     Link,
     Quote,
     Muted,
+    /// `~~struck~~` text.
+    Strike,
+    /// The `[sumo]` badge in front of an entry link's title.
+    EntryBadge(EntryType),
+    /// An entry link whose target does not exist.
+    Broken,
+    /// The bar, icon and label of a callout.
+    Callout(super::markdown::CalloutKind),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -296,6 +304,17 @@ impl Theme {
             Class::Link => self.fg(74, 25).add_modifier(Modifier::UNDERLINED),
             Class::Quote => self.muted().add_modifier(Modifier::ITALIC),
             Class::Muted => self.muted(),
+            Class::Strike => self.muted().add_modifier(Modifier::CROSSED_OUT),
+            Class::EntryBadge(ty) => self.badge(ty),
+            Class::Broken => self.fg(203, 160).add_modifier(Modifier::BOLD),
+            Class::Callout(kind) => {
+                let base = Style::default().add_modifier(Modifier::BOLD);
+                let (dark, light) = kind.colors();
+                match self.pick(dark, light) {
+                    Some(c) => base.fg(c),
+                    None => base,
+                }
+            }
         }
     }
 }

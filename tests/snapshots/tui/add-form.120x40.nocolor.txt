@@ -1,5 +1,5 @@
  New entry · from clipboard · detected cw (high)
- Type      sql sumo [cw] cmd prompt link code         ┌ Body ──────────────────────────────────────────────────────────┐
+ Type      sql sumo [cw] cmd prompt link code note    ┌ Body ──────────────────────────────────────────────────────────┐
                                                       │ 1 fields @timestamp, @message                                  │
 ▸Title     Authorizer p99 latency                     │ 2 | filter @message like /{{fn}}/                              │
  Tags      lambda                                     │ 3 | stats pct(@duration, 99) by bin({{minutes}}m)              │
@@ -48,6 +48,7 @@
 1:29..35 dim
 1:36..40 dim
 1:41..45 dim
+1:46..50 dim
 1:55..61 dim
 2:56..58 dim
 3:0..6 bold

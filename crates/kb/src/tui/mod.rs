@@ -250,6 +250,11 @@ pub fn run(
                     pending.extend(state.update(action, Instant::now()));
                     dirty = true;
                 }
+                Effect::CopyRenderedText => {
+                    let report = copy_rendered_text(platform, &clipboard_settings, &state, &ui_kb);
+                    pending.extend(state.update(Action::CopyDone(report), Instant::now()));
+                    dirty = true;
+                }
                 Effect::CopyTemplate => {
                     let mut report = copy_selected(platform, &clipboard_settings, &state, &ui_kb);
                     if report.sent {
@@ -1239,6 +1244,34 @@ fn copy_selected(
     }
 }
 
+/// A note as the plain text it is drawn as.
+fn copy_rendered_text(
+    platform: &impl Platform,
+    settings: &ClipboardSettings,
+    state: &AppState,
+    kb: &Kb,
+) -> CopyReport {
+    let failed = |m: String| CopyReport {
+        message: m,
+        sent: false,
+    };
+    let Some(id) = &state.selected_id else {
+        return failed("Copy failed: nothing selected".into());
+    };
+    let text = match crate::show::rendered_text(kb, id) {
+        Ok(t) => t,
+        Err(e) => return failed(format!("Copy failed: {e}")),
+    };
+    let outcome = clipboard::copy(platform, settings, &text, Place::Ui);
+    if outcome.sent() {
+        let _ = kb.record_use(id, SystemTime::now());
+    }
+    CopyReport {
+        message: outcome.message_short(),
+        sent: outcome.sent(),
+    }
+}
+
 fn open_selected(
     platform: &impl Platform,
     settings: &Settings,
@@ -1603,7 +1636,7 @@ fn edit_body(
     let ext = match ty {
         EntryType::Sql => "sql",
         EntryType::Cmd => "sh",
-        EntryType::Prompt => "md",
+        EntryType::Prompt | EntryType::Note => "md",
         _ => "txt",
     };
     let temp = match platform.private_temp_file(ext, text.as_bytes()) {

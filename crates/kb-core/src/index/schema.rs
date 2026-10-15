@@ -2,7 +2,7 @@
 //! [`INDEX_VERSION`] means "rebuild", never "migrate".
 
 /// Bump when the schema or the way documents are built changes.
-pub const INDEX_VERSION: u32 = 2;
+pub const INDEX_VERSION: u32 = 3;
 
 /// BM25 weights for the FTS columns, in column order: title, tags, id, meta, payload, notes
 /// (spec FR-012: title, tags, ID, variable names and type-specific fields, payload, notes).
@@ -15,6 +15,7 @@ pub const DROP: &str = "
 DROP TABLE IF EXISTS vocab;
 DROP TABLE IF EXISTS fts_vocab;
 DROP TABLE IF EXISTS fts;
+DROP TABLE IF EXISTS entry_links;
 DROP TABLE IF EXISTS entry_vars;
 DROP TABLE IF EXISTS entry_tags;
 DROP TABLE IF EXISTS entries;
@@ -37,6 +38,9 @@ CREATE TABLE entry_tags(id TEXT NOT NULL, tag TEXT NOT NULL, PRIMARY KEY(tag, id
 CREATE INDEX entry_tags_id ON entry_tags(id);
 CREATE TABLE entry_vars(id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY(name, id)) WITHOUT ROWID;
 CREATE INDEX entry_vars_id ON entry_vars(id);
+-- `[[id]]` references from notes, for `kb mv` and `kb rm`.
+CREATE TABLE entry_links(source_id TEXT NOT NULL, target_id TEXT NOT NULL, PRIMARY KEY(source_id, target_id)) WITHOUT ROWID;
+CREATE INDEX entry_links_target ON entry_links(target_id);
 CREATE VIRTUAL TABLE fts USING fts5(
     title, tags, id, meta, payload, notes,
     tokenize='unicode61 remove_diacritics 2', prefix='2 3');

@@ -4,6 +4,7 @@ pub mod history;
 pub mod hooks;
 pub mod keys;
 pub mod mcp;
+pub mod note;
 pub mod pick;
 pub mod review;
 pub mod shell;

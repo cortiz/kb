@@ -105,7 +105,10 @@ fn fields_json(entry: &Entry) -> Value {
             }
             m.insert("code".into(), Value::Object(code));
         }
-        TypeFields::Code { code: None } | TypeFields::Prompt | TypeFields::Unknown => {}
+        TypeFields::Code { code: None }
+        | TypeFields::Prompt
+        | TypeFields::Note
+        | TypeFields::Unknown => {}
     }
     Value::Object(m)
 }
@@ -150,6 +153,12 @@ pub fn entry_json(entry: &Entry, abs_path: &Path) -> Value {
     })
 }
 
+/// A note's Markdown as written: everything after the frontmatter, minus the blank lines that
+/// separate it from the closing `---`.
+pub fn note_source(entry: &Entry) -> &str {
+    entry.notes().trim_start_matches(['\r', '\n'])
+}
+
 /// Exactly the bytes `kb show --print <mode>` writes. Nothing is added to the payload, ID or path;
 /// the JSON document ends with one newline.
 pub fn pick_output(entry: &Entry, abs_path: &Path, mode: PrintMode) -> Result<String, PickError> {
@@ -160,6 +169,9 @@ pub fn pick_output(entry: &Entry, abs_path: &Path, mode: PrintMode) -> Result<St
         PrintMode::Payload => match entry.fields() {
             TypeFields::Link { url: Some(url) } => Ok(url.clone()),
             TypeFields::Code { code: Some(c) } => Ok(format!("{}:{}", c.path, c.line)),
+            // a note is all body: its Markdown, without the frontmatter and without anything a
+            // terminal would act on
+            TypeFields::Note => Ok(crate::terminal::raw(note_source(entry)).into_owned()),
             _ => entry.payload().map(|p| p.text.clone()).ok_or(PickError),
         },
     }
@@ -226,6 +238,21 @@ mod tests {
             pick_output(&e, &p, PrintMode::Path).unwrap(),
             p.to_string_lossy()
         );
+    }
+
+    #[test]
+    fn a_note_prints_its_markdown_without_frontmatter_or_escape_sequences() {
+        let text = "---\nkb_format: 1\ntype: note\ntitle: N\n---\n\n# N\n\nbody \x1b[2J here\n";
+        let e = parse_entry("note/n", "note/n.md", text.as_bytes().to_vec())
+            .entry
+            .unwrap();
+        let out = pick_output(&e, Path::new("/k/note/n.md"), PrintMode::Payload).unwrap();
+        assert_eq!(out, "# N\n\nbody  here\n");
+        assert_eq!(note_source(&e), "# N\n\nbody \x1b[2J here\n");
+        let json = entry_json(&e, Path::new("/k/note/n.md"));
+        assert_eq!(json["type"], "note");
+        assert_eq!(json["payload"], Value::Null);
+        assert_eq!(json["notes"], e.notes());
     }
 
     #[test]

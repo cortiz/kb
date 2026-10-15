@@ -1,0 +1,8 @@
+## Ports
+
+| Service | Port |
+|:--------|-----:|
+| api     | 8080 |
+| db      | 5432 |
+
+Check them before deploy.

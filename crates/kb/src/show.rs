@@ -6,7 +6,8 @@ use unicode_width::UnicodeWidthStr;
 
 use kb_core::search::{Kb, KbError};
 
-use crate::tui::preview::build_preview;
+use crate::tui::markdown::{Ctx, layout, render_markdown};
+use crate::tui::preview::build_preview_with;
 use crate::tui::theme::Theme;
 use crate::tui::view::render_preview;
 
@@ -31,7 +32,8 @@ pub fn preview_text(
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .and_then(|d| i64::try_from(d.as_secs()).ok());
     let uses = kb.usage(id).map_or(0, |u| u.count);
-    let mut model = build_preview(&entry, modified, uses, color);
+    let lookup = |target: &str| link_lookup(kb, target);
+    let mut model = build_preview_with(&entry, modified, uses, color, Some(&lookup));
     let unreviewed = kb_core::mcp::review::ReviewStateTracker::is_unreviewed(kb.root(), id);
     if let Some(meta) = &mut model.meta {
         meta.unreviewed = unreviewed;
@@ -39,6 +41,33 @@ pub fn preview_text(
     // two columns of padding are part of the drawing and are cut off again below
     let buf = render_preview(&model, theme, width.max(MIN_WIDTH) + 2);
     Ok(buffer_to_text(&buf, color))
+}
+
+/// The body of entry `id` as the plain text a preview draws, 100 columns wide: no Markdown syntax,
+/// no styling, no control characters. For notes, this is what "copy as text" puts on the clipboard.
+pub fn rendered_text(kb: &Kb, id: &str) -> Result<String, KbError> {
+    let entry = kb.entry(id)?;
+    let lookup = |target: &str| link_lookup(kb, target);
+    let doc = render_markdown(
+        entry.notes().trim(),
+        &Ctx {
+            color: false,
+            entry_links: entry.entry_type() == Some(kb_core::entry::EntryType::Note),
+            lookup: Some(&lookup),
+        },
+    );
+    let mut out = String::new();
+    for line in layout(&doc.blocks, usize::from(DEFAULT_WIDTH)) {
+        out.push_str(line.text().trim_end());
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+/// The type and title of the entry `target`, for `[[entry-id]]` links.
+pub fn link_lookup(kb: &Kb, target: &str) -> Option<(kb_core::entry::EntryType, String)> {
+    let entry = kb.entry(target).ok()?;
+    Some((entry.entry_type()?, entry.title()?.to_string()))
 }
 
 /// The SGR parameters that set `fg` (or `bg` when `background`), or nothing for the default.

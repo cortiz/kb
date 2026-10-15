@@ -1,0 +1,10 @@
+# Postmortem: auth outage
+
+## Impact
+
+Roughly 5% of logins failed for 20 minutes.
+
+## Follow-ups
+
+- [ ] Add an alert
+- [ ] Review the cache TTL

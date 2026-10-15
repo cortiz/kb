@@ -1,0 +1,8 @@
+# Authorizer runbook
+
+See [[sumo/5xx-by-authorizer]] for the dashboard query.
+
+## Escalation
+
+- Page the on-call
+- Open an incident

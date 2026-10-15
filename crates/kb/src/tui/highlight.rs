@@ -13,6 +13,9 @@ use super::theme::Class;
 pub struct Span {
     pub text: String,
     pub class: Class,
+    /// Where a Markdown link points. Only `kb show` on a terminal that supports it turns this
+    /// into a hyperlink, and only for safe schemes.
+    pub url: Option<std::sync::Arc<str>>,
 }
 
 impl Span {
@@ -20,6 +23,15 @@ impl Span {
         Span {
             text: text.into(),
             class,
+            url: None,
+        }
+    }
+
+    pub fn link(text: impl Into<String>, class: Class, url: std::sync::Arc<str>) -> Span {
+        Span {
+            text: text.into(),
+            class,
+            url: Some(url),
         }
     }
 }
@@ -40,7 +52,7 @@ pub fn lang_for(ty: EntryType) -> Lang {
         EntryType::Cmd => Lang::Bash,
         EntryType::Sumo => Lang::Sumo,
         EntryType::Cw => Lang::Cwi,
-        EntryType::Prompt | EntryType::Link | EntryType::Code => Lang::Plain,
+        EntryType::Prompt | EntryType::Link | EntryType::Code | EntryType::Note => Lang::Plain,
     }
 }
 
@@ -178,21 +190,46 @@ pub fn highlight_code_snippet(
     color: bool,
 ) -> Vec<Vec<Span>> {
     if !color {
-        return lines
-            .iter()
-            .map(|l| vec![Span::new(l.as_str(), Class::Plain)])
-            .collect();
+        return plain_lines(lines);
     }
     let s = sets();
     let syntax = extension
         .and_then(|ext| s.default.find_syntax_by_extension(ext))
         .unwrap_or_else(|| s.default.find_syntax_plain_text());
+    highlight_lines(lines, syntax, &s.default)
+}
+
+/// The lines of a fenced code block in the language named after the fence (`rust`, `py`, `sh`);
+/// unknown languages, and no language, stay plain.
+pub fn highlight_fenced(lang: Option<&str>, lines: &[String], color: bool) -> Vec<Vec<Span>> {
+    let s = sets();
+    let syntax = lang
+        .filter(|_| color)
+        .and_then(|l| s.default.find_syntax_by_token(l));
+    match syntax {
+        Some(syntax) => highlight_lines(lines, syntax, &s.default),
+        None => plain_lines(lines),
+    }
+}
+
+fn plain_lines(lines: &[String]) -> Vec<Vec<Span>> {
+    lines
+        .iter()
+        .map(|l| vec![Span::new(l.as_str(), Class::Plain)])
+        .collect()
+}
+
+fn highlight_lines(
+    lines: &[String],
+    syntax: &syntect::parsing::SyntaxReference,
+    set: &SyntaxSet,
+) -> Vec<Vec<Span>> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut out = Vec::new();
     for line in lines {
         let with_newline = format!("{line}\n");
-        let Ok(ops) = state.parse_line(&with_newline, &s.default) else {
+        let Ok(ops) = state.parse_line(&with_newline, set) else {
             out.push(vec![Span::new(line.as_str(), Class::Plain)]);
             continue;
         };

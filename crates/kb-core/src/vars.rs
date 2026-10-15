@@ -331,7 +331,7 @@ fn definition(name: &str, key_offset: usize, def: &Node, sink: &mut Sink<'_>) ->
     var.description = def
         .get("description")
         .and_then(Node::as_str)
-        .map(str::to_string);
+        .map(|d| crate::terminal::display(d).into_owned());
     var.env = def.get("env").and_then(Node::as_str).map(str::to_string);
     if let Some(node) = def.get("escape") {
         match node.as_str().and_then(Escape::from_name) {

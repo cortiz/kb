@@ -1075,5 +1075,5 @@ fn a_version_one_index_is_rebuilt() {
             .iter()
             .any(|n| matches!(n, Notice::Rebuilt { entries: 32 }))
     );
-    assert_eq!(crate::index::INDEX_VERSION, 2);
+    assert_eq!(crate::index::INDEX_VERSION, 3);
 }
