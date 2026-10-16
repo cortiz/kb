@@ -658,6 +658,8 @@ fn main() -> ExitCode {
         Command::Clone(_) => false,
         Command::Sync(a) => a.json(),
         Command::Runbook(commands::runbook::RunbookCommand::New(a)) => a.json,
+        Command::Runbook(commands::runbook::RunbookCommand::Runs(a)) => a.json,
+        Command::Runbook(_) => false,
         Command::Tui(_) => false,
     };
     // A panic has already restored the terminal and printed its message (see the hook in
@@ -812,6 +814,15 @@ fn run(cli: Cli) -> Result<ExitCode, CliError> {
         Command::Sync(args) => commands::sync::run_sync(&platform, &root, &loaded, &args),
         Command::Runbook(commands::runbook::RunbookCommand::New(args)) => {
             commands::runbook::run_runbook_new(&platform, &root, &loaded, args)
+        }
+        Command::Runbook(commands::runbook::RunbookCommand::Run(args)) => {
+            commands::runbook::run_runbook_run(&platform, &root, &loaded, args)
+        }
+        Command::Runbook(commands::runbook::RunbookCommand::Runs(args)) => {
+            commands::runbook::run_runbook_runs(&platform, &root, args)
+        }
+        Command::Runbook(commands::runbook::RunbookCommand::Abandon(args)) => {
+            commands::runbook::run_runbook_abandon(&platform, &root, args)
         }
         Command::Tui(args) => run_tui(&platform, &root, &args, &loaded),
     }

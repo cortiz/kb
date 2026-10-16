@@ -12,10 +12,11 @@ pub enum Context {
     Form,
     Add,
     Help,
+    Run,
 }
 
 impl Context {
-    pub const ALL: [Context; 10] = [
+    pub const ALL: [Context; 11] = [
         Context::Global,
         Context::Search,
         Context::Normal,
@@ -26,6 +27,7 @@ impl Context {
         Context::Form,
         Context::Add,
         Context::Help,
+        Context::Run,
     ];
 
     pub const fn name(self) -> &'static str {
@@ -40,6 +42,7 @@ impl Context {
             Context::Form => "form",
             Context::Add => "add",
             Context::Help => "help",
+            Context::Run => "run",
         }
     }
 

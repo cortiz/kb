@@ -134,6 +134,15 @@ impl Signals {
         Signals { flags }
     }
 
+    /// Whether `sig` arrived since the last time, forgetting it (run mode: Ctrl-C meant for the
+    /// command that was running in the foreground, not for kb).
+    pub fn take(&self, sig: i32) -> bool {
+        self.flags
+            .iter()
+            .find(|(s, _)| *s == sig)
+            .is_some_and(|(_, f)| f.swap(false, Ordering::Relaxed))
+    }
+
     /// The first signal that arrived, if any.
     pub fn received(&self) -> Option<i32> {
         self.flags

@@ -90,6 +90,8 @@ pub struct PreviewModel {
     pub steps: Vec<StepPreview>,
     pub step_issue_counts: Option<(usize, usize, usize)>,
     pub used_in: Vec<String>,
+    /// Run mode: the active runs of this runbook (set by the app, not cached).
+    pub runs: Vec<String>,
     pub fields: Vec<(String, String)>,
     pub notes: Notes,
     pub mtime: i64,
@@ -359,6 +361,7 @@ pub fn build_preview_full(
         steps: steps_preview,
         step_issue_counts,
         used_in,
+        runs: Vec::new(),
         fields: fields_of(entry),
         notes: Notes::new(render_markdown(
             entry.notes().trim(),

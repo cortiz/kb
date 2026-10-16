@@ -3,6 +3,7 @@
 pub mod binding;
 pub mod checklist;
 pub mod lint;
+pub mod run;
 
 use std::collections::{BTreeMap, HashSet};
 

@@ -34,11 +34,21 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
         return;
     }
     if let (Screen::Ok(_), Some(modal)) = (&screen, &state.run_modal) {
+        if let Some(run) = &state.run {
+            super::run_view::draw_run(run, &state.keymap, theme, area, buf);
+        }
         super::run_modal::draw_run_modal(state, modal, theme, area, buf);
         return;
     }
     if let (Screen::Ok(_), Some(cv)) = (&screen, &state.code_view) {
         super::code_view::draw_code_view(state, cv, theme, area, buf);
+        return;
+    }
+    if let (Screen::Ok(_), Some(run)) = (&screen, &state.run) {
+        super::run_view::draw_run(run, &state.keymap, theme, area, buf);
+        if let Some(p) = &state.run_picker {
+            super::run_picker::draw_picker(p, theme, area, buf);
+        }
         return;
     }
     let Screen::Ok(l) = screen else {
@@ -69,6 +79,9 @@ pub fn draw(state: &AppState, theme: &Theme, area: Rect, buf: &mut Buffer) {
     }
     if state.overlay == Overlay::Help {
         draw_help(state, theme, area, buf);
+    }
+    if let Some(p) = &state.run_picker {
+        super::run_picker::draw_picker(p, theme, area, buf);
     }
 }
 
@@ -114,6 +127,13 @@ fn draw_header(state: &AppState, theme: &Theme, r: Rect, buf: &mut Buffer) {
         std::path::Path::new(&state.root),
     )
     .len();
+    if !state.active_runs.is_empty() {
+        let n = state.active_runs.len();
+        tail.push(Span::styled(
+            format!(" · ▶ {n} active run{}", if n == 1 { "" } else { "s" }),
+            theme.warning(),
+        ));
+    }
     if unreviewed_count > 0 {
         tail.push(Span::styled(
             format!(" · ⚠ {unreviewed_count} unreviewed"),
@@ -479,6 +499,7 @@ enum Row {
     Var(usize),
     Step(usize),
     UsedIn(usize),
+    Run(usize),
     Field(usize),
     Notes(usize),
 }
@@ -565,6 +586,11 @@ fn preview_layout(m: &PreviewModel, cols: usize) -> PreviewLayout {
         rows.push(Row::Blank);
         rows.push(Row::Rule("used in"));
         rows.extend((0..m.used_in.len()).map(Row::UsedIn));
+    }
+    if !m.runs.is_empty() {
+        rows.push(Row::Blank);
+        rows.push(Row::Rule("active runs"));
+        rows.extend((0..m.runs.len()).map(Row::Run));
     }
     if !m.fields.is_empty() {
         rows.push(Row::Blank);
@@ -789,6 +815,7 @@ fn draw_preview_rows_linked(
             Row::Var(i) => var_spans(&m.vars[i], theme, cols),
             Row::Step(i) => step_spans(&m.steps[i], theme, cols),
             Row::UsedIn(i) => used_in_spans(&m.used_in[i], theme, cols),
+            Row::Run(i) => used_in_spans(&m.runs[i], theme, cols),
             Row::Field(i) => {
                 let (k, v) = &m.fields[i];
                 vec![

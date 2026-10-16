@@ -79,4 +79,14 @@ commands! {
     Save => "save",
     EditBody => "edit-body",
     Close => "close",
+    // run mode (spec 015)
+    StepAction => "step-action",
+    CopyStep => "copy-step",
+    MarkDone => "mark-done",
+    MarkSkipped => "mark-skipped",
+    ResetStep => "reset-step",
+    AddRunNote => "add-run-note",
+    EditRunVars => "edit-run-vars",
+    FinishRun => "finish-run",
+    AbandonRun => "abandon-run",
 }

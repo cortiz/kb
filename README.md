@@ -7,7 +7,7 @@ them.
 
 ![kb demo: search, fill in variables, copy, vim mode, add from the clipboard, lint](demo.gif)
 
-> Status: milestone R1 (011-runbook-format: ordered sequence of snippet steps, variable lifting, reference integrity, checklists).
+> Status: milestone R2 (015-runbook-run-mode: run a runbook step by step in the TUI, resumable; builds on 011-runbook-format).
 
 ## Install
 
@@ -346,7 +346,39 @@ Owner: platform security.
 - **Creation**: `kb runbook new "Deploy authorizer" sumo/5xx cmd/deploy` creates a runbook from existing entries, automatically lifting compatible variables to the runbook. You can also mark entries in the TUI (`Space` or `m`) and run `new-runbook-from-marks` (`C-R`).
 - **Integrity**: `kb mv` updates step references across runbooks in the same commit. `kb rm` refuses to delete entries used in runbooks unless `--force` is passed.
 - **Checklists**: `kb show <runbook> --checklist` exports a Markdown checklist. With `--resolve`, it prompts once for variables and inlines resolved query/command code blocks with secrets safely masked. `kb use <runbook>` copies the resolved checklist to the clipboard and records usage.
+- **Running**: `o` / `Ctrl-O` on a runbook starts a run (or lists its active runs to resume); `kb runbook run <id|query> [--new]` opens the same from the shell. See [Run mode](#run-mode).
 - **Search & Filters**: `type:runbook` lists only runbooks. `runbook:<id>` lists the entries used by that runbook in step order. `used-by:runbook` lists all entries referenced by any runbook. Ordinary entries display a "Used in" section in preview showing referencing runbooks.
+
+#### Run mode
+
+Opening a runbook asks for its variables once, then shows the steps on the left and the selected
+step on the right, with its query or command already resolved. Progress is saved after every change
+in `.kb/runs/<run-id>.json` (git-ignored, per machine; secret values are never written), so a run
+survives closing the terminal. A runbook can have several active runs at once (a stage and a prod
+deploy); opening it lists them with "Start a new run" last.
+
+| Key | Command | Does |
+|---|---|---|
+| `Enter` | `step-action` | the step's primary action: run the command (with the usual confirmation), open the console or link, open the code view, show the note, copy a `sql`/`prompt` payload, or mark a manual step done |
+| `y` | `copy-step` | copy the resolved payload, URL or `path:line` |
+| `d` / `s` / `u` | `mark-done` / `mark-skipped` / `reset-step` | set the step's status (`confirm: true` steps ask `y`) |
+| `n` | `add-run-note` | add a timestamped note to the step (kept in the run, not the runbook) |
+| `V` | `edit-run-vars` | change the run's variables; later actions use the new values |
+| `F` / `A` | `finish-run` / `abandon-run` | close the run (asks `y` unless complete) |
+| `j` `k` / `J` `K` | `down` `up` / `scroll-preview-*` | move, scroll the step |
+| `Esc` | `close` | back to the list; the run stays active |
+
+Statuses: `○` pending, `◐` opened/copied, `▶` running, `●` done, `⊘` skipped, `✕` failed (exit code
+kept), `!` interrupted (a command that was killed or cancelled with Ctrl-C). Steps can be done in any
+order; acting on a step while an earlier required one is unfinished asks `y` once
+(`runbook.order_warnings = false` turns that off). A command that exits 0 marks its step done
+(`runbook.auto_done = false` turns that off). Commands of an unreviewed entry or runbook need `run`
+typed. If the runbook file changes between sessions, steps are matched by id: new steps appear as
+pending and removed ones are listed under "removed since start". A run open in another `kb` is
+shown read-only. All keys are rebindable under `[tui.keys.run]`.
+
+`kb runbook runs [<runbook>] [--all] [--json] [--prune [--older-than <days>]]` lists runs;
+`kb runbook abandon <run-id> [--yes]` abandons one.
 
 ### Variables
 
@@ -580,7 +612,7 @@ In search mode `Ctrl-U` still clears the line, and `Home` / `End` move within it
 
 Every key can be changed, for either keymap, in `[tui.keys.<context>]` tables of the config file.
 The contexts are `global` (both list modes), `search`, `normal`, `action-menu`, `code-view`,
-`history`, `form` and `add`. A list replaces the command's keys in that context and an empty list
+`history`, `form`, `add` and `run` (run mode). A list replaces the command's keys in that context and an empty list
 unbinds it; commands you do not mention keep their keys:
 
 ```toml

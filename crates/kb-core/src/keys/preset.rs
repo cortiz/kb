@@ -152,6 +152,25 @@ const ADD: &[Row] = &[
     (Quit, &["esc"]),
 ];
 
+// Same in both keymaps: the run screen has no text input outside the note prompt.
+const RUN: &[Row] = &[
+    (StepAction, &["enter"]),
+    (CopyStep, &["y"]),
+    (MarkDone, &["d"]),
+    (MarkSkipped, &["s"]),
+    (ResetStep, &["u"]),
+    (AddRunNote, &["n"]),
+    (EditRunVars, &["V"]),
+    (FinishRun, &["F"]),
+    (AbandonRun, &["A"]),
+    (Down, &["down", "j"]),
+    (Up, &["up", "k"]),
+    (ScrollPreviewDown, &["shift-down", "J"]),
+    (ScrollPreviewUp, &["shift-up", "K"]),
+    (Help, &["?"]),
+    (Close, &["esc"]),
+];
+
 // "close" has no keys by default: every key closes the help overlay.
 const HELP: &[Row] = &[(Close, &[])];
 
@@ -166,6 +185,7 @@ pub fn rows(keymap: Keymap, ctx: Context) -> Vec<Row> {
         (_, Context::Form) => FORM.to_vec(),
         (_, Context::Add) => ADD.to_vec(),
         (_, Context::Help) => HELP.to_vec(),
+        (_, Context::Run) => RUN.to_vec(),
         (Keymap::Emacs, Context::Search) => EMACS_SEARCH.to_vec(),
         (Keymap::Emacs, Context::Normal) => Vec::new(),
         (Keymap::Vim, Context::Normal) => VIM_NORMAL.to_vec(),

@@ -22,6 +22,12 @@ pub enum Then {
     Open,
     /// Run the command safely and stay in the UI (Ctrl-G).
     Run,
+    /// Run mode: the variables of a new run.
+    StartRun,
+    /// Run mode: change (or complete) the variables of the open run.
+    EditRunVars,
+    /// Run mode: variables of a step's entry that nothing has answered.
+    StepVars,
 }
 
 /// Everything the form needs, read from the entry and the saved state. Built outside `update`.
