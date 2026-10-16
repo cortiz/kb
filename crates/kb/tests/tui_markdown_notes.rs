@@ -20,6 +20,13 @@ fn notes_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     fs::write(root.join("note/ports.md"), WIDE_TABLE).unwrap();
+    // the preview falls back to the file date: pin it so the snapshots do not age
+    fs::File::options()
+        .write(true)
+        .open(root.join("note/ports.md"))
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1792065600))
+        .unwrap();
     (tmp, root)
 }
 
