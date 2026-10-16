@@ -219,6 +219,12 @@ pub trait Platform {
         command: &str,
     ) -> io::Result<(Option<i32>, String)>;
 
+    // ---- processes ----
+    /// Whether a process with this id is alive (run mode's stale-lock check).
+    fn process_alive(&self, pid: u32) -> bool {
+        unix::process_alive(pid)
+    }
+
     // ---- terminal ----
     /// Whether there is a terminal to interact with: stdin is one, or the controlling terminal
     /// can be opened. A redirected stdout does not matter.

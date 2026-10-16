@@ -1475,6 +1475,7 @@ pub fn run_ui(
         path_template: loaded.settings.path_template(),
         highlight: true,
         start_add: None,
+        start_run: None,
     };
     let outcome = tui::run(platform, root, query, options).map_err(|e| CliError::new("io", e));
     if report_config {
@@ -1543,6 +1544,36 @@ pub fn run_ui(
     }
 }
 
+/// `kb runbook run`: the UI opens on the runbook's runs (or a new run with `new`). Leaving it
+/// prints nothing.
+pub fn run_runbook_ui(
+    platform: &impl Platform,
+    root: &Path,
+    loaded: &Loaded,
+    runbook_id: &str,
+    new: bool,
+) -> Result<ExitCode, CliError> {
+    let options = Options {
+        mouse: loaded.settings.tui_mouse(),
+        theme: loaded.settings.theme(),
+        clipboard: ClipboardSettings::from_settings(&loaded.settings),
+        editor: loaded.settings.editor().map(str::to_string),
+        settings: loaded.settings.clone(),
+        config_problems: loaded.warnings.len() + keys::effective(loaded).warnings.len(),
+        fill_variables: false,
+        remember_vars: loaded.settings.vars_remember(),
+        refresh_timer: std::env::var_os("KB_TUI_NO_REFRESH_TIMER").is_none(),
+        path_template: loaded.settings.path_template(),
+        highlight: true,
+        start_add: None,
+        start_run: Some((runbook_id.to_string(), new)),
+    };
+    match tui::run(platform, root, "", options).map_err(|e| CliError::new("io", e))? {
+        Outcome::Exit(code) => Ok(ExitCode::from(u8::try_from(code).unwrap_or(2))),
+        _ => Ok(ExitCode::SUCCESS),
+    }
+}
+
 /// `kb add` without `--yes`: the UI opens on the add form for `draft`. The new ID is printed after
 /// the terminal is restored; cancelling prints nothing and exits 130.
 pub fn run_add_ui(
@@ -1565,6 +1596,7 @@ pub fn run_add_ui(
         path_template: loaded.settings.path_template(),
         highlight: true,
         start_add: Some(Box::new(crate::tui::app::StartAdd { draft, unavailable })),
+        start_run: None,
     };
     match tui::run(platform, root, "", options).map_err(|e| CliError::new("io", e))? {
         Outcome::Added { id } => {

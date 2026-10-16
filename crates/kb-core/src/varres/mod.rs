@@ -66,6 +66,24 @@ impl VarPlan {
         self.vars.is_empty()
     }
 
+    /// The plan limited to the variables `keep` accepts: references to the others stay as literal
+    /// `{{name}}` text, so the plan can still be previewed and resolved (run mode asks only for
+    /// the variables that have no value yet).
+    pub fn restricted(&self, keep: impl Fn(&str) -> bool) -> VarPlan {
+        let mut plan = self.clone();
+        plan.vars.retain(|p| keep(&p.var.name));
+        for t in &mut plan.templates {
+            for piece in &mut t.pieces {
+                if let Piece::Ref(n) = piece
+                    && !keep(n)
+                {
+                    *piece = Piece::Lit(format!("{{{{{n}}}}}"));
+                }
+            }
+        }
+        plan
+    }
+
     pub fn var(&self, name: &str) -> Option<&PlannedVar> {
         self.vars.iter().find(|v| v.var.name == name)
     }

@@ -51,6 +51,8 @@ pub struct Options {
     pub highlight: bool,
     /// `kb add` opens the UI on the add form: closing it ends the UI.
     pub start_add: Option<Box<StartAdd>>,
+    /// `kb runbook run`: open this runbook's runs at start (runbook id, start a new run).
+    pub start_run: Option<(String, bool)>,
 }
 
 /// A one-line question on the key bar (Ctrl-R, Ctrl-X).
@@ -104,6 +106,7 @@ impl Default for Options {
             path_template: PathTemplate::default(),
             highlight: true,
             start_add: None,
+            start_run: None,
             theme: ThemeChoice::Auto,
             clipboard: ClipboardSettings::default(),
             editor: None,
@@ -111,6 +114,14 @@ impl Default for Options {
             refresh_timer: true,
         }
     }
+}
+
+/// An active run, as the header and previews list it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveRun {
+    pub runbook_id: String,
+    pub name: String,
+    pub progress: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -334,6 +345,25 @@ pub enum Effect {
         title: String,
         entries: Vec<String>,
     },
+    /// Run mode: open the runbook's runs (a picker, or a new run when `new`).
+    StartRunbook {
+        id: String,
+        new: bool,
+    },
+    /// Run mode: a run picker choice.
+    ResumeRun(String),
+    NewRun(String),
+    /// Run mode: write the run.
+    SaveRun,
+    /// Run mode: write the run, release it and go back to the list.
+    CloseRun,
+    /// Run mode: do the step's primary action, or copy it.
+    RunStep {
+        idx: usize,
+        copy: bool,
+    },
+    /// Run mode: `edit-run-vars`.
+    RunEditVars,
     Quit(i32),
 }
 
@@ -382,6 +412,14 @@ pub struct AppState {
     pub code_view: Option<Box<super::code_view::CodeViewState>>,
     /// Action Menu modal, when it is open.
     pub action_menu: Option<Box<super::action_view::ActionMenuState>>,
+    /// Run mode: the run screen, when a run is open.
+    pub run: Option<Box<super::run_view::RunScreen>>,
+    /// Run mode: every active run in the KB, for the header and runbook previews.
+    pub active_runs: Vec<ActiveRun>,
+    /// Run mode: the picker of a runbook's runs.
+    pub run_picker: Option<Box<super::run_picker::RunPicker>>,
+    /// Run mode: the step whose command waits for the run modal.
+    pub run_exec: Option<usize>,
     /// The list of entries a note links to, when there is more than one.
     pub link_picker: Option<Box<super::action_view::LinkPickerState>>,
     /// Tags in use in the KB with their counts, for completion in the add form.
@@ -459,6 +497,10 @@ impl AppState {
             run_modal: None,
             code_view: None,
             action_menu: None,
+            run: None,
+            run_picker: None,
+            active_runs: Vec::new(),
+            run_exec: None,
             link_picker: None,
             tags: Vec::new(),
             started_by_add: false,
@@ -490,6 +532,8 @@ impl AppState {
         } else if self.form.is_some()
             || self.add.is_some()
             || self.code_view.is_some()
+            || self.run.is_some()
+            || self.run_picker.is_some()
             || self.action_menu.is_some()
             || self.link_picker.is_some()
             || self.history.is_some()
@@ -628,6 +672,9 @@ impl AppState {
                 if self.run_modal.is_some() {
                     return self.run_modal_key(e);
                 }
+                if self.run_picker.is_some() {
+                    return self.run_picker_key(e);
+                }
                 if self.action_menu.is_some() {
                     return self.action_menu_key(e, now);
                 }
@@ -665,6 +712,9 @@ impl AppState {
                 }
                 if self.code_view.is_some() {
                     return self.code_view_key(e, now);
+                }
+                if self.run.is_some() {
+                    return self.run_key(e);
                 }
                 let Some(key) = keys::from_event(e) else {
                     return Vec::new();
@@ -730,6 +780,7 @@ impl AppState {
             Action::PreviewReady(generation, model) => {
                 if generation == self.preview_gen {
                     self.preview = Some(*model);
+                    self.mark_runs();
                 }
                 Vec::new()
             }
@@ -1084,6 +1135,11 @@ impl AppState {
             FormEvent::Close => {
                 let kept = form.session_values();
                 let id = form.id.clone();
+                if form.then == Then::StepVars
+                    && let Some(r) = self.run.as_mut()
+                {
+                    r.awaiting_vars = None;
+                }
                 self.form = None;
                 if kept.is_empty() {
                     self.form_session.remove(&id);
@@ -1122,6 +1178,7 @@ impl AppState {
             } => {
                 if key == Key::new(keys::Code::Esc, 0) {
                     self.run_modal = None;
+                    self.run_exec = None;
                     return Vec::new();
                 }
                 if plan.requires_typed_run {
@@ -1167,6 +1224,81 @@ impl AppState {
                         _ => Vec::new(),
                     }
                 }
+            }
+        }
+    }
+
+    /// Replaces the active runs shown in the header and the selected runbook's preview.
+    pub fn set_active_runs(&mut self, runs: Vec<ActiveRun>) {
+        self.active_runs = runs;
+        self.mark_runs();
+    }
+
+    fn mark_runs(&mut self) {
+        if let Some(p) = self.preview.as_mut() {
+            p.runs = self
+                .active_runs
+                .iter()
+                .filter(|r| r.runbook_id == p.id)
+                .map(|r| format!("{} · {}", r.name, r.progress))
+                .collect();
+        }
+    }
+
+    /// A key while the run screen is open (spec 015).
+    fn run_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        let Some(key) = keys::from_event(e) else {
+            return Vec::new();
+        };
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(screen) = self.run.as_mut() else {
+            return Vec::new();
+        };
+        let ev = screen.key(key, &self.keymap);
+        self.run_event(ev)
+    }
+
+    /// What the run screen asked for, as effects.
+    pub fn run_event(&mut self, ev: super::run_view::RunEvent) -> Vec<Effect> {
+        use super::run_view::RunEvent as E;
+        match ev {
+            E::None => Vec::new(),
+            E::Close | E::SaveAndClose => vec![Effect::CloseRun],
+            E::Save => vec![Effect::SaveRun],
+            E::Primary(idx) => vec![Effect::RunStep { idx, copy: false }],
+            E::Copy(idx) => vec![Effect::RunStep { idx, copy: true }],
+            E::EditVars => vec![Effect::RunEditVars],
+        }
+    }
+
+    /// A key while the run picker is open.
+    fn run_picker_key(&mut self, e: KeyEvent) -> Vec<Effect> {
+        use super::run_picker::PickerEvent as P;
+        let Some(key) = keys::from_event(e) else {
+            return Vec::new();
+        };
+        if key == Key::new(keys::Code::Char('c'), keys::CTRL) {
+            return vec![Effect::Quit(130)];
+        }
+        let Some(p) = self.run_picker.as_mut() else {
+            return Vec::new();
+        };
+        let id = p.runbook_id.clone();
+        match p.key(key) {
+            P::None => Vec::new(),
+            P::Close => {
+                self.run_picker = None;
+                Vec::new()
+            }
+            P::Resume(run_id) => {
+                self.run_picker = None;
+                vec![Effect::ResumeRun(run_id)]
+            }
+            P::New => {
+                self.run_picker = None;
+                vec![Effect::NewRun(id)]
             }
         }
     }

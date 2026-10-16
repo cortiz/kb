@@ -20,6 +20,9 @@ pub mod markdown;
 pub mod preview;
 pub mod render_cache;
 pub mod run_modal;
+pub mod run_ops;
+pub mod run_picker;
+pub mod run_view;
 pub mod terminal;
 pub mod theme;
 pub mod view;
@@ -123,6 +126,11 @@ pub fn run(
     if settings.sync_fetch_on_start() {
         pending.push(Effect::Fetch);
     }
+    if let Some((id, new)) = state.options.start_run.take() {
+        pending.push(Effect::StartRunbook { id, new });
+    }
+    let mut rctx = run_ops::RunCtx::default();
+    state.set_active_runs(run_ops::active_runs(&ui_kb));
     let mut picked: Option<String> = None;
     let mut resolved: Option<Submission> = None;
     let mut exit: Option<i32> = None;
@@ -275,6 +283,13 @@ pub fn run(
                 }
                 Effect::OpenEntry(id) => {
                     let entry = ui_kb.entry(&id);
+                    if let Ok(entry) = &entry
+                        && entry.entry_type() == Some(EntryType::Runbook)
+                    {
+                        pending.push(Effect::StartRunbook { id, new: false });
+                        dirty = true;
+                        continue;
+                    }
                     if let Ok(entry) = &entry
                         && entry.entry_type() == Some(EntryType::Code)
                     {
@@ -729,7 +744,122 @@ pub fn run(
                     }
                     dirty = true;
                 }
+                Effect::StartRunbook { id, new } => {
+                    let p = run_ops::picker(&ui_kb, &id, &|pid| platform.process_alive(pid));
+                    if new || p.rows.is_empty() {
+                        if p.unreviewed {
+                            state.run_picker =
+                                Some(Box::new(run_picker::RunPicker::confirm_new(&id, &p.title)));
+                        } else {
+                            pending.push(Effect::NewRun(id));
+                        }
+                    } else {
+                        state.run_picker = Some(Box::new(p));
+                    }
+                    dirty = true;
+                }
+                Effect::NewRun(id) => {
+                    let now = Instant::now();
+                    match run_ops::runbook_form(&ui_kb, &id, None, false, &rctx) {
+                        Ok(Some(spec)) => {
+                            pending.extend(state.update(
+                                Action::FormLoaded(Ok(Box::new(spec)), Then::StartRun),
+                                now,
+                            ))
+                        }
+                        Ok(None) => {
+                            match run_ops::start_run(
+                                &ui_kb,
+                                &settings,
+                                &id,
+                                None,
+                                &mut rctx,
+                                &|pid| platform.process_alive(pid),
+                            ) {
+                                Ok(screen) => state.run = Some(Box::new(screen)),
+                                Err(e) => say(&mut state, &mut pending, e),
+                            }
+                        }
+                        Err(e) => say(&mut state, &mut pending, e),
+                    }
+                    dirty = true;
+                }
+                Effect::ResumeRun(run_id) => {
+                    match run_ops::resume_run(&ui_kb, &settings, &run_id, &mut rctx, &|pid| {
+                        platform.process_alive(pid)
+                    }) {
+                        Ok(r) => {
+                            state.run = Some(Box::new(r.screen));
+                            if let Some(spec) = r.form {
+                                pending.extend(state.update(
+                                    Action::FormLoaded(Ok(Box::new(spec)), Then::EditRunVars),
+                                    Instant::now(),
+                                ));
+                            }
+                        }
+                        Err(e) => say(&mut state, &mut pending, e),
+                    }
+                    dirty = true;
+                }
+                Effect::SaveRun => {
+                    if let Some(s) = state.run.as_mut() {
+                        run_ops::save(&ui_kb, s);
+                    }
+                    dirty = true;
+                }
+                Effect::CloseRun => {
+                    if let Some(s) = state.run.as_mut() {
+                        run_ops::save(&ui_kb, s);
+                    }
+                    state.run = None;
+                    state.run_exec = None;
+                    rctx = run_ops::RunCtx::default();
+                    state.set_active_runs(run_ops::active_runs(&ui_kb));
+                    dirty = true;
+                }
+                Effect::RunEditVars => {
+                    if let Some(s) = state.run.as_ref() {
+                        match run_ops::runbook_form(
+                            &ui_kb,
+                            &s.run.runbook_id,
+                            Some(&s.run),
+                            false,
+                            &rctx,
+                        ) {
+                            Ok(Some(spec)) => pending.extend(state.update(
+                                Action::FormLoaded(Ok(Box::new(spec)), Then::EditRunVars),
+                                Instant::now(),
+                            )),
+                            Ok(None) => say(
+                                &mut state,
+                                &mut pending,
+                                "this runbook has no variables".into(),
+                            ),
+                            Err(e) => say(&mut state, &mut pending, e),
+                        }
+                    }
+                    dirty = true;
+                }
+                Effect::RunStep { idx, copy } => {
+                    run_step(
+                        platform,
+                        &settings,
+                        &clipboard_settings,
+                        &ui_kb,
+                        &mut state,
+                        &mut pending,
+                        &rctx,
+                        idx,
+                        copy,
+                    );
+                    dirty = true;
+                }
                 Effect::ExecuteRun { id, plan } => {
+                    let run_step_idx = state.run_exec.take();
+                    if let (Some(idx), Some(s)) = (run_step_idx, state.run.as_mut()) {
+                        s.starting(idx);
+                        run_ops::save(&ui_kb, s);
+                    }
                     guard.suspend();
                     let env_tuples: Vec<(String, String)> = plan
                         .secret_env_vars
@@ -755,6 +885,17 @@ pub fn run(
                     });
                     let _ = ui_kb.record_use(&id, SystemTime::now());
                     let now = Instant::now();
+                    if let (Some(idx), Some(s)) = (run_step_idx, state.run.as_mut()) {
+                        // Ctrl-C went to the command (and to us): the step is interrupted, kb stays
+                        let sigint = signals.take(signal_hook::consts::SIGINT);
+                        s.command_ended(
+                            idx,
+                            Some(res.exit_code),
+                            res.killed_by_signal.is_some() || sigint,
+                            u64::try_from(res.duration.as_millis()).unwrap_or(u64::MAX),
+                        );
+                        run_ops::save(&ui_kb, s);
+                    }
                     if res.exit_code == 0 && !settings.run_pause_after() {
                         state.run_modal = None;
                         pending.extend(state.update(
@@ -775,6 +916,23 @@ pub fn run(
                 }
                 Effect::SubmitForm(sub) => {
                     let now = Instant::now();
+                    if matches!(
+                        sub.then,
+                        Then::StartRun | Then::EditRunVars | Then::StepVars
+                    ) {
+                        pending.extend(state.update(Action::FormDone, now));
+                        run_form_done(
+                            &|pid| platform.process_alive(pid),
+                            &settings,
+                            &ui_kb,
+                            &mut state,
+                            &mut pending,
+                            &mut rctx,
+                            &sub,
+                        );
+                        dirty = true;
+                        continue;
+                    }
                     match recheck(&ui_kb, &sub) {
                         Recheck::Same => match sub.then {
                             // Alt-Enter prints and exits, whichever way the form was opened
@@ -804,6 +962,7 @@ pub fn run(
                                 pending.extend(state.update(Action::CopyDone(report), now));
                                 pending.extend(state.update(Action::FormDone, now));
                             }
+                            Then::StartRun | Then::EditRunVars | Then::StepVars => {}
                             Then::Run => {
                                 let entry = ui_kb.entry(&sub.id).unwrap();
                                 let mut map = kb_core::varres::Values::new();
@@ -1178,6 +1337,207 @@ pub fn run(
     match picked {
         Some(id) => Ok(Outcome::Picked { id }),
         None => Ok(Outcome::Exit(130)),
+    }
+}
+
+/// A message on the run screen (or the list when no run is open).
+fn say(state: &mut AppState, pending: &mut Vec<Effect>, message: String) {
+    if let Some(s) = state.run.as_mut() {
+        s.message = Some(message);
+    } else {
+        pending.extend(state.update(
+            Action::CopyDone(CopyReport {
+                message,
+                sent: false,
+            }),
+            Instant::now(),
+        ));
+    }
+}
+
+/// A run form was submitted: start the run, change its variables, or answer a step's variables.
+fn run_form_done(
+    alive: &dyn Fn(u32) -> bool,
+    settings: &Settings,
+    kb: &Kb,
+    state: &mut AppState,
+    pending: &mut Vec<Effect>,
+    rctx: &mut run_ops::RunCtx,
+    sub: &Submission,
+) {
+    match sub.then {
+        Then::StartRun => match run_ops::start_run(kb, settings, &sub.id, Some(sub), rctx, alive) {
+            Ok(screen) => state.run = Some(Box::new(screen)),
+            Err(e) => say(state, pending, e),
+        },
+        Then::EditRunVars => {
+            if let Some(s) = state.run.as_mut() {
+                let refused = run_ops::apply_run_vars(&mut s.run, rctx, sub);
+                run_ops::refresh(kb, s, rctx);
+                run_ops::save(kb, s);
+                if !refused.is_empty() {
+                    s.message = Some(format!(
+                        "{} looks like a credential and was not kept; use a secret variable",
+                        refused.join(", ")
+                    ));
+                }
+            }
+        }
+        Then::StepVars => {
+            if let Some(s) = state.run.as_mut()
+                && let Some((idx, act)) = s.awaiting_vars.take()
+            {
+                let refused = run_ops::apply_step_vars(s, rctx, idx, sub);
+                run_ops::refresh(kb, s, rctx);
+                run_ops::save(kb, s);
+                if refused.is_empty() {
+                    pending.push(Effect::RunStep {
+                        idx,
+                        copy: act == run_view::Act::Copy,
+                    });
+                } else {
+                    s.message = Some(format!(
+                        "{} looks like a credential and was not kept; use a secret variable",
+                        refused.join(", ")
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Enter or `y` on a step of the open run (FR-013, FR-014).
+#[allow(clippy::too_many_arguments)]
+fn run_step(
+    platform: &impl Platform,
+    settings: &Settings,
+    clipboard_settings: &ClipboardSettings,
+    kb: &Kb,
+    state: &mut AppState,
+    pending: &mut Vec<Effect>,
+    rctx: &run_ops::RunCtx,
+    idx: usize,
+    copy: bool,
+) {
+    let Some(screen) = state.run.as_mut() else {
+        return;
+    };
+    let _ = kb.record_use(&screen.run.runbook_id, SystemTime::now());
+    match run_ops::step_form(kb, screen, rctx, idx) {
+        Err(e) => {
+            screen.message = Some(e);
+            return;
+        }
+        Ok(Some(spec)) => {
+            screen.awaiting_vars = Some((
+                idx,
+                if copy {
+                    run_view::Act::Copy
+                } else {
+                    run_view::Act::Primary
+                },
+            ));
+            pending.extend(state.update(
+                Action::FormLoaded(Ok(Box::new(spec)), Then::StepVars),
+                Instant::now(),
+            ));
+            return;
+        }
+        Ok(None) => {}
+    }
+    let sub = match run_ops::step_submission(kb, screen, rctx, idx) {
+        Ok(s) => s,
+        Err(e) => {
+            screen.message = Some(e);
+            return;
+        }
+    };
+    let id = sub.id.clone();
+    let Ok(entry) = kb.entry(&id) else {
+        screen.message = Some(format!("cannot load {id}"));
+        return;
+    };
+    let ty = entry.entry_type();
+    let report: CopyReport;
+    let mut status = kb_core::runbook::run::StepStatus::Opened;
+    if copy {
+        status = kb_core::runbook::run::StepStatus::Copied;
+        report = if let (Some(EntryType::Code), TypeFields::Code { code: Some(c) }) =
+            (ty, entry.fields())
+        {
+            let outcome = clipboard::copy(
+                platform,
+                clipboard_settings,
+                &format!("{}:{}", c.path, c.line),
+                Place::Ui,
+            );
+            CopyReport {
+                message: outcome.message_short(),
+                sent: outcome.sent(),
+            }
+        } else {
+            copy_resolved(platform, clipboard_settings, kb, &sub, false)
+        };
+    } else {
+        match ty {
+            Some(EntryType::Cmd) => {
+                let mut values = varres::Values::new();
+                for (n, v, _) in &sub.values {
+                    values.insert(n.clone(), v.clone());
+                }
+                match kb_core::run::RunService::build_run_plan(
+                    &entry,
+                    &values,
+                    None,
+                    settings.run_destructive_patterns(),
+                ) {
+                    Ok(mut plan) => {
+                        // an unreviewed entry or runbook needs the typed `run` (FR-012)
+                        plan.requires_typed_run |=
+                            screen.steps[idx].unreviewed || screen.runbook_unreviewed;
+                        state.run_exec = Some(idx);
+                        pending.extend(
+                            state.update(Action::OpenRunModal { id, plan }, Instant::now()),
+                        );
+                    }
+                    Err(e) => screen.message = Some(format!("cannot run: {e}")),
+                }
+                return;
+            }
+            Some(EntryType::Code) => {
+                match code_view::load_code_view_state(kb, &id, settings, false) {
+                    Ok(cv) => {
+                        let ev = screen.acted(idx, status);
+                        pending.extend(
+                            state.update(Action::OpenCodeView(Box::new(cv)), Instant::now()),
+                        );
+                        pending.extend(state.run_event(ev));
+                    }
+                    Err(e) => screen.message = Some(format!("Code view error: {e}")),
+                }
+                return;
+            }
+            Some(EntryType::Note) => {
+                let text = run_ops::note_text(kb, &id).unwrap_or_default();
+                screen.view = Some((screen.steps[idx].title.clone(), text, 0));
+                let ev = screen.acted(idx, status);
+                pending.extend(state.run_event(ev));
+                return;
+            }
+            Some(EntryType::Sql | EntryType::Prompt) => {
+                status = kb_core::runbook::run::StepStatus::Copied;
+                report = copy_resolved(platform, clipboard_settings, kb, &sub, false);
+            }
+            _ => {
+                report = open_resolved(platform, settings, clipboard_settings, kb, &sub, false);
+            }
+        }
+    }
+    let ev = report.sent.then(|| screen.acted(idx, status));
+    screen.message = Some(report.message);
+    if let Some(ev) = ev {
+        pending.extend(state.run_event(ev));
     }
 }
 

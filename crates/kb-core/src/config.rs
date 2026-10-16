@@ -42,7 +42,7 @@ pub struct Setting {
 
 const THEMES: &[&str] = &["auto", "dark", "light"];
 
-/// The thirty-four settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
+/// The thirty-six settings. `config init`, `list`, `get`, `set` and the loader are all driven by this
 /// table, so none of them can disagree about a key, its type, its default or its variable.
 pub const SETTINGS: &[Setting] = &[
     Setting {
@@ -170,6 +170,20 @@ pub const SETTINGS: &[Setting] = &[
         default: "true",
         env: "KB_RUN_PAUSE_AFTER",
         doc: "Whether to pause and show exit code and duration after running a command.",
+    },
+    Setting {
+        key: "runbook.auto_done",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_RUNBOOK_AUTO_DONE",
+        doc: "Run mode: mark a command step done automatically when it exits 0.",
+    },
+    Setting {
+        key: "runbook.order_warnings",
+        kind: Kind::Bool,
+        default: "true",
+        env: "KB_RUNBOOK_ORDER_WARNINGS",
+        doc: "Run mode: warn before acting on a step while an earlier required step is unfinished.",
     },
     Setting {
         key: "git.auto_commit",
@@ -627,6 +641,14 @@ impl Settings {
 
     pub fn run_pause_after(&self) -> bool {
         self.flag("run.pause_after")
+    }
+
+    pub fn runbook_auto_done(&self) -> bool {
+        self.flag("runbook.auto_done")
+    }
+
+    pub fn runbook_order_warnings(&self) -> bool {
+        self.flag("runbook.order_warnings")
     }
 
     pub fn git_auto_commit(&self) -> bool {
@@ -1604,7 +1626,7 @@ mod settings_tests {
         let mut keys: Vec<_> = SETTINGS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), 34, "thirty-four settings, no duplicates");
+        assert_eq!(keys.len(), 36, "thirty-six settings, no duplicates");
         for s in SETTINGS {
             let want = format!("KB_{}", s.key.to_uppercase().replace('.', "_"));
             assert_eq!(s.env, want, "{}", s.key);
@@ -1644,7 +1666,7 @@ mod settings_tests {
         assert_eq!(s.mcp_exclude_tags(), &["private"]);
         assert!(s.mcp_exclude_types().is_empty());
         assert!(s.mcp_write_types().is_empty());
-        assert_eq!(s.iter().count(), 34);
+        assert_eq!(s.iter().count(), 36);
         assert_eq!(s.path_template(), PathTemplate::default());
     }
 

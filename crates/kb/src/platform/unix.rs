@@ -81,6 +81,24 @@ fn wait_unless_interrupted(
     }
 }
 
+/// Whether a process with this id exists (`kill -0`; no permission to signal it still means alive).
+pub fn process_alive(pid: u32) -> bool {
+    match Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        Ok(o) => {
+            o.status.success()
+                || String::from_utf8_lossy(&o.stderr)
+                    .to_lowercase()
+                    .contains("not permitted")
+        }
+        Err(_) => true,
+    }
+}
+
 /// Runs an interactive command in the terminal, capturing exit code / signal termination and timing.
 pub fn run_interactive_command(
     shell: &str,

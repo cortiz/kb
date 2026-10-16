@@ -66,6 +66,10 @@ const ALLOWED: &[(&str, &str)] = &[
         "checks {{var}} references in step titles and manual do text",
     ),
     (
+        "kb-core/src/runbook/run/resolve.rs",
+        "puts the run's values into a step title for display; payloads are resolved by varres",
+    ),
+    (
         "kb-core/src/mcp/engine.rs",
         "formats {{var}} references in runbook steps and interpolates step titles",
     ),

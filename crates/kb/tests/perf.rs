@@ -931,3 +931,40 @@ Notes.
         "type:runbook filter {m_type_runbook:?}"
     );
 }
+
+#[test]
+#[ignore = "performance budget; run in release mode"]
+fn run_state_loads_and_saves_in_5ms_and_100_runs_list_in_20ms() {
+    use kb_core::runbook::run::{self, StepStatus, fs as runfs};
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let ids: Vec<String> = (0..50).map(|i| format!("step-{i}")).collect();
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let mut sample = run::new_run("runbook/x", "x", "X", "h", 1, &refs);
+    for (i, id) in ids.iter().enumerate() {
+        run::mark_step(&mut sample, id, StepStatus::Done, 2 + i as i64);
+        run::add_step_note(&mut sample, id, "a note on this step", 3);
+    }
+    runfs::save(root, &sample).unwrap();
+    let start = Instant::now();
+    for _ in 0..20 {
+        let r = runfs::load(root, &sample.id).unwrap();
+        runfs::save(root, &r).unwrap();
+    }
+    let each = start.elapsed() / 20;
+    println!("run load+save with 50 steps: {each:?}");
+    assert!(each < Duration::from_millis(5), "load+save took {each:?}");
+
+    for i in 0..100 {
+        let mut r = sample.clone();
+        r.id = format!("runbook-x-{i}");
+        runfs::save(root, &r).unwrap();
+    }
+    let start = Instant::now();
+    let runs = runfs::list(root);
+    let took = start.elapsed();
+    println!("list of {} runs: {took:?}", runs.len());
+    assert_eq!(runs.len(), 100); // run 1 overwrote the sample
+    assert!(took < Duration::from_millis(20), "listing took {took:?}");
+}
