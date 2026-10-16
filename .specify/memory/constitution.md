@@ -1,3 +1,17 @@
+<!--
+Sync Impact Report
+==================
+Version change: 1.1.0 → 1.1.1 (PATCH amendment)
+Modified sections:
+- Principle II (The Index Is Disposable): enumerated all .kb/ contents (index.db, state.json, runs/, mcp.log, code-link clone cache) as git-ignored, per machine, and never synced; clarified that deleting .kb/ loses only local state, never entries.
+- Technical Constraints → Entry types: added note (spec 014) and runbook (spec 011).
+- Technical Constraints → Distribution: listed actual targets (aarch64-apple-darwin, x86_64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl) and channels (release archives, Homebrew tap, install.sh with kb-update, cargo install --git).
+- Technical Constraints → Workspace: clarified kb binary includes CLI, TUI, and MCP stdio server.
+Principles: No principles added or removed.
+Templates: Checked .specify/templates/plan-template.md, spec-template.md, and tasks-template.md; no template changes required.
+Follow-up TODOs: None.
+-->
+
 # kb Constitution
 
 kb is a personal, serverless knowledge base for reusable operational snippets: SQL, Sumo Logic and
@@ -22,8 +36,13 @@ standard tools.
 
 - Search state (SQLite + FTS5) MUST live in `.kb/index.db`, MUST be git-ignored, and MUST be fully
   rebuildable from the files with `kb reindex`.
-- Deleting the index MUST lose nothing except usage statistics. Usage counts and last-used variable
-  values live in `.kb/state.json`, which is also git-ignored.
+- Everything in `.kb/` is git-ignored, per machine and never synced:
+  - `index.db` (search index, rebuildable)
+  - `state.json` (usage, remembered values, review state)
+  - `runs/` (runbook run state, spec 015)
+  - `mcp.log` (MCP audit log, spec 012)
+  - the code-link clone cache (spec 008)
+- Deleting `.kb/` loses only local state (usage, remembered values, run progress, logs), never entries.
 - There are no schema migrations for the index: a version mismatch triggers a rebuild.
 
 **Rationale:** derived data that can always be thrown away removes a whole class of corruption and
@@ -113,19 +132,23 @@ now.
 ## Technical Constraints
 
 - **Language:** Rust (stable), organized as a Cargo workspace: `kb-core` (library) and `kb` (binary
-  with the CLI and the TUI).
+  with CLI, TUI and the MCP stdio server).
 - **Storage:** `rusqlite` with bundled SQLite and FTS5. Frontmatter is parsed with `serde` and a
   YAML parser.
 - **TUI:** `ratatui` + `crossterm`. Syntax highlighting via `syntect`.
 - **CLI:** `clap` with generated shell completions for bash, zsh and fish.
 - **Shell integration:** a shell widget (zsh, bash, fish) that opens a compact picker and inserts
   the resolved command into the prompt line.
-- **Entry types (v1):** `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link`, `code`. Adding a type is a
-  minor change to the format.
+- **Entry types:** `sql`, `sumo`, `cw`, `cmd`, `prompt`, `link`, `code`, `note`, `runbook`. Adding
+  a type is a minor change to the format.
 - **Variables:** written as `{{name}}`, with kinds `text`, `number`, `enum` and `secret`, each with
   an optional default.
-- **Distribution:** a single static binary, published through a Homebrew tap (macOS and Linux),
-  `cargo install`, and release tarballs for macOS (arm64, x86_64) and Linux (x86_64, aarch64).
+- **Distribution:** a single static binary, distributed through:
+  - release archives for the targets the release workflow builds: macOS (`aarch64-apple-darwin`, `x86_64-apple-darwin`) and static Linux (`x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`);
+  - the Homebrew tap;
+  - `install.sh`, which also installs the `kb-update` helper;
+  - `cargo install --git https://github.com/cortiz/kb kb` (the crates are `publish = false`).
+  `kb-update` runs only when the user invokes it. kb itself never checks for updates (principle III).
 
 ## Development Workflow
 
@@ -149,4 +172,4 @@ now.
   - PATCH for clarifications.
 - Exceptions granted in a plan apply only to that milestone and MUST be recorded in its plan.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-08 | **Last Amended**: 2026-10-11
+**Version**: 1.1.1 | **Ratified**: 2026-10-08 | **Last Amended**: 2026-10-15
