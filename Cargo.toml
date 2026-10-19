@@ -16,7 +16,7 @@ unsafe_code = "forbid"
 
 [workspace.dependencies]
 kb-core = { path = "crates/kb-core" }
-saphyr-parser = "0.1"
+saphyr-parser = "0.2"
 pulldown-cmark = { version = "0.13", default-features = false }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
